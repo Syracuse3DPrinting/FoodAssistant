@@ -1,17 +1,4 @@
 services:
-  grocy:
-    image: linuxserver/grocy:latest
-    container_name: foodassistant-grocy
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=America/New_York
-    volumes:
-      - ./grocy/data:/config
-    ports:
-      - "9383:80"
-    restart: unless-stopped
-
   service:
     build: ./service
     container_name: foodassistant-service
