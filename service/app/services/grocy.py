@@ -40,35 +40,44 @@ class GrocyClient:
         locations = await self.get_locations()
         for loc in locations:
             if loc["name"].lower() == name.lower():
-                return loc["id"]
+                return int(loc["id"])
         result = await self._post("/objects/locations", {"name": name})
-        return result["created_object_id"]
+        return int(result["created_object_id"])
 
     async def ensure_product_group(self, name: str) -> int:
         groups = await self.get_product_groups()
         for g in groups:
             if g["name"].lower() == name.lower():
-                return g["id"]
+                return int(g["id"])
         result = await self._post("/objects/product_groups", {"name": name})
-        return result["created_object_id"]
+        return int(result["created_object_id"])
+
+    async def ensure_quantity_unit(self, name: str = "Piece") -> int:
+        units = await self._get("/objects/quantity_units")
+        for u in units:
+            if u["name"].lower() in (name.lower(), name.lower() + "s"):
+                return int(u["id"])
+        result = await self._post("/objects/quantity_units", {"name": name, "name_plural": name + "s"})
+        return int(result["created_object_id"])
 
     async def ensure_product(self, item: FoodItem, location_id: int, group_id: int) -> int:
         products = await self.get_products()
         name_lower = item.name.lower()
         for p in products:
             if p["name"].lower() == name_lower:
-                return p["id"]
+                return int(p["id"])
+        qu_id = await self.ensure_quantity_unit("Piece")
         result = await self._post("/objects/products", {
             "name": item.name,
             "location_id": location_id,
             "product_group_id": group_id,
-            "qu_id_purchase": 1,
-            "qu_id_stock": 1,
-            "qu_factor_purchase_to_stock": 1,
+            "qu_id_purchase": qu_id,
+            "qu_id_stock": qu_id,
+            "qu_factor_purchase_to_stock": "1",
             "default_best_before_days": -1,
             "description": item.notes or "",
         })
-        return result["created_object_id"]
+        return int(result["created_object_id"])
 
     async def add_stock(self, product_id: int, item: FoodItem) -> dict:
         best_before = (
