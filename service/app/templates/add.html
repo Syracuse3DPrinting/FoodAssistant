@@ -1,0 +1,434 @@
+{% extends "base.html" %}
+{% block title %}Add Food — FoodAssistant{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center my-3">
+  <h4 class="mb-0"><i class="bi bi-plus-circle me-2"></i>Add Food</h4>
+</div>
+
+<!-- Input tabs -->
+<ul class="nav nav-tabs mb-3" id="inputTabs">
+  <li class="nav-item">
+    <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-barcode">
+      <i class="bi bi-upc-scan me-1"></i>Barcode
+    </button>
+  </li>
+  <li class="nav-item">
+    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-photo">
+      <i class="bi bi-camera me-1"></i>Photo / Receipt
+    </button>
+  </li>
+  <li class="nav-item">
+    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-manual">
+      <i class="bi bi-pencil me-1"></i>Manual
+    </button>
+  </li>
+</ul>
+
+<div class="tab-content">
+
+  <!-- ── Barcode Tab ── -->
+  <div class="tab-pane fade show active" id="tab-barcode">
+    <div class="row g-3">
+      <div class="col-md-6">
+        <div class="card">
+          <div class="card-body">
+            <h6 class="card-title">Camera Scanner</h6>
+            <div id="scanner-container" style="width:100%; max-width:400px; margin:0 auto;">
+              <div id="reader" style="width:100%"></div>
+            </div>
+            <div class="mt-2 d-flex gap-2">
+              <button class="btn btn-primary btn-sm" id="startScanBtn" onclick="startScanner()">
+                <i class="bi bi-camera-video me-1"></i>Start Camera
+              </button>
+              <button class="btn btn-secondary btn-sm d-none" id="stopScanBtn" onclick="stopScanner()">
+                <i class="bi bi-stop-circle me-1"></i>Stop
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="card">
+          <div class="card-body">
+            <h6 class="card-title">Enter Barcode Manually</h6>
+            <div class="input-group">
+              <input type="text" id="barcodeInput" class="form-control" placeholder="e.g. 049000028935"
+                     inputmode="numeric" pattern="[0-9]*">
+              <button class="btn btn-primary" onclick="lookupBarcode()">
+                <i class="bi bi-search me-1"></i>Look Up
+              </button>
+            </div>
+            <div class="form-text">UPC-A, EAN-13, or EAN-8</div>
+            <div id="barcode-status" class="mt-2"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Photo Tab ── -->
+  <div class="tab-pane fade" id="tab-photo">
+    <div class="card">
+      <div class="card-body">
+        <div id="drop-zone" class="border border-2 border-dashed rounded p-4 text-center mb-3"
+             style="cursor:pointer; transition: border-color 0.2s;"
+             ondragover="event.preventDefault(); this.style.borderColor='#0d6efd'"
+             ondragleave="this.style.borderColor=''"
+             ondrop="handleDrop(event)">
+          <i class="bi bi-cloud-upload fs-2 d-block mb-2 text-muted"></i>
+          <div>Drag &amp; drop an image here, or <a href="#" onclick="document.getElementById('photoInput').click(); return false">browse</a></div>
+          <div class="text-muted small mt-1">Supports: food photos, receipt photos — JPG, PNG, WEBP</div>
+          <input type="file" id="photoInput" accept="image/*" class="d-none" onchange="handleFileSelect(this)">
+        </div>
+
+        <div id="photo-preview" class="d-none mb-3 text-center">
+          <img id="preview-img" src="" class="img-fluid rounded" style="max-height:250px">
+        </div>
+
+        <div class="d-flex gap-2 align-items-center">
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="radio" name="photoType" id="typeFood" value="food" checked>
+            <label class="form-check-label" for="typeFood">Food Photo</label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="radio" name="photoType" id="typeReceipt" value="receipt">
+            <label class="form-check-label" for="typeReceipt">Receipt</label>
+          </div>
+          <button class="btn btn-primary btn-sm ms-auto" id="analyzeBtn" onclick="analyzePhoto()" disabled>
+            <i class="bi bi-magic me-1"></i>Analyze
+          </button>
+        </div>
+
+        <div id="photo-status" class="mt-2"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Manual Tab ── -->
+  <div class="tab-pane fade" id="tab-manual">
+    <div class="card">
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Name <span class="text-danger">*</span></label>
+            <input type="text" id="manual-name" class="form-control" placeholder="e.g. Chicken Breast">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Quantity</label>
+            <input type="number" id="manual-qty" class="form-control" value="1" min="0.1" step="0.1">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Unit</label>
+            <input type="text" id="manual-unit" class="form-control" value="item">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Category</label>
+            <select id="manual-category" class="form-select">
+              {% for cat in ['Poultry','Meat','Seafood','Dairy','Produce','Grains','Condiments','Beverages','Snacks','Frozen','Canned','Other'] %}
+              <option>{{ cat }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Storage</label>
+            <select id="manual-storage" class="form-select">
+              <option value="refrigerated">Refrigerated</option>
+              <option value="frozen">Frozen</option>
+              <option value="room_temp">Room Temp</option>
+              <option value="dry">Dry</option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Best By Date</label>
+            <input type="date" id="manual-bestby" class="form-control">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Brand</label>
+            <input type="text" id="manual-brand" class="form-control">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Notes</label>
+            <input type="text" id="manual-notes" class="form-control">
+          </div>
+          <div class="col-12">
+            <button class="btn btn-primary" onclick="addManualItem()">
+              <i class="bi bi-plus-lg me-1"></i>Add to Queue
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /tab-content -->
+
+<!-- ── Results Queue ── -->
+<div id="results-section" class="d-none mt-4">
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <h5 class="mb-0">
+      <i class="bi bi-basket me-2"></i>Import Queue
+      <span class="badge bg-primary ms-1" id="queue-count">0</span>
+    </h5>
+    <div class="d-flex gap-2">
+      <button class="btn btn-outline-secondary btn-sm" onclick="clearQueue()">
+        <i class="bi bi-x-circle me-1"></i>Clear All
+      </button>
+      <button class="btn btn-success" onclick="importAll()">
+        <i class="bi bi-cloud-upload me-1"></i>Import All to Grocy
+      </button>
+    </div>
+  </div>
+  <div id="results-list"></div>
+  <div id="import-status" class="mt-2"></div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+let scanner = null;
+let pendingFile = null;
+let queue = [];   // array of item objects
+
+// ── Barcode Scanner ─────────────────────────────────────────────────────────
+function startScanner() {
+  document.getElementById('startScanBtn').classList.add('d-none');
+  document.getElementById('stopScanBtn').classList.remove('d-none');
+  scanner = new Html5Qrcode("reader");
+  scanner.start(
+    { facingMode: "environment" },
+    { fps: 10, qrbox: { width: 280, height: 120 } },
+    (decodedText) => {
+      stopScanner();
+      document.getElementById('barcodeInput').value = decodedText;
+      lookupBarcode();
+    },
+    () => {}
+  ).catch(err => {
+    showStatus('barcode-status', 'Camera error: ' + err, 'danger');
+    stopScanner();
+  });
+}
+
+function stopScanner() {
+  if (scanner) {
+    scanner.stop().catch(() => {});
+    scanner = null;
+  }
+  document.getElementById('startScanBtn').classList.remove('d-none');
+  document.getElementById('stopScanBtn').classList.add('d-none');
+}
+
+async function lookupBarcode() {
+  const code = document.getElementById('barcodeInput').value.trim();
+  if (!code) return;
+  showStatus('barcode-status', '<span class="spinner-border spinner-border-sm me-1"></span>Looking up...', 'info');
+  try {
+    const r = await fetch(`/analyze/barcode/${code}`);
+    if (!r.ok) {
+      const err = await r.json();
+      showStatus('barcode-status', `Not found: ${err.detail}`, 'warning');
+      return;
+    }
+    const result = await r.json();
+    addToQueue(result.items);
+    showStatus('barcode-status', `Found: <strong>${result.items[0].name}</strong>`, 'success');
+    document.getElementById('barcodeInput').value = '';
+  } catch(e) {
+    showStatus('barcode-status', 'Lookup failed: ' + e, 'danger');
+  }
+}
+
+// ── Photo Upload ─────────────────────────────────────────────────────────────
+function handleDrop(e) {
+  e.preventDefault();
+  e.currentTarget.style.borderColor = '';
+  const file = e.dataTransfer.files[0];
+  if (file) setPhotoFile(file);
+}
+
+function handleFileSelect(input) {
+  if (input.files[0]) setPhotoFile(input.files[0]);
+}
+
+function setPhotoFile(file) {
+  pendingFile = file;
+  const reader = new FileReader();
+  reader.onload = e => {
+    document.getElementById('preview-img').src = e.target.result;
+    document.getElementById('photo-preview').classList.remove('d-none');
+  };
+  reader.readAsDataURL(file);
+  document.getElementById('analyzeBtn').disabled = false;
+}
+
+async function analyzePhoto() {
+  if (!pendingFile) return;
+  const type = document.querySelector('input[name=photoType]:checked').value;
+  const endpoint = type === 'receipt' ? '/analyze/receipt' : '/analyze/food';
+
+  showStatus('photo-status', '<span class="spinner-border spinner-border-sm me-1"></span>Analyzing with Gemini...', 'info');
+  document.getElementById('analyzeBtn').disabled = true;
+
+  const fd = new FormData();
+  fd.append('file', pendingFile);
+
+  try {
+    const r = await fetch(endpoint, { method: 'POST', body: fd });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    const result = await r.json();
+    addToQueue(result.items);
+    showStatus('photo-status',
+      `Found <strong>${result.items.length}</strong> item(s). Added to import queue.`, 'success');
+    pendingFile = null;
+    document.getElementById('photo-preview').classList.add('d-none');
+  } catch(e) {
+    showStatus('photo-status', 'Analysis failed: ' + e, 'danger');
+    document.getElementById('analyzeBtn').disabled = false;
+  }
+}
+
+// ── Manual Entry ─────────────────────────────────────────────────────────────
+function addManualItem() {
+  const name = document.getElementById('manual-name').value.trim();
+  if (!name) { alert('Name is required.'); return; }
+  addToQueue([{
+    name,
+    quantity: parseFloat(document.getElementById('manual-qty').value) || 1,
+    unit: document.getElementById('manual-unit').value || 'item',
+    category: document.getElementById('manual-category').value,
+    storage_type: document.getElementById('manual-storage').value,
+    best_by_date: document.getElementById('manual-bestby').value || null,
+    brand: document.getElementById('manual-brand').value || null,
+    notes: document.getElementById('manual-notes').value || null,
+    confidence: 1.0,
+  }]);
+  document.getElementById('manual-name').value = '';
+  document.getElementById('manual-brand').value = '';
+  document.getElementById('manual-notes').value = '';
+  document.getElementById('manual-bestby').value = '';
+}
+
+// ── Queue Management ──────────────────────────────────────────────────────────
+function addToQueue(items) {
+  queue.push(...items);
+  renderQueue();
+  document.getElementById('results-section').classList.remove('d-none');
+}
+
+function removeFromQueue(i) {
+  queue.splice(i, 1);
+  renderQueue();
+  if (queue.length === 0) document.getElementById('results-section').classList.add('d-none');
+}
+
+function clearQueue() {
+  queue = [];
+  renderQueue();
+  document.getElementById('results-section').classList.add('d-none');
+}
+
+function renderQueue() {
+  document.getElementById('queue-count').textContent = queue.length;
+  const list = document.getElementById('results-list');
+  if (queue.length === 0) { list.innerHTML = ''; return; }
+
+  list.innerHTML = queue.map((item, i) => `
+    <div class="card mb-2">
+      <div class="card-body py-2">
+        <div class="row g-2 align-items-center">
+          <div class="col-md-3">
+            <input class="form-control form-control-sm" value="${esc(item.name)}"
+                   onchange="queue[${i}].name=this.value" placeholder="Name">
+          </div>
+          <div class="col-6 col-md-1">
+            <input class="form-control form-control-sm" type="number" value="${item.quantity}"
+                   onchange="queue[${i}].quantity=parseFloat(this.value)" placeholder="Qty" min="0.01" step="0.01">
+          </div>
+          <div class="col-6 col-md-1">
+            <input class="form-control form-control-sm" value="${esc(item.unit||'item')}"
+                   onchange="queue[${i}].unit=this.value" placeholder="Unit">
+          </div>
+          <div class="col-md-2">
+            <select class="form-select form-select-sm" onchange="queue[${i}].category=this.value">
+              ${categoryOptions(item.category)}
+            </select>
+          </div>
+          <div class="col-md-2">
+            <select class="form-select form-select-sm" onchange="queue[${i}].storage_type=this.value">
+              ${storageOptions(item.storage_type)}
+            </select>
+          </div>
+          <div class="col-md-2">
+            <input class="form-control form-control-sm" type="date" value="${item.best_by_date||''}"
+                   onchange="queue[${i}].best_by_date=this.value||null" title="Best by date">
+          </div>
+          <div class="col-md-1 text-end">
+            <button class="btn btn-sm btn-outline-danger btn-icon" onclick="removeFromQueue(${i})" title="Remove">
+              <i class="bi bi-x-lg"></i>
+            </button>
+          </div>
+        </div>
+        ${item.brand ? `<div class="text-muted small mt-1 ms-1">${esc(item.brand)}</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+async function importAll() {
+  if (queue.length === 0) return;
+  showStatus('import-status', '<span class="spinner-border spinner-border-sm me-1"></span>Importing...', 'info');
+  try {
+    const r = await fetch('/inventory/import', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ items: queue }),
+    });
+    const result = await r.json();
+    const ok = result.results.filter(r => r.status === 'ok').length;
+    const err = result.results.filter(r => r.status === 'error').length;
+    if (err === 0) {
+      showStatus('import-status', `✅ Imported ${ok} item(s) to Grocy.`, 'success');
+      clearQueue();
+    } else {
+      const errs = result.results.filter(r => r.status === 'error').map(r => r.error).join('; ');
+      showStatus('import-status', `⚠️ ${ok} imported, ${err} failed: ${errs}`, 'warning');
+    }
+  } catch(e) {
+    showStatus('import-status', 'Import failed: ' + e, 'danger');
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const CATEGORIES = ['Poultry','Meat','Seafood','Dairy','Produce','Grains','Condiments','Beverages','Snacks','Frozen','Canned','Other'];
+const STORAGES   = ['refrigerated','frozen','room_temp','dry'];
+const STORAGE_LABELS = {refrigerated:'Refrigerated', frozen:'Frozen', room_temp:'Room Temp', dry:'Dry'};
+
+function categoryOptions(selected) {
+  return CATEGORIES.map(c =>
+    `<option value="${c}" ${c===selected?'selected':''}>${c}</option>`
+  ).join('');
+}
+
+function storageOptions(selected) {
+  return STORAGES.map(s =>
+    `<option value="${s}" ${s===selected?'selected':''}>${STORAGE_LABELS[s]}</option>`
+  ).join('');
+}
+
+function showStatus(id, html, type) {
+  document.getElementById(id).innerHTML =
+    `<div class="alert alert-${type} py-1 px-2 mb-0 small">${html}</div>`;
+}
+
+function esc(s) {
+  return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+}
+
+// Enter key on barcode input
+document.getElementById('barcodeInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') lookupBarcode();
+});
+</script>
+{% endblock %}

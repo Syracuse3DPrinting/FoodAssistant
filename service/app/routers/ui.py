@@ -12,6 +12,14 @@ router = APIRouter(prefix="/ui", tags=["ui"])
 templates = Jinja2Templates(directory="app/templates")
 
 
+@router.get("/add", response_class=HTMLResponse)
+async def add_page(request: Request):
+    return templates.TemplateResponse("add.html", {
+        "request": request,
+        "active": "add",
+    })
+
+
 @router.get("/", response_class=HTMLResponse)
 async def expiring_page(request: Request, days: int = 7):
     grocy = GrocyClient()
