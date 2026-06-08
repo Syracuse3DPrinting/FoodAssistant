@@ -48,32 +48,33 @@ views:
             name: 7 Days
             icon: mdi:food-apple
 
-      # ── Expiring Soon List ───────────────────────────────────────────────────
+      # ── Expiring Soon Summary ────────────────────────────────────────────────
       - type: markdown
-        title: Expiring Soon
+        title: Food Status
         content: >
-          {% set items = state_attr('sensor.food_expiring_soon_list', 'value_json') %}
-          {% if items %}
-          | Item | Location | Expires |
-          |------|----------|---------|
-          {% for item in items %}
-          {% set days = item.days_remaining %}
-          {% set name = item.product.name if item.product else 'Unknown' %}
-          {% set location = item.location.name if item.location else '' %}
-          {% set date = item.best_before_date %}
-          {% if days < 0 %}
-          | ❌ **{{ name }}** | {{ location }} | **EXPIRED** |
-          {% elif days == 0 %}
-          | 🔴 **{{ name }}** | {{ location }} | **Today** |
-          {% elif days <= 3 %}
-          | 🟠 **{{ name }}** | {{ location }} | {{ days }}d ({{ date }}) |
-          {% else %}
-          | 🟡 {{ name }} | {{ location }} | {{ days }}d ({{ date }}) |
+          {% set expired = states('sensor.food_expired') | int %}
+          {% set today = states('sensor.food_expiring_today') | int %}
+          {% set d3 = states('sensor.food_expiring_3d') | int %}
+          {% set d7 = states('sensor.food_expiring_7d') | int %}
+          {% if expired > 0 %}❌ **{{ expired }} item(s) EXPIRED** — check fridge
+
           {% endif %}
-          {% endfor %}
-          {% else %}
-          *No items expiring within 7 days* ✅
+          {% if today > 0 %}🔴 **{{ today }} expiring today** — use them up!
+
           {% endif %}
+          {% if d3 > 0 %}🟠 {{ d3 }} expiring within 3 days
+
+          {% endif %}
+          {% if d7 > 0 %}🟡 {{ d7 }} expiring within 7 days
+
+          {% endif %}
+          {% if expired == 0 and today == 0 and d3 == 0 and d7 == 0 %}✅ Nothing expiring in the next 7 days{% endif %}
+
+      # ── Grocy Full List (iframe) ─────────────────────────────────────────────
+      - type: iframe
+        url: http://192.168.1.170:9383/stockoverview
+        aspect_ratio: 75%
+        title: Stock Overview
 
       # ── Quick Actions ────────────────────────────────────────────────────────
       - type: entities

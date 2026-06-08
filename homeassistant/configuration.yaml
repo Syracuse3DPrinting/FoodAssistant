@@ -32,12 +32,3 @@ rest:
         unit_of_measurement: "items"
         icon: mdi:food-apple
 
-  - resource: http://192.168.1.170:9284/expiring/?days=7
-    scan_interval: 300
-    sensor:
-      - name: "Food Expiring Soon List"
-        unique_id: food_expiring_soon_list
-        value_template: "{{ value_json | length }}"
-        unit_of_measurement: "items"
-        json_attributes_template: "{{ value_json | tojson }}"
-        icon: mdi:fridge-outline
