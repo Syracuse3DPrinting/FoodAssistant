@@ -1,13 +1,3 @@
-# FoodAssistant — Lovelace Dashboard
-#
-# Option A: Add as a new Dashboard in HA → Settings → Dashboards → Add Dashboard
-#           then Edit → Raw config editor → paste this file's content
-#
-# Option B: Add individual cards to an existing view
-#
-# Requires: custom:button-card (HACS) for the food item cards
-#           OR use the fallback markdown card version below
-
 title: Food Tracker
 views:
   - title: Food
@@ -16,46 +6,26 @@ views:
     cards:
 
       # ── Summary Row ──────────────────────────────────────────────────────────
-      - type: horizontal-stack
-        cards:
-          - type: stat
-            entity: sensor.food_expired
-            name: Expired
-            icon: mdi:food-off
-            card_mod:
-              style: |
-                ha-card {
-                  background: {% if states('sensor.food_expired') | int > 0 %}#5c1010{% else %}var(--card-background-color){% endif %};
-                }
-
-          - type: stat
-            entity: sensor.food_expiring_today
-            name: Today
-            icon: mdi:food-variant-off
-            card_mod:
-              style: |
-                ha-card {
-                  background: {% if states('sensor.food_expiring_today') | int > 0 %}#5c3010{% else %}var(--card-background-color){% endif %};
-                }
-
-          - type: stat
-            entity: sensor.food_expiring_3d
-            name: 3 Days
-            icon: mdi:food-drumstick
-
-          - type: stat
-            entity: sensor.food_expiring_7d
-            name: 7 Days
-            icon: mdi:food-apple
-
-      # ── Expiring Soon Summary ────────────────────────────────────────────────
-      - type: markdown
+      - type: glance
         title: Food Status
+        entities:
+          - entity: sensor.food_expired
+            name: Expired
+          - entity: sensor.food_expiring_today
+            name: Today
+          - entity: sensor.food_expiring_3_days
+            name: 3 Days
+          - entity: sensor.food_expiring_7_days
+            name: 7 Days
+
+      # ── Status Summary ───────────────────────────────────────────────────────
+      - type: markdown
+        title: Alerts
         content: >
-          {% set expired = states('sensor.food_expired') | int %}
-          {% set today = states('sensor.food_expiring_today') | int %}
-          {% set d3 = states('sensor.food_expiring_3d') | int %}
-          {% set d7 = states('sensor.food_expiring_7d') | int %}
+          {% set expired = states('sensor.food_expired') | int(-1) %}
+          {% set today = states('sensor.food_expiring_today') | int(-1) %}
+          {% set d3 = states('sensor.food_expiring_3_days') | int(-1) %}
+          {% set d7 = states('sensor.food_expiring_7_days') | int(-1) %}
           {% if expired > 0 %}❌ **{{ expired }} item(s) EXPIRED** — check fridge
 
           {% endif %}
@@ -69,28 +39,23 @@ views:
 
           {% endif %}
           {% if expired == 0 and today == 0 and d3 == 0 and d7 == 0 %}✅ Nothing expiring in the next 7 days{% endif %}
+          {% if expired < 0 %}*Sensors loading...*{% endif %}
 
-      # ── Grocy Full List (iframe) ─────────────────────────────────────────────
-      - type: iframe
-        url: http://192.168.1.170:9383/stockoverview
-        aspect_ratio: 75%
-        title: Stock Overview
-
-      # ── Quick Actions ────────────────────────────────────────────────────────
+      # ── Quick Links ──────────────────────────────────────────────────────────
       - type: entities
         title: Quick Links
         entities:
           - type: weblink
-            name: Open Grocy
-            url: http://192.168.1.170:9383
+            name: Open Grocy (Stock Overview)
+            url: http://192.168.1.170:9383/stockoverview
             icon: mdi:fridge
 
           - type: weblink
-            name: FoodAssistant API
+            name: FoodAssistant API Docs
             url: http://192.168.1.170:9284/docs
             icon: mdi:api
 
           - type: weblink
-            name: Add Food (API)
+            name: Analyze Food Photo
             url: http://192.168.1.170:9284/docs#/analyze/analyze_food_analyze_food_post
             icon: mdi:camera-plus
