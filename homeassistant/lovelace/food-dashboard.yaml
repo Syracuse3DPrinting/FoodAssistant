@@ -47,17 +47,17 @@ views:
         entities:
           - type: weblink
             name: Expiring Items
-            url: http://192.168.1.170:9284/ui/
+            url: https://fass.korolev.link/ui/
             icon: mdi:clock-alert-outline
 
           - type: weblink
             name: Add Food (Scan / Photo / Manual)
-            url: http://192.168.1.170:9284/ui/add
+            url: https://fass.korolev.link/ui/add
             icon: mdi:barcode-scan
 
           - type: weblink
             name: Expiry Defaults
-            url: http://192.168.1.170:9284/ui/defaults
+            url: https://fass.korolev.link/ui/defaults
             icon: mdi:table-edit
 
           - type: weblink
