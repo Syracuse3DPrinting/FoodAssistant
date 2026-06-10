@@ -1,7 +1,10 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, RedirectResponse
+from starlette.middleware.sessions import SessionMiddleware
 from contextlib import asynccontextmanager
 
+from .config import settings
 from .database import engine, get_db, Base
 from .models import db_models  # noqa: F401 — registers models with Base
 from .services.defaults import seed_defaults
@@ -32,6 +35,31 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_PUBLIC_PATHS = {"/health", "/ui/login"}
+
+
+@app.middleware("http")
+async def require_auth(request: Request, call_next):
+    """Auth is enabled when AUTH_PASSWORD is set. Browsers authenticate via the
+    /ui/login session cookie; headless clients (HA, ESPHome) via X-API-Key."""
+    if not settings.auth_password:
+        return await call_next(request)
+    if request.url.path in _PUBLIC_PATHS:
+        return await call_next(request)
+
+    session_ok = request.session.get("authed", False)
+    key_ok = bool(settings.api_key) and request.headers.get("X-API-Key") == settings.api_key
+    if session_ok or key_ok:
+        return await call_next(request)
+
+    if request.url.path.startswith("/ui"):
+        return RedirectResponse("/ui/login", status_code=303)
+    return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+
+
+# Added after the auth middleware so it runs first and request.session exists
+app.add_middleware(SessionMiddleware, secret_key=settings.secret_key, max_age=60 * 60 * 24 * 30)
 
 app.include_router(analyze.router)
 app.include_router(defaults.router)

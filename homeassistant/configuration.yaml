@@ -4,9 +4,14 @@
 # Replace 192.168.1.170:9284 with your Unraid IP if different.
 
 # ─── REST Sensors ─────────────────────────────────────────────────────────────
+# If you set API_KEY in the FoodAssistant .env, add it to HA's secrets.yaml as
+#   foodassistant_api_key: "your_key_here"
+# and uncomment the headers blocks below.
 rest:
   - resource: http://192.168.1.170:9284/expiring/summary
     scan_interval: 300  # refresh every 5 minutes
+    # headers:
+    #   X-API-Key: !secret foodassistant_api_key
     sensor:
       - name: "Food Expired"
         unique_id: food_expired

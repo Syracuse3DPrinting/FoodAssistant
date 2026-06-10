@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     data_dir: str = "/app/data"
     secret_key: str = "change_me"
 
+    # Auth — leave auth_password empty to disable auth entirely.
+    # api_key lets headless clients (HA, ESPHome) authenticate via X-API-Key.
+    auth_password: str = ""
+    api_key: str = ""
+
     class Config:
         env_file = ".env"
 

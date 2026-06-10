@@ -1,15 +1,42 @@
+import secrets
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from typing import Optional
 
+from ..config import settings
 from ..database import get_db
 from ..models.db_models import ExpiryDefault
 from ..services.grocy import GrocyClient
 
 router = APIRouter(prefix="/ui", tags=["ui"])
 templates = Jinja2Templates(directory="app/templates")
+
+
+@router.get("/login", response_class=HTMLResponse)
+def login_page(request: Request):
+    if not settings.auth_password or request.session.get("authed"):
+        return RedirectResponse("/ui/", status_code=303)
+    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+
+
+@router.post("/login")
+def login(request: Request, password: str = Form(...)):
+    if settings.auth_password and secrets.compare_digest(password, settings.auth_password):
+        request.session["authed"] = True
+        return RedirectResponse("/ui/", status_code=303)
+    return templates.TemplateResponse(
+        "login.html",
+        {"request": request, "error": "Incorrect password"},
+        status_code=401,
+    )
+
+
+@router.get("/logout")
+def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse("/ui/login", status_code=303)
 
 
 @router.get("/add", response_class=HTMLResponse)
