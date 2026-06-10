@@ -37,3 +37,23 @@ rest:
         unit_of_measurement: "items"
         icon: mdi:food-apple
 
+  # Full inventory grouped by storage location — item lists land in the
+  # sensor's attributes so the Lovelace markdown cards can render them.
+  - resource: https://fass.korolev.link/inventory/dashboard?sort=expiry_asc
+    scan_interval: 300
+    # headers:
+    #   X-API-Key: !secret foodassistant_api_key
+    sensor:
+      - name: "Food Inventory"
+        unique_id: food_inventory
+        value_template: >-
+          {{ (value_json.refrigerated | length) + (value_json.frozen | length)
+           + (value_json.room_temp | length) + (value_json.pantry | length) }}
+        unit_of_measurement: "items"
+        icon: mdi:fridge-outline
+        json_attributes:
+          - refrigerated
+          - frozen
+          - room_temp
+          - pantry
+

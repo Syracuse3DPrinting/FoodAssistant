@@ -52,6 +52,62 @@ views:
             {% endif %}
             {% if today > 0 %}🔴 **{{ today }} expiring today** — use them up!{% endif %}
 
+      # ── Inventory Panels ──────────────────────────────────────────────────────
+      # Read-only mirror of the web UI's inventory page. Items sorted by
+      # expiring soonest (set by the REST sensor's sort= parameter).
+      - type: grid
+        columns: 2
+        square: false
+        cards:
+          - type: markdown
+            content: >-
+              {% set items = state_attr('sensor.food_inventory', 'refrigerated') or [] %}
+              ### 🧊 Refrigerated ({{ items | length }})
+
+              {% if items %}{% for i in items %}{{ i.name }} —
+              {%- if i.days_remaining is none %} no date
+              {%- elif i.days_remaining < 0 %} **⚠ {{ -i.days_remaining }}d ago**
+              {%- elif i.days_remaining == 0 %} **today**
+              {%- else %} {{ i.days_remaining }}d{% endif %}
+
+              {% endfor %}{% else %}*Empty*{% endif %}
+          - type: markdown
+            content: >-
+              {% set items = state_attr('sensor.food_inventory', 'frozen') or [] %}
+              ### ❄️ Frozen ({{ items | length }})
+
+              {% if items %}{% for i in items %}{{ i.name }} —
+              {%- if i.days_remaining is none %} no date
+              {%- elif i.days_remaining < 0 %} **⚠ {{ -i.days_remaining }}d ago**
+              {%- elif i.days_remaining == 0 %} **today**
+              {%- else %} {{ i.days_remaining }}d{% endif %}
+
+              {% endfor %}{% else %}*Empty*{% endif %}
+          - type: markdown
+            content: >-
+              {% set items = state_attr('sensor.food_inventory', 'room_temp') or [] %}
+              ### ☀️ Room Temp ({{ items | length }})
+
+              {% if items %}{% for i in items %}{{ i.name }} —
+              {%- if i.days_remaining is none %} no date
+              {%- elif i.days_remaining < 0 %} **⚠ {{ -i.days_remaining }}d ago**
+              {%- elif i.days_remaining == 0 %} **today**
+              {%- else %} {{ i.days_remaining }}d{% endif %}
+
+              {% endfor %}{% else %}*Empty*{% endif %}
+          - type: markdown
+            content: >-
+              {% set items = state_attr('sensor.food_inventory', 'pantry') or [] %}
+              ### 📦 Pantry ({{ items | length }})
+
+              {% if items %}{% for i in items %}{{ i.name }} —
+              {%- if i.days_remaining is none %} no date
+              {%- elif i.days_remaining < 0 %} **⚠ {{ -i.days_remaining }}d ago**
+              {%- elif i.days_remaining == 0 %} **today**
+              {%- else %} {{ i.days_remaining }}d{% endif %}
+
+              {% endfor %}{% else %}*Empty*{% endif %}
+
       # ── Action Buttons ────────────────────────────────────────────────────────
       - type: grid
         columns: 2
@@ -77,7 +133,7 @@ views:
             icon_height: 44px
             tap_action:
               action: url
-              url_path: https://fass.korolev.link/ui/
+              url_path: https://fass.korolev.link/ui/expiring
           - type: button
             name: Expiry Defaults
             icon: mdi:table-edit

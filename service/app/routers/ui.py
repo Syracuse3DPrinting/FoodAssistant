@@ -39,11 +39,14 @@ def logout(request: Request):
     return RedirectResponse("/ui/login", status_code=303)
 
 
+@router.get("/", response_class=HTMLResponse)
 @router.get("/inventory", response_class=HTMLResponse)
 async def inventory_page(request: Request):
     return templates.TemplateResponse("inventory.html", {
         "request": request,
         "active": "inventory",
+        "message": request.query_params.get("msg"),
+        "message_type": request.query_params.get("msg_type", "success"),
     })
 
 
@@ -55,7 +58,7 @@ async def add_page(request: Request):
     })
 
 
-@router.get("/", response_class=HTMLResponse)
+@router.get("/expiring", response_class=HTMLResponse)
 async def expiring_page(request: Request, days: int = 7):
     grocy = GrocyClient()
     try:
@@ -82,7 +85,7 @@ async def consume_item(product_id: int, amount: float = Form(1.0)):
     except Exception as e:
         msg = f"Error: {e}"
         msg_type = "danger"
-    return RedirectResponse(f"/ui/?msg={msg}&msg_type={msg_type}", status_code=303)
+    return RedirectResponse(f"/ui/expiring?msg={msg}&msg_type={msg_type}", status_code=303)
 
 
 @router.get("/defaults", response_class=HTMLResponse)
