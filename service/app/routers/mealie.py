@@ -203,17 +203,19 @@ async def create_recipe(payload: CreateRecipePayload):
 
 
 @router.get("/suggest")
-async def suggest(top: int = Query(0, ge=0, le=20), external: bool = True):
+async def suggest(top: int = Query(0, ge=0, le=20), mealie: bool = True, external: bool = True):
     """Recipes sorted into three cookability tiers against current inventory:
     ready (stock only), staples (stock + pantry basics), shopping (uses
     perishable stock but needs extra ingredients). Candidates come from
-    Mealie plus TheMealDB when external=true."""
+    Mealie (when mealie=true) plus the configured external source (when external=true)."""
     m = _client()
     top = top or settings.suggest_per_tier
-    try:
-        recipes = await m.get_recipes_with_ingredients()
-    except MealieError as e:
-        raise HTTPException(502, str(e))
+    recipes: list[dict] = []
+    if mealie:
+        try:
+            recipes = await m.get_recipes_with_ingredients()
+        except MealieError as e:
+            raise HTTPException(502, str(e))
     try:
         stock = await GrocyClient().get_full_stock()
     except Exception:
@@ -221,8 +223,7 @@ async def suggest(top: int = Query(0, ge=0, le=20), external: bool = True):
 
     external_count = 0
     if external and stock:
-        # Search TheMealDB by stock item names, perishables first so the
-        # results lean toward using up what's expiring.
+        # Search the external source by stock item names, perishables first.
         ordered = sorted(stock, key=lambda s: (s.get("days_remaining") is None,
                                                s.get("days_remaining") or 999))
         try:
