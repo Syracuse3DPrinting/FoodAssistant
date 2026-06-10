@@ -138,6 +138,16 @@ class GrocyClient:
             str(loc["id"]): loc["name"]
             for loc in await self._cached_list("/objects/locations")
         }
+
+        # /stock aggregates per product and drops timestamps; the raw stock
+        # table has row_created_timestamp per entry — take the newest per
+        # product as "date added".
+        added: dict[int, str] = {}
+        for row in await self._get("/objects/stock"):
+            pid = int(row.get("product_id") or 0)
+            ts = row.get("row_created_timestamp") or row.get("purchased_date") or ""
+            if pid and ts and ts > added.get(pid, ""):
+                added[pid] = ts
         today = date.today()
         result = []
         for entry in raw:
@@ -177,8 +187,9 @@ class GrocyClient:
                 days_remaining = None
                 urgency = "unknown"
 
+            pid = int(entry.get("product_id", 0))
             result.append({
-                "product_id": int(entry.get("product_id", 0)),
+                "product_id": pid,
                 "name": name,
                 "amount": float(entry.get("amount") or 0),
                 "unit": product.get("qu_unit_stock", {}).get("name") if product.get("qu_unit_stock") else None,
@@ -187,6 +198,7 @@ class GrocyClient:
                 "urgency": urgency,
                 "location_name": loc_name,
                 "storage_bucket": bucket,
+                "added_date": added.get(pid),
             })
         return result
 

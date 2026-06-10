@@ -57,7 +57,13 @@ _SORT_KEYS = {
     "name_desc":   lambda i: i["name"].lower(),
     "qty_desc":    lambda i: -i["amount"],
     "qty_asc":     lambda i:  i["amount"],
+    # ISO timestamps sort lexicographically; items without one sort last.
+    # added_desc is applied with reverse=True, so its tuple is inverted
+    # ("is not None" first) to keep undated items at the bottom either way.
+    "added_asc":   lambda i: (i.get("added_date") is None, i.get("added_date") or "", i["name"].lower()),
+    "added_desc":  lambda i: (i.get("added_date") is not None, i.get("added_date") or "", i["name"].lower()),
 }
+_REVERSED_SORTS = {"name_desc", "added_desc"}
 
 _BUCKETS = ["refrigerated", "frozen", "room_temp", "pantry", "other"]
 
@@ -83,8 +89,7 @@ async def get_dashboard(sort: str = "expiry_asc"):
     items = await grocy.get_full_stock()
 
     key_fn = _SORT_KEYS.get(sort, _SORT_KEYS["expiry_asc"])
-    reverse = sort == "name_desc"
-    items.sort(key=key_fn, reverse=reverse)
+    items.sort(key=key_fn, reverse=sort in _REVERSED_SORTS)
 
     return {
         bucket: [i for i in items if i["storage_bucket"] == bucket]
