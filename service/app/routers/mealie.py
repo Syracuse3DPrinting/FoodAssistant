@@ -90,19 +90,44 @@ async def delete_mealplan_entry(entry_id: int):
 # ── Recipes ──────────────────────────────────────────────────────────────────
 
 @router.get("/recipes")
-async def search_recipes(search: str = "", per_page: int = Query(50, ge=1, le=200)):
-    try:
-        items = await _client().search_recipes(search, per_page=per_page)
-    except MealieError as e:
-        raise HTTPException(502, str(e))
-    return [{
-        "id": r.get("id"),
-        "name": r.get("name"),
-        "slug": r.get("slug"),
-        "description": (r.get("description") or "")[:160],
-        "total_time": r.get("totalTime"),
-        "rating": r.get("rating"),
-    } for r in items]
+async def search_recipes(search: str = "", per_page: int = Query(50, ge=1, le=200),
+                         mine: bool = True, external: bool = False):
+    results: list[dict] = []
+    if mine:
+        try:
+            items = await _client().search_recipes(search, per_page=per_page)
+        except MealieError as e:
+            raise HTTPException(502, str(e))
+        results = [{
+            "id": r.get("id"),
+            "name": r.get("name"),
+            "slug": r.get("slug"),
+            "source": "mealie",
+            "description": (r.get("description") or "")[:160],
+            "total_time": r.get("totalTime"),
+            "rating": r.get("rating"),
+        } for r in items]
+
+    # External name search needs a query — there's nothing useful to "browse".
+    if external and search.strip():
+        try:
+            ext = await recipes_external.search_recipes_by_name(search)
+        except Exception:
+            ext = []
+        mine_names = {(r.get("name") or "").lower() for r in results}
+        results += [{
+            "id": None,
+            "name": r["name"],
+            "slug": None,
+            "source": r["source"],
+            "external_id": r["external_id"],
+            "image": r.get("image"),
+            "description": (r.get("description") or "")[:160],
+            "total_time": r.get("total_time"),
+            "rating": None,
+        } for r in ext if (r.get("name") or "").lower() not in mine_names]
+
+    return results
 
 
 def _strip_html(html: str, limit: int = 18000) -> str:

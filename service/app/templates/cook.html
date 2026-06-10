@@ -12,21 +12,9 @@
 
 <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mt-3 mb-1">
   <h4 class="mb-0"><i class="bi bi-lightbulb me-2"></i>What Can I Cook?</h4>
-  <div class="d-flex align-items-center gap-3">
-    <div class="d-flex gap-3">
-      <div class="form-check form-check-inline mb-0">
-        <input class="form-check-input" type="checkbox" id="chk-mealie" checked onchange="loadSuggestions()">
-        <label class="form-check-label small" for="chk-mealie">My recipes</label>
-      </div>
-      <div class="form-check form-check-inline mb-0">
-        <input class="form-check-input" type="checkbox" id="chk-external" checked onchange="loadSuggestions()">
-        <label class="form-check-label small" for="chk-external">Other recipes</label>
-      </div>
-    </div>
-    <button class="btn btn-sm btn-outline-secondary" onclick="loadSuggestions()" title="Refresh">
-      <i class="bi bi-arrow-clockwise me-1"></i>Refresh
-    </button>
-  </div>
+  <button class="btn btn-sm btn-outline-secondary" onclick="loadSuggestions()" title="Refresh">
+    <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+  </button>
 </div>
 <p class="text-secondary small mb-3" id="cook-meta">Matching recipes against your inventory…</p>
 
@@ -150,26 +138,14 @@ function suggestionCard(s, tier) {
 async function loadSuggestions() {
   const el = document.getElementById('tiers');
   const meta = document.getElementById('cook-meta');
-  const inclMealie = document.getElementById('chk-mealie').checked;
-  const inclExternal = document.getElementById('chk-external').checked;
-  const params = new URLSearchParams({mealie: inclMealie, external: inclExternal});
-  const sourceLabel = [inclMealie && 'your recipes', inclExternal && 'the web'].filter(Boolean).join(' and ');
   el.innerHTML = `<div class="col-12 text-secondary">
-    <span class="spinner-border spinner-border-sm me-2"></span>Checking ${sourceLabel || 'nothing'} against current stock…</div>`;
-  if (!inclMealie && !inclExternal) {
-    el.innerHTML = '<div class="col-12 text-secondary">Select at least one recipe source above.</div>';
-    meta.textContent = '';
-    return;
-  }
+    <span class="spinner-border spinner-border-sm me-2"></span>Checking your recipes and the web against current stock…</div>`;
   try {
-    const r = await fetch(`/mealie/suggest?${params}`);
+    const r = await fetch('/mealie/suggest');
     if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
     const data = await r.json();
     const tiers = data.tiers || {};
-    const parts = [];
-    if (inclMealie) parts.push(`${data.recipes_considered - data.external_considered} from Mealie`);
-    if (inclExternal) parts.push(`${data.external_considered} from the web`);
-    meta.textContent = `${data.recipes_considered} recipes (${parts.join(', ')}) matched against ${data.inventory_items} inventory items.`;
+    meta.textContent = `${data.recipes_considered} recipes (${data.external_considered} from the web) matched against ${data.inventory_items} inventory items.`;
     el.innerHTML = Object.entries(TIER_META).map(([key, m]) => {
       const items = tiers[key] || [];
       return `

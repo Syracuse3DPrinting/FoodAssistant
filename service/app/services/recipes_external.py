@@ -106,6 +106,21 @@ def _mealdb_normalize(meal: dict) -> dict:
     )
 
 
+async def _mealdb_search_name(query: str, limit: int) -> list[dict]:
+    ck = ("themealdb-name", query.lower())
+    if ck in _recipe_cache:
+        return _recipe_cache[ck]
+    try:
+        r = await _client.get(f"{_mealdb_base()}/search.php", params={"s": query})
+        r.raise_for_status()
+        meals = (r.json() or {}).get("meals") or []
+    except Exception:
+        meals = []
+    recipes = [_mealdb_normalize(m) for m in meals[:limit]]
+    _recipe_cache[ck] = recipes
+    return recipes
+
+
 async def _mealdb_find(ingredients: list[str], limit: int) -> list[dict]:
     queries = [i for i in ingredients[:8] if i and len(i) >= 3]
     if not queries:
@@ -153,6 +168,36 @@ async def _spoon_find(ingredients: list[str], limit: int) -> list[dict]:
 
     recipes = await asyncio.gather(*(_spoon_lookup(rid) for rid in ids))
     return [r for r in recipes if r]
+
+
+async def _spoon_search_name(query: str, limit: int) -> list[dict]:
+    """complexSearch returns id/title/image only — enough for a result list.
+    Full details are fetched on import via get_external_recipe."""
+    ck = ("spoonacular-name", query.lower())
+    if ck in _recipe_cache:
+        return _recipe_cache[ck]
+    try:
+        r = await _client.get(f"{_SPOON_BASE}/recipes/complexSearch", params={
+            "query": query,
+            "number": limit,
+            "apiKey": settings.spoonacular_api_key,
+        })
+        r.raise_for_status()
+        results = (r.json() or {}).get("results") or []
+    except Exception:
+        results = []
+    recipes = [_normalized(
+        name=m.get("title"),
+        external_id=str(m.get("id")),
+        source="spoonacular",
+        description="",
+        image=m.get("image"),
+        source_url="",
+        ingredients=[],
+        instructions=[],
+    ) for m in results if m.get("id")]
+    _recipe_cache[ck] = recipes
+    return recipes
 
 
 async def _spoon_lookup(recipe_id: str) -> dict | None:
@@ -223,6 +268,21 @@ async def find_recipes_for_ingredients(ingredients: list[str], limit: int = 12) 
     if source == "spoonacular" and settings.spoonacular_api_key:
         return await _spoon_find(ingredients, limit)
     return await _mealdb_find(ingredients, limit)
+
+
+async def search_recipes_by_name(query: str, limit: int = 12) -> list[dict]:
+    """External recipes matching a name search, per settings source."""
+    _expire_cache()
+    _touch_cache()
+    query = query.strip()
+    if not query:
+        return []
+    source = settings.recipe_source
+    if source == "off":
+        return []
+    if source == "spoonacular" and settings.spoonacular_api_key:
+        return await _spoon_search_name(query, limit)
+    return await _mealdb_search_name(query, limit)
 
 
 async def get_external_recipe(external_id: str, source: str = "themealdb") -> dict | None:

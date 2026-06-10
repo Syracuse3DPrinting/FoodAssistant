@@ -41,8 +41,18 @@
 <!-- Browse -->
 <div class="row g-3" id="browse-section">
   <div class="col-lg-8 col-xl-6">
-    <input type="search" class="form-control mb-3" id="recipe-filter"
+    <input type="search" class="form-control mb-2" id="recipe-filter"
            placeholder="Search recipes…" autocomplete="off">
+    <div class="d-flex gap-3 mb-3">
+      <div class="form-check form-check-inline mb-0">
+        <input class="form-check-input" type="checkbox" id="chk-mine" checked onchange="reloadRecipes()">
+        <label class="form-check-label small" for="chk-mine">My recipes</label>
+      </div>
+      <div class="form-check form-check-inline mb-0">
+        <input class="form-check-input" type="checkbox" id="chk-external" onchange="reloadRecipes()">
+        <label class="form-check-label small" for="chk-external">Other recipes <span class="text-secondary">(web)</span></label>
+      </div>
+    </div>
     <div id="recipe-list" class="vstack gap-2">
       <div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading recipes…</div>
     </div>
@@ -136,18 +146,13 @@ document.getElementById('recipe-filter').addEventListener('input', e => {
   filterTimer = setTimeout(() => loadRecipes(e.target.value.trim()), 300);
 });
 
-async function loadRecipes(search = '') {
-  const el = document.getElementById('recipe-list');
-  try {
-    const r = await fetch('/mealie/recipes?per_page=100&search=' + encodeURIComponent(search));
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-    const items = await r.json();
-    if (!items.length) {
-      el.innerHTML = '<div class="text-secondary small p-2">No recipes' +
-        (search ? ' matching that search.' : ' yet — import one above!') + '</div>';
-      return;
-    }
-    el.innerHTML = items.map(r => `
+function reloadRecipes() {
+  loadRecipes(document.getElementById('recipe-filter').value.trim());
+}
+
+function recipeRow(r) {
+  if (r.source === 'mealie') {
+    return `
       <div class="card">
         <div class="card-body py-2 d-flex align-items-center justify-content-between gap-2">
           <div class="min-width-0">
@@ -156,9 +161,73 @@ async function loadRecipes(search = '') {
           </div>
           ${r.total_time ? `<span class="badge bg-secondary flex-shrink-0"><i class="bi bi-clock me-1"></i>${r.total_time}</span>` : ''}
         </div>
-      </div>`).join('');
+      </div>`;
+  }
+  return `
+    <div class="card">
+      <div class="card-body py-2 d-flex align-items-center justify-content-between gap-2">
+        <div class="d-flex align-items-center gap-2 min-width-0">
+          ${r.image ? `<img src="${r.image}" class="rounded flex-shrink-0" style="width:48px;height:48px;object-fit:cover" loading="lazy" onerror="this.remove()">` : ''}
+          <div class="min-width-0">
+            <span class="fw-semibold">${r.name}</span>
+            <span class="badge bg-dark border ms-1" title="External recipe — save it to keep it">web</span>
+            ${r.description ? `<div class="small text-secondary text-truncate">${r.description}</div>` : ''}
+          </div>
+        </div>
+        <button class="btn btn-sm btn-outline-info flex-shrink-0" title="Save this recipe into Mealie"
+                onclick="saveExternal('${r.external_id}', '${r.source}', this)">
+          <i class="bi bi-download me-1"></i>Save
+        </button>
+      </div>
+    </div>`;
+}
+
+async function loadRecipes(search = '') {
+  const el = document.getElementById('recipe-list');
+  const mine = document.getElementById('chk-mine').checked;
+  const external = document.getElementById('chk-external').checked;
+  if (!mine && !external) {
+    el.innerHTML = '<div class="text-secondary small p-2">Select at least one recipe source above.</div>';
+    return;
+  }
+  try {
+    const params = new URLSearchParams({per_page: 100, search, mine, external});
+    const r = await fetch(`/mealie/recipes?${params}`);
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    const items = await r.json();
+    if (!items.length) {
+      let hint = search ? ' matching that search.' : ' yet — import one above!';
+      if (!mine && external && !search) hint = ' — type a search to look up web recipes.';
+      el.innerHTML = `<div class="text-secondary small p-2">No recipes${hint}</div>`;
+      return;
+    }
+    let html = items.map(recipeRow).join('');
+    if (external && !search) {
+      html += '<div class="text-secondary small p-2"><i class="bi bi-info-circle me-1"></i>Type a search to include web recipes.</div>';
+    }
+    el.innerHTML = html;
   } catch (e) {
     el.innerHTML = `<div class="alert alert-danger">Could not load recipes: ${e.message}</div>`;
+  }
+}
+
+async function saveExternal(externalId, source, btn) {
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+  try {
+    const r = await fetch('/mealie/recipes/import-external', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({external_id: externalId, source, add_missing_to_list: false}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    btn.outerHTML = `<a href="${d.mealie_url}/g/home/r/${d.slug}" target="_blank"
+      class="small text-success flex-shrink-0"><i class="bi bi-check-circle me-1"></i>Saved</a>`;
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+    alert('Save failed: ' + e.message);
   }
 }
 
