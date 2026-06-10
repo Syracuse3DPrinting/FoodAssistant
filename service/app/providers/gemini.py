@@ -79,6 +79,39 @@ make your best guess and keep going.
 Return ONLY valid JSON. No markdown, no explanation.
 """.strip()
 
+_GENERATE_RECIPE_PROMPT = """
+Write a complete, accurate recipe for "{name}".
+Return a JSON object with these exact fields:
+{{
+  "name": "recipe title",
+  "description": "one or two sentence summary",
+  "servings": "e.g. '4 servings'",
+  "total_time": "e.g. '45 minutes'",
+  "ingredients": ["1 cup flour", "2 large eggs", "..."],
+  "instructions": ["First step text.", "Second step text.", "..."]
+}}
+Each ingredient is one string with quantity and name together.
+Each instruction is one numbered step's full text, in order.
+Return ONLY valid JSON. No markdown, no explanation.
+""".strip()
+
+_SUGGEST_INVENTORY_PROMPT = """
+I have the following ingredients available:
+{items}
+
+Suggest up to {limit} recipes I could make primarily with these ingredients
+plus common pantry staples. Prioritize recipes that use the most of the
+listed items, especially ones expiring soon. Avoid listing obvious single-item
+dishes.
+Return a JSON object:
+{{
+  "suggestions": [
+    {{"name": "recipe name", "description": "one-sentence description", "uses": ["item1", "item2"]}}
+  ]
+}}
+Return ONLY valid JSON. No markdown, no explanation.
+""".strip()
+
 _HEALTH_CACHE_TTL = 3600  # seconds — avoid hammering the API on every /health poll
 
 
@@ -127,6 +160,17 @@ class GeminiProvider(VisionProvider):
             parts = [f"{prompt}\n\n--- PAGE TEXT ---\n{page_text}"]
         response = await self.model.generate_content_async(parts)
         return json.loads(response.text)
+
+    async def generate_recipe(self, name: str) -> dict | None:
+        prompt = _GENERATE_RECIPE_PROMPT.format(name=name)
+        response = await self.model.generate_content_async([prompt])
+        return json.loads(response.text)
+
+    async def suggest_from_inventory(self, items: list[str], limit: int = 8) -> list[dict] | None:
+        prompt = _SUGGEST_INVENTORY_PROMPT.format(
+            items="\n".join(f"- {i}" for i in items), limit=limit)
+        response = await self.model.generate_content_async([prompt])
+        return json.loads(response.text).get("suggestions", [])
 
     async def health_check(self) -> bool:
         # Metadata lookup, not a billed generation; cached to keep /health cheap.

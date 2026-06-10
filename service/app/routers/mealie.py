@@ -7,6 +7,7 @@ from fastapi import APIRouter, Body, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
 from ..config import settings
+from ..dependencies import get_enrich_provider
 from ..services.grocy import GrocyClient
 from ..services.mealie import MealieClient, MealieError, classify_recipes
 from ..services import recipes_external
@@ -278,6 +279,53 @@ async def external_recipe_detail(external_id: str, source: str = "themealdb"):
     if not recipe:
         raise HTTPException(404, "Recipe not found at the external source.")
     return recipe
+
+
+@router.post("/recipes/generate")
+async def generate_recipe(name: str = Body(..., embed=True)):
+    """Ask the configured LLM to write a full recipe for the given dish name.
+    Returns the same normalized shape as external recipes so the same preview
+    modal and save flow can be reused."""
+    if not name.strip():
+        raise HTTPException(400, "Dish name is required.")
+    provider = get_enrich_provider()
+    try:
+        recipe = await provider.generate_recipe(name.strip())
+    except Exception as e:
+        raise HTTPException(502, f"LLM error: {e}")
+    if not recipe or not recipe.get("name"):
+        raise HTTPException(502, "LLM did not return a usable recipe.")
+    recipe.setdefault("source", "llm")
+    recipe.setdefault("external_id", None)
+    recipe.setdefault("image", None)
+    recipe.setdefault("source_url", None)
+    if "ingredients" not in recipe:
+        recipe["ingredients"] = []
+    recipe.setdefault("recipeIngredient", [{"note": i} for i in recipe["ingredients"]])
+    return recipe
+
+
+@router.post("/suggest/llm")
+async def suggest_llm():
+    """Ask the LLM to suggest recipes based on current Grocy inventory.
+    Returns a list of {name, description, uses} — lightweight cards the
+    user can expand into a full generated recipe."""
+    try:
+        stock = await GrocyClient().get_full_stock()
+    except Exception:
+        stock = []
+    if not stock:
+        return {"suggestions": [], "message": "No inventory items found."}
+    ordered = sorted(stock, key=lambda s: (s.get("days_remaining") is None,
+                                           s.get("days_remaining") or 999))
+    item_names = [s["name"] for s in ordered]
+    provider = get_enrich_provider()
+    try:
+        suggestions = await provider.suggest_from_inventory(
+            item_names, limit=settings.suggest_per_tier)
+    except Exception as e:
+        raise HTTPException(502, f"LLM error: {e}")
+    return {"suggestions": suggestions or [], "inventory_items": len(stock)}
 
 
 class ImportExternalPayload(BaseModel):

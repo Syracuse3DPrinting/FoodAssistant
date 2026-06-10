@@ -41,8 +41,14 @@
 <!-- Browse -->
 <div class="row g-3" id="browse-section">
   <div class="col-lg-8 col-xl-6">
-    <input type="search" class="form-control mb-2" id="recipe-filter"
-           placeholder="Search recipes…" autocomplete="off">
+    <div class="input-group mb-2">
+      <input type="search" class="form-control" id="recipe-filter"
+             placeholder="Search recipes…" autocomplete="off">
+      <button class="btn btn-outline-secondary d-none" id="btn-generate-ai"
+              onclick="generateFromSearch()" title="Ask AI to write this recipe">
+        <i class="bi bi-stars me-1"></i>Generate with AI
+      </button>
+    </div>
     <div class="d-flex gap-3 mb-3">
       <div class="form-check form-check-inline mb-0">
         <input class="form-check-input" type="checkbox" id="chk-mine" checked onchange="reloadRecipes()">
@@ -177,8 +183,10 @@ const MEALIE_URL = {{ mealie_url | tojson }};
 
 let filterTimer = null;
 document.getElementById('recipe-filter').addEventListener('input', e => {
+  const q = e.target.value.trim();
+  document.getElementById('btn-generate-ai').classList.toggle('d-none', !q);
   clearTimeout(filterTimer);
-  filterTimer = setTimeout(() => loadRecipes(e.target.value.trim()), 300);
+  filterTimer = setTimeout(() => loadRecipes(q), 300);
 });
 
 function reloadRecipes() {
@@ -303,9 +311,24 @@ async function saveFromPreview(btn) {
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving…';
   try {
-    const r = await fetch('/mealie/recipes/import-external', {
+    let url, body;
+    if (previewRecipe._llm) {
+      // LLM-generated recipe: save via /recipes/create
+      const r = previewRecipe.recipe;
+      url = '/mealie/recipes/create';
+      body = {
+        name: r.name, description: r.description || '',
+        servings: r.servings || '', total_time: r.total_time || '',
+        ingredients: r.ingredients || [], instructions: r.instructions || [],
+      };
+    } else {
+      // External (TheMealDB/Spoonacular): import-external
+      url = '/mealie/recipes/import-external';
+      body = {...previewRecipe, add_missing_to_list: false};
+    }
+    const r = await fetch(url, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({...previewRecipe, add_missing_to_list: false}),
+      body: JSON.stringify(body),
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || r.statusText);
@@ -443,6 +466,59 @@ async function saveRecipe() {
     err.classList.remove('d-none');
   } finally {
     btn.disabled = false;
+  }
+}
+
+// ── AI recipe generation ─────────────────────────────────────────────────────
+
+async function generateFromSearch() {
+  const query = document.getElementById('recipe-filter').value.trim();
+  if (!query) return;
+  const btn = document.getElementById('btn-generate-ai');
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Generating…';
+  // Reuse the preview modal — it will show a spinner then the result.
+  previewRecipe = null;
+  const show = id => document.getElementById(id).classList.toggle('d-none', false);
+  const hide = id => document.getElementById(id).classList.add('d-none');
+  document.getElementById('pv-name').textContent = `Generating "${query}"…`;
+  const saveBtn = document.getElementById('pv-save');
+  saveBtn.disabled = true;
+  saveBtn.className = 'btn btn-info';
+  saveBtn.innerHTML = '<i class="bi bi-download me-1"></i>Save to Mealie';
+  saveBtn.onclick = () => saveFromPreview(saveBtn);
+  show('pv-loading'); hide('pv-body'); hide('pv-error');
+  new bootstrap.Modal(document.getElementById('previewModal')).show();
+  btn.disabled = false;
+  btn.innerHTML = orig;
+  try {
+    const r = await fetch('/mealie/recipes/generate', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: query}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    // Store so saveFromPreview can POST to /recipes/create
+    previewRecipe = {_llm: true, recipe: d};
+    document.getElementById('pv-name').textContent = d.name || query;
+    const img = document.getElementById('pv-image');
+    img.classList.add('d-none');
+    document.getElementById('pv-meta').textContent =
+      [d.servings, d.total_time].filter(Boolean).join(' · ');
+    document.getElementById('pv-description').textContent = d.description || '';
+    document.getElementById('pv-ingredients').innerHTML =
+      (d.ingredients || []).map(i => `<li>${i}</li>`).join('') || '<li class="text-secondary">None listed</li>';
+    document.getElementById('pv-instructions').innerHTML =
+      (d.instructions || []).map(s => `<li>${s}</li>`).join('') || '<li class="text-secondary">None listed</li>';
+    document.getElementById('pv-source-link').classList.add('d-none');
+    hide('pv-loading'); show('pv-body');
+    saveBtn.disabled = false;
+  } catch (e) {
+    hide('pv-loading');
+    const err = document.getElementById('pv-error');
+    err.textContent = 'Generation failed: ' + e.message;
+    err.classList.remove('d-none');
   }
 }
 

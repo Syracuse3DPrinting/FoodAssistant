@@ -5,7 +5,8 @@ import time
 from anthropic import AsyncAnthropic
 
 from .base import VisionProvider, parse_json_response
-from .gemini import _parse_item, _FOOD_PROMPT, _RECEIPT_PROMPT, _ENRICH_PROMPT, _RECIPE_PROMPT
+from .gemini import (_parse_item, _FOOD_PROMPT, _RECEIPT_PROMPT, _ENRICH_PROMPT,
+                     _RECIPE_PROMPT, _GENERATE_RECIPE_PROMPT, _SUGGEST_INVENTORY_PROMPT)
 from ..models.food import AnalysisResult
 
 _HEALTH_CACHE_TTL = 3600  # seconds — avoid hammering the API on every /health poll
@@ -67,6 +68,17 @@ class AnthropicProvider(VisionProvider):
             prompt = _RECIPE_PROMPT.format(source="webpage text below")
             raw = await self._generate(f"{prompt}\n\n--- PAGE TEXT ---\n{page_text}", max_tokens=4096)
         return parse_json_response(raw)
+
+    async def generate_recipe(self, name: str) -> dict | None:
+        prompt = _GENERATE_RECIPE_PROMPT.format(name=name)
+        raw = await self._generate(prompt, max_tokens=4096)
+        return parse_json_response(raw)
+
+    async def suggest_from_inventory(self, items: list[str], limit: int = 8) -> list[dict] | None:
+        prompt = _SUGGEST_INVENTORY_PROMPT.format(
+            items="\n".join(f"- {i}" for i in items), limit=limit)
+        raw = await self._generate(prompt, max_tokens=2048)
+        return parse_json_response(raw).get("suggestions", [])
 
     async def health_check(self) -> bool:
         now = time.monotonic()

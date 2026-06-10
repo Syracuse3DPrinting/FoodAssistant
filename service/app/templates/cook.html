@@ -12,15 +12,63 @@
 
 <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mt-3 mb-1">
   <h4 class="mb-0"><i class="bi bi-lightbulb me-2"></i>What Can I Cook?</h4>
-  <button class="btn btn-sm btn-outline-secondary" onclick="loadSuggestions()" title="Refresh">
-    <i class="bi bi-arrow-clockwise me-1"></i>Refresh
-  </button>
+  <div class="d-flex gap-2">
+    <button class="btn btn-sm btn-outline-secondary" id="btn-ask-ai" onclick="loadAiSuggestions()">
+      <i class="bi bi-stars me-1"></i>Ask AI
+    </button>
+    <button class="btn btn-sm btn-outline-secondary" onclick="loadSuggestions()" title="Refresh">
+      <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+    </button>
+  </div>
 </div>
 <p class="text-secondary small mb-3" id="cook-meta">Matching recipes against your inventory…</p>
 
 <div class="row g-3" id="tiers">
   <div class="col-12 text-secondary">
     <span class="spinner-border spinner-border-sm me-2"></span>Checking your recipes and TheMealDB against current stock…
+  </div>
+</div>
+
+<!-- AI suggestions section (hidden until asked) -->
+<div class="d-none mt-3" id="ai-section">
+  <div class="d-flex align-items-baseline gap-2 mb-2">
+    <h5 class="text-primary mb-0"><i class="bi bi-stars me-1"></i>AI Suggestions</h5>
+    <span class="small text-secondary">Based on your current inventory</span>
+    <button type="button" class="btn-close ms-auto" aria-label="Close"
+            onclick="document.getElementById('ai-section').classList.add('d-none')"></button>
+  </div>
+  <div id="ai-cards" class="row g-2 row-cols-1 row-cols-md-2 row-cols-lg-3 row-cols-xxl-4"></div>
+</div>
+
+<!-- AI recipe preview modal -->
+<div class="modal fade" id="aiPreviewModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="aipv-name">Recipe</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="text-center text-secondary py-4" id="aipv-loading">
+          <span class="spinner-border spinner-border-sm me-2"></span>Generating recipe…
+        </div>
+        <div id="aipv-body" class="d-none">
+          <div class="small text-secondary mb-2" id="aipv-meta"></div>
+          <p class="small" id="aipv-description"></p>
+          <h6><i class="bi bi-basket me-1"></i>Ingredients</h6>
+          <ul class="small" id="aipv-ingredients"></ul>
+          <h6><i class="bi bi-list-ol me-1"></i>Instructions</h6>
+          <ol class="small" id="aipv-instructions"></ol>
+        </div>
+        <div class="alert alert-danger d-none" id="aipv-error"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <button class="btn btn-info" id="aipv-save" disabled onclick="saveAiRecipe(this)">
+          <i class="bi bi-download me-1"></i>Save to Mealie
+        </button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -235,6 +283,119 @@ async function savePlan() {
   } catch (e) {
     err.textContent = e.message;
     err.classList.remove('d-none');
+  }
+}
+
+// ── AI inventory-based suggestions ───────────────────────────────────────────
+
+let aiGeneratedRecipe = null;
+
+async function loadAiSuggestions() {
+  const btn = document.getElementById('btn-ask-ai');
+  const section = document.getElementById('ai-section');
+  const cards = document.getElementById('ai-cards');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Thinking…';
+  section.classList.remove('d-none');
+  cards.innerHTML = '<div class="col-12 text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Asking AI for suggestions…</div>';
+  try {
+    const r = await fetch('/mealie/suggest/llm', {method: 'POST'});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    const sug = d.suggestions || [];
+    if (!sug.length) {
+      cards.innerHTML = '<div class="col-12 text-secondary small">No suggestions returned. Try again or add more inventory items.</div>';
+    } else {
+      cards.innerHTML = sug.map(s => `
+        <div class="col">
+          <div class="card h-100">
+            <div class="card-body py-2 d-flex flex-column">
+              <a href="#" class="fw-semibold" onclick="openAiPreview('${escHtml(s.name)}'); return false;">${escHtml(s.name)}</a>
+              ${s.description ? `<div class="small text-secondary mt-1">${escHtml(s.description)}</div>` : ''}
+              ${(s.uses||[]).length ? `<div class="small text-success mt-1"><i class="bi bi-check2 me-1"></i>${s.uses.map(escHtml).join(', ')}</div>` : ''}
+              <div class="mt-auto pt-2">
+                <button class="btn btn-sm btn-outline-primary"
+                        onclick="openAiPreview('${escHtml(s.name)}')">
+                  <i class="bi bi-stars me-1"></i>Generate full recipe
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>`).join('');
+    }
+  } catch (e) {
+    cards.innerHTML = `<div class="col-12"><div class="alert alert-danger">Could not get AI suggestions: ${e.message}</div></div>`;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-stars me-1"></i>Ask AI';
+  }
+}
+
+function escHtml(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+async function openAiPreview(name) {
+  aiGeneratedRecipe = null;
+  const modal = new bootstrap.Modal(document.getElementById('aiPreviewModal'));
+  document.getElementById('aipv-name').textContent = `Generating "${name}"…`;
+  document.getElementById('aipv-save').disabled = true;
+  document.getElementById('aipv-loading').classList.remove('d-none');
+  document.getElementById('aipv-body').classList.add('d-none');
+  document.getElementById('aipv-error').classList.add('d-none');
+  modal.show();
+  try {
+    const r = await fetch('/mealie/recipes/generate', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    aiGeneratedRecipe = d;
+    document.getElementById('aipv-name').textContent = d.name || name;
+    document.getElementById('aipv-meta').textContent =
+      [d.servings, d.total_time].filter(Boolean).join(' · ');
+    document.getElementById('aipv-description').textContent = d.description || '';
+    document.getElementById('aipv-ingredients').innerHTML =
+      (d.ingredients || []).map(i => `<li>${escHtml(i)}</li>`).join('') || '<li class="text-secondary">None listed</li>';
+    document.getElementById('aipv-instructions').innerHTML =
+      (d.instructions || []).map(s => `<li>${escHtml(s)}</li>`).join('') || '<li class="text-secondary">None listed</li>';
+    document.getElementById('aipv-loading').classList.add('d-none');
+    document.getElementById('aipv-body').classList.remove('d-none');
+    document.getElementById('aipv-save').disabled = false;
+  } catch (e) {
+    document.getElementById('aipv-loading').classList.add('d-none');
+    const err = document.getElementById('aipv-error');
+    err.textContent = 'Generation failed: ' + e.message;
+    err.classList.remove('d-none');
+  }
+}
+
+async function saveAiRecipe(btn) {
+  if (!aiGeneratedRecipe) return;
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving…';
+  try {
+    const d = aiGeneratedRecipe;
+    const r = await fetch('/mealie/recipes/create', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        name: d.name, description: d.description || '',
+        servings: d.servings || '', total_time: d.total_time || '',
+        ingredients: d.ingredients || [], instructions: d.instructions || [],
+      }),
+    });
+    const res = await r.json();
+    if (!r.ok) throw new Error(res.detail || r.statusText);
+    btn.className = 'btn btn-success';
+    btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Saved';
+    btn.onclick = () => window.open(`${res.mealie_url}/g/home/r/${res.slug}`, '_blank');
+    btn.disabled = false;
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+    alert('Save failed: ' + e.message);
   }
 }
 

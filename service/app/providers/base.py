@@ -35,6 +35,16 @@ class VisionProvider(ABC):
         """
         return None
 
+    async def generate_recipe(self, name: str) -> dict | None:
+        """Generate a full recipe from a dish name. Returns the same schema as
+        extract_recipe, or None if the provider doesn't support text generation."""
+        return None
+
+    async def suggest_from_inventory(self, items: list[str], limit: int = 8) -> list[dict] | None:
+        """Suggest recipes from a list of available ingredients. Returns a list of
+        {name, description, uses} dicts, or None if unsupported."""
+        return None
+
     async def extract_recipe(self, image_data: bytes | None = None,
                              mime_type: str | None = None,
                              page_text: str | None = None) -> dict | None:
