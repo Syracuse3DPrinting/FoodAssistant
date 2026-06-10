@@ -427,7 +427,84 @@ async def add_missing_ingredients(payload: AddMissingPayload):
     }
 
 
+class CookedPayload(BaseModel):
+    slug: str
+
+
+@router.post("/cooked")
+async def cooked_recipe(payload: CookedPayload):
+    """Mark a recipe as cooked: consume one unit of each inventory item that
+    matches one of its ingredients, so Grocy stock stays accurate."""
+    m = _client()
+    try:
+        recipe = await m.get_recipe(payload.slug)
+    except MealieError as e:
+        raise HTTPException(502, str(e))
+
+    grocy = GrocyClient()
+    try:
+        stock = await grocy.get_full_stock()
+    except Exception as e:
+        raise HTTPException(502, f"Could not read Grocy stock: {e}")
+
+    from ..services.mealie import _tokens, _ingredient_text
+    inv = [{"product_id": s["product_id"], "name": s["name"],
+            "amount": s["amount"], "tokens": _tokens(s["name"])}
+           for s in stock if s.get("product_id") and _tokens(s["name"])]
+
+    consumed, failed = [], []
+    seen: set[int] = set()
+    for ing in recipe.get("recipeIngredient") or []:
+        text = _ingredient_text(ing).strip()
+        toks = _tokens(text)
+        if not toks:
+            continue
+        hit = next((s for s in inv if toks & s["tokens"]), None)
+        if not hit or hit["product_id"] in seen:
+            continue
+        seen.add(hit["product_id"])
+        try:
+            # One unit per matched product, capped at what's actually in stock.
+            await grocy.consume_stock(hit["product_id"], min(1.0, hit["amount"]))
+            consumed.append(hit["name"])
+        except Exception:
+            failed.append(hit["name"])
+
+    msg = f"Consumed {len(consumed)} item{'s' if len(consumed) != 1 else ''} from inventory."
+    if failed:
+        msg += f" Failed: {', '.join(failed)}."
+    return {"ok": True, "consumed": consumed, "failed": failed, "message": msg}
+
+
 # ── Shopping lists ───────────────────────────────────────────────────────────
+
+@router.get("/mealplan/summary")
+async def mealplan_summary():
+    """Lean today/tomorrow meal plan view for Home Assistant REST sensors."""
+    if not settings.mealie_configured():
+        return {"count": 0, "today": [], "tomorrow": []}
+    from datetime import date, timedelta
+    today = date.today()
+    tomorrow = today + timedelta(days=1)
+    try:
+        entries = await MealieClient().get_mealplan(today.isoformat(), tomorrow.isoformat())
+    except Exception:
+        return {"count": 0, "today": [], "tomorrow": [], "error": "unreachable"}
+
+    def lean(e: dict) -> dict:
+        recipe = e.get("recipe") or {}
+        return {"type": e.get("entryType", ""),
+                "name": recipe.get("name") or e.get("title") or e.get("text") or "?"}
+
+    by_day = {"today": [], "tomorrow": []}
+    for e in entries:
+        if e.get("date") == today.isoformat():
+            by_day["today"].append(lean(e))
+        elif e.get("date") == tomorrow.isoformat():
+            by_day["tomorrow"].append(lean(e))
+    return {"count": len(by_day["today"]),
+            "today": by_day["today"], "tomorrow": by_day["tomorrow"]}
+
 
 @router.get("/shopping/summary")
 async def shopping_summary():

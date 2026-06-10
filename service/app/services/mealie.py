@@ -362,6 +362,9 @@ def _is_staple_ingredient(ing_toks: set[str]) -> bool:
     # Strip modifier tokens from BOTH sides so "canned chickpeas" ingredient
     # matches "Canned chickpeas" phrase, while bare "chicken" still does NOT
     # match "chicken stock" (neither side has modifier tokens to strip).
+    # Skipped when the settings field is set — that list replaces the file.
+    if settings.staple_items.strip():
+        return False
     phrases = _active_staple_phrases()
     if phrases:
         ing_core = ing_toks - _PHRASE_MODIFIERS

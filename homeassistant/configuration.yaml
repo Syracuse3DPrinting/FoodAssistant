@@ -80,6 +80,23 @@ rest:
           - items
           - list_name
 
+  # Mealie meal plan — today's count as state, today/tomorrow entry lists in
+  # attributes for the Lovelace card. Returns 0/empty when Mealie isn't
+  # configured.
+  - resource: http://192.168.1.170:9284/mealie/mealplan/summary
+    scan_interval: 900
+    # headers:
+    #   X-API-Key: !secret foodassistant_api_key
+    sensor:
+      - name: "Meal Plan Today"
+        unique_id: food_mealplan_today
+        value_template: "{{ value_json.count }}"
+        unit_of_measurement: "meals"
+        icon: mdi:silverware-fork-knife
+        json_attributes:
+          - today
+          - tomorrow
+
   # Pending scans waiting for review on the /ui/pending page
   - resource: http://192.168.1.170:9284/pending/count
     scan_interval: 60

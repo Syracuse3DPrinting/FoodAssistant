@@ -46,6 +46,14 @@ views:
             tap_action:
               action: url
               url_path: https://fass.korolev.link/ui/shopping
+          - type: tile
+            entity: sensor.meal_plan_today
+            name: Meals Today
+            icon: mdi:silverware-fork-knife
+            color: blue
+            tap_action:
+              action: url
+              url_path: https://fass.korolev.link/ui/mealplan
 
       # ── Alerts (only shows when something needs attention) ──────────────────
       - type: conditional
@@ -142,6 +150,36 @@ views:
             {% for i in items %}- {{ i }}
 
             {% endfor %}
+
+      # ── Meal Plan ─────────────────────────────────────────────────────────────
+      # Today's and tomorrow's planned meals from Mealie. Tap the tile above
+      # to open the meal plan page.
+      - type: conditional
+        conditions:
+          - condition: or
+            conditions:
+              - condition: numeric_state
+                entity: sensor.meal_plan_today
+                above: 0
+              - condition: template
+                value_template: "{{ (state_attr('sensor.meal_plan_today', 'tomorrow') or []) | length > 0 }}"
+        card:
+          type: markdown
+          content: >-
+            {% set today = state_attr('sensor.meal_plan_today', 'today') or [] %}
+            {% set tomorrow = state_attr('sensor.meal_plan_today', 'tomorrow') or [] %}
+            ### 🍽️ Meal Plan
+
+            {% if today %}**Today**
+
+            {% for m in today %}- {{ m.type | title }}: {{ m.name }}
+
+            {% endfor %}{% endif %}
+            {% if tomorrow %}**Tomorrow**
+
+            {% for m in tomorrow %}- {{ m.type | title }}: {{ m.name }}
+
+            {% endfor %}{% endif %}
 
       # ── Action Buttons ────────────────────────────────────────────────────────
       - type: grid

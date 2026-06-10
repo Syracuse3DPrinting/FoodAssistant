@@ -48,10 +48,15 @@ _SETUP_BYPASS = {
 _PUBLIC_PATHS = _SETUP_BYPASS | {"/ui/login", "/"}
 
 
+def _is_static(path: str) -> bool:
+    return path.startswith("/static/")
+
+
 @app.middleware("http")
 async def redirect_if_unconfigured(request: Request, call_next):
     """Send new installs to /setup until Grocy + vision provider are configured."""
-    if not settings.is_configured() and request.url.path not in _SETUP_BYPASS:
+    if (not settings.is_configured() and request.url.path not in _SETUP_BYPASS
+            and not _is_static(request.url.path)):
         return RedirectResponse("/setup", status_code=303)
     return await call_next(request)
 
@@ -62,7 +67,9 @@ async def require_auth(request: Request, call_next):
     /ui/login session cookie; headless clients (HA, ESPHome) via X-API-Key."""
     if not settings.auth_password:
         return await call_next(request)
-    if request.url.path in _PUBLIC_PATHS:
+    # Static assets (PWA manifest, icons) are public: the OS fetches install
+    # icons without session cookies.
+    if request.url.path in _PUBLIC_PATHS or _is_static(request.url.path):
         return await call_next(request)
 
     session_ok = request.session.get("authed", False)
@@ -78,6 +85,10 @@ async def require_auth(request: Request, call_next):
 
 # SessionMiddleware runs after middlewares above so request.session is available
 app.add_middleware(SessionMiddleware, secret_key=settings.secret_key, max_age=60 * 60 * 24 * 30)
+
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
+app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 app.include_router(setup.router)
 app.include_router(pending.router)

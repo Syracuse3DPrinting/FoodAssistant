@@ -105,4 +105,7 @@ pip install fastapi jinja2 itsdangerous pillow python-multipart sqlalchemy pydan
 python -c "import sys; sys.path.insert(0,'service'); from app.main import app"
 ```
 
-No automated test suite yet — see Phase 2 beads (FoodAssistant-rpz).
+Tests: `pip install pytest && python -m pytest tests/ -q` — staple matching,
+tier classifier, LLM JSON parsing (pure logic, no network/Docker needed).
+Backups: `./scripts/backup.sh [dest]` (cron-friendly, 14-day rotation);
+restore with `./scripts/restore.sh <archive>`.

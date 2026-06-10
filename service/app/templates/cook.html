@@ -149,6 +149,9 @@ function actions(s, tier) {
   } else {
     btns.push(`<button class="btn btn-sm btn-outline-primary" onclick="openPlan('${s.id}', '${(s.name || '').replace(/'/g, '&#39;')}')"
       title="Add to meal plan"><i class="bi bi-calendar-plus me-1"></i>Plan</button>`);
+    btns.push(`<button class="btn btn-sm btn-outline-success" onclick="cookedRecipe('${s.slug}', ${s.matched_ingredients.length}, this)"
+      title="Mark as cooked — consumes the ${s.matched_ingredients.length} matched item${s.matched_ingredients.length !== 1 ? 's' : ''} from inventory">
+      <i class="bi bi-check2-circle me-1"></i>Cooked it</button>`);
     if (tier === 'shopping' && missing) {
       btns.push(`<button class="btn btn-sm btn-outline-warning" onclick="addMissing('${s.slug}', this)"
         title="Add ${missing} missing ingredient${missing !== 1 ? 's' : ''} to the shopping list">
@@ -212,6 +215,27 @@ async function loadSuggestions() {
   } catch (e) {
     el.innerHTML = `<div class="col-12"><div class="alert alert-danger">Could not load suggestions: ${e.message}</div></div>`;
     meta.textContent = '';
+  }
+}
+
+async function cookedRecipe(slug, matchedCount, btn) {
+  if (!confirm(`Mark as cooked? This consumes ${matchedCount} matched item${matchedCount !== 1 ? 's' : ''} from your Grocy inventory.`)) return;
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+  try {
+    const r = await fetch('/mealie/cooked', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({slug}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    btn.outerHTML = `<span class="small text-success align-self-center" title="${(d.consumed || []).join(', ')}">
+      <i class="bi bi-check-circle me-1"></i>${d.message}</span>`;
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+    alert('Failed: ' + e.message);
   }
 }
 
