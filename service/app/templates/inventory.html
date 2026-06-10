@@ -59,6 +59,13 @@
     font-size: 0.85rem;
     padding: 2rem 1rem;
   }
+  .item-row[draggable="true"] { cursor: grab; }
+  .item-row.dragging { opacity: 0.4; }
+  .drop-target {
+    outline: 2px dashed var(--bs-primary);
+    outline-offset: -2px;
+    background: rgba(13,110,253,0.08);
+  }
   .panel-refrigerated .panel-header { background: #0d3b5e; color: #74c0fc; }
   .panel-frozen       .panel-header { background: #1a1a4d; color: #a5b4fc; }
   .panel-room_temp    .panel-header { background: #3b2100; color: #ffa94d; }
@@ -93,7 +100,9 @@
 <div class="row g-3" id="panels">
   <!-- Refrigerated -->
   <div class="col-md-6">
-    <div class="border rounded panel-refrigerated" style="border-width:1px !important">
+    <div class="border rounded panel-refrigerated" style="border-width:1px !important"
+         data-bucket="refrigerated"
+         ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="dropItem(event)">
       <div class="panel-header">
         <i class="bi bi-thermometer-low"></i> Refrigerated
         <span class="panel-count" id="count-refrigerated">—</span>
@@ -103,7 +112,9 @@
   </div>
   <!-- Frozen -->
   <div class="col-md-6">
-    <div class="border rounded panel-frozen" style="border-width:1px !important">
+    <div class="border rounded panel-frozen" style="border-width:1px !important"
+         data-bucket="frozen"
+         ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="dropItem(event)">
       <div class="panel-header">
         <i class="bi bi-snow"></i> Frozen
         <span class="panel-count" id="count-frozen">—</span>
@@ -113,7 +124,9 @@
   </div>
   <!-- Room Temp -->
   <div class="col-md-6">
-    <div class="border rounded panel-room_temp" style="border-width:1px !important">
+    <div class="border rounded panel-room_temp" style="border-width:1px !important"
+         data-bucket="room_temp"
+         ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="dropItem(event)">
       <div class="panel-header">
         <i class="bi bi-sun"></i> Room Temp / Counter
         <span class="panel-count" id="count-room_temp">—</span>
@@ -123,12 +136,40 @@
   </div>
   <!-- Pantry -->
   <div class="col-md-6">
-    <div class="border rounded panel-pantry" style="border-width:1px !important">
+    <div class="border rounded panel-pantry" style="border-width:1px !important"
+         data-bucket="pantry"
+         ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="dropItem(event)">
       <div class="panel-header">
         <i class="bi bi-box-seam"></i> Pantry / Dry Storage
         <span class="panel-count" id="count-pantry">—</span>
       </div>
       <div class="panel-body" id="panel-pantry"><div class="panel-empty">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Move-item modal (tap-friendly alternative to drag & drop) -->
+<div class="modal fade" id="moveModal" tabindex="-1">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title">Move <span id="moveModalName"></span> to…</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body d-grid gap-2">
+        <button class="btn btn-outline-info" onclick="moveFromModal('refrigerated')">
+          <i class="bi bi-thermometer-low me-1"></i>Refrigerated
+        </button>
+        <button class="btn btn-outline-primary" onclick="moveFromModal('frozen')">
+          <i class="bi bi-snow me-1"></i>Frozen
+        </button>
+        <button class="btn btn-outline-warning" onclick="moveFromModal('room_temp')">
+          <i class="bi bi-sun me-1"></i>Room Temp / Counter
+        </button>
+        <button class="btn btn-outline-success" onclick="moveFromModal('pantry')">
+          <i class="bi bi-box-seam me-1"></i>Pantry / Dry Storage
+        </button>
+      </div>
     </div>
   </div>
 </div>
@@ -176,7 +217,7 @@ function esc(s) {
   return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
 }
 
-function renderPanel(panelId, countId, items) {
+function renderPanel(panelId, countId, items, bucket) {
   const el = document.getElementById(panelId);
   const cnt = document.getElementById(countId);
   cnt.textContent = items.length;
@@ -185,18 +226,105 @@ function renderPanel(panelId, countId, items) {
     return;
   }
   el.innerHTML = items.map(item => `
-    <div class="item-row" id="row-${item.product_id}">
+    <div class="item-row" id="row-${item.product_id}" draggable="true"
+         data-product-id="${item.product_id}" data-bucket="${bucket}" data-name="${esc(item.name)}"
+         ondragstart="dragStart(event)" ondragend="dragEnd(event)">
       <div class="item-name">
         <div class="item-name-text" title="${esc(item.name)}">${esc(item.name)}</div>
       </div>
       <span class="item-qty">${item.amount % 1 === 0 ? item.amount : item.amount.toFixed(1)}${item.unit ? ' ' + esc(item.unit) : ''}</span>
       ${expiryBadge(item)}
-      <button class="btn btn-outline-secondary btn-icon ms-1" title="Mark consumed"
+      <button class="btn btn-outline-secondary btn-icon ms-1" title="Move to another location"
+              onclick="openMoveModal(${item.product_id}, '${esc(item.name)}')">
+        <i class="bi bi-arrow-left-right"></i>
+      </button>
+      <button class="btn btn-outline-secondary btn-icon" title="Mark consumed"
               onclick="consume(${item.product_id}, ${item.amount}, '${esc(item.name)}')">
         <i class="bi bi-check2"></i>
       </button>
     </div>
   `).join('');
+}
+
+// ── Drag & Drop ──────────────────────────────────────────────────────────────
+let dragged = null;  // { productId, fromBucket, name }
+
+function dragStart(e) {
+  const row = e.currentTarget;
+  dragged = {
+    productId: parseInt(row.dataset.productId),
+    fromBucket: row.dataset.bucket,
+    name: row.dataset.name,
+  };
+  row.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', row.dataset.productId);
+}
+
+function dragEnd(e) {
+  e.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('.drop-target').forEach(p => p.classList.remove('drop-target'));
+}
+
+function dragOver(e) {
+  if (!dragged) return;
+  const panel = e.currentTarget;
+  if (panel.dataset.bucket !== dragged.fromBucket) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    panel.classList.add('drop-target');
+  }
+}
+
+function dragLeave(e) {
+  e.currentTarget.classList.remove('drop-target');
+}
+
+async function dropItem(e) {
+  e.preventDefault();
+  const panel = e.currentTarget;
+  panel.classList.remove('drop-target');
+  if (!dragged || panel.dataset.bucket === dragged.fromBucket) return;
+  const { productId, name } = dragged;
+  dragged = null;
+  await moveItem(productId, panel.dataset.bucket, name);
+}
+
+// ── Move via modal (touch devices) ───────────────────────────────────────────
+let moveTarget = null;  // { productId, name }
+
+function openMoveModal(productId, name) {
+  moveTarget = { productId, name };
+  document.getElementById('moveModalName').textContent = name;
+  new bootstrap.Modal(document.getElementById('moveModal')).show();
+}
+
+async function moveFromModal(bucket) {
+  bootstrap.Modal.getInstance(document.getElementById('moveModal')).hide();
+  if (!moveTarget) return;
+  const { productId, name } = moveTarget;
+  moveTarget = null;
+  await moveItem(productId, bucket, name);
+}
+
+const BUCKET_LABELS = {
+  refrigerated: 'Refrigerated', frozen: 'Frozen',
+  room_temp: 'Room Temp', pantry: 'Pantry',
+};
+
+async function moveItem(productId, bucket, name) {
+  try {
+    const r = await fetch(`/inventory/move/${productId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bucket }),
+    });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    showToast(`✓ Moved ${name} to ${BUCKET_LABELS[bucket]}`);
+    await loadDashboard();
+  } catch(e) {
+    showToast(`Move failed: ${e.message}`, true);
+  }
 }
 
 async function loadDashboard() {
@@ -206,10 +334,10 @@ async function loadDashboard() {
     const r = await fetch(`/inventory/dashboard?sort=${sort}`);
     if (!r.ok) throw new Error(await r.text());
     const data = await r.json();
-    renderPanel('panel-refrigerated', 'count-refrigerated', data.refrigerated || []);
-    renderPanel('panel-frozen',       'count-frozen',       data.frozen       || []);
-    renderPanel('panel-room_temp',    'count-room_temp',    data.room_temp    || []);
-    renderPanel('panel-pantry',       'count-pantry',       data.pantry       || []);
+    renderPanel('panel-refrigerated', 'count-refrigerated', data.refrigerated || [], 'refrigerated');
+    renderPanel('panel-frozen',       'count-frozen',       data.frozen       || [], 'frozen');
+    renderPanel('panel-room_temp',    'count-room_temp',    data.room_temp    || [], 'room_temp');
+    renderPanel('panel-pantry',       'count-pantry',       data.pantry       || [], 'pantry');
   } catch(e) {
     ['refrigerated','frozen','room_temp','pantry'].forEach(b => {
       document.getElementById(`panel-${b}`).innerHTML =

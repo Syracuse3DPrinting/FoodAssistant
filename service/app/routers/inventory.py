@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models.food import ImportRequest, FoodItem, FoodItemOverride
@@ -59,6 +60,20 @@ _SORT_KEYS = {
 }
 
 _BUCKETS = ["refrigerated", "frozen", "room_temp", "pantry", "other"]
+
+
+class MoveRequest(BaseModel):
+    bucket: str  # refrigerated | frozen | room_temp | pantry
+
+
+@router.post("/move/{product_id}")
+async def move_item(product_id: int, body: MoveRequest):
+    """Move all stock of a product to a different storage location."""
+    grocy = GrocyClient()
+    try:
+        return await grocy.move_product(product_id, body.bucket)
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
 
 @router.get("/dashboard")

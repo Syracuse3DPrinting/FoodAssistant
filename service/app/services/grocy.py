@@ -190,6 +190,34 @@ class GrocyClient:
             })
         return result
 
+    async def move_product(self, product_id: int, bucket: str) -> dict:
+        """Transfer all stock of a product to the location for `bucket` and
+        make that the product's default location."""
+        if bucket not in BUCKET_LOCATION:
+            raise GrocyError(f"Unknown storage bucket: {bucket}")
+        to_id = await self.ensure_location(BUCKET_LOCATION[bucket])
+
+        entries = await self._get(f"/stock/products/{product_id}/entries")
+        moved = 0.0
+        for entry in entries:
+            amount = float(entry.get("amount") or 0)
+            from_id = int(entry.get("location_id") or 0)
+            if amount <= 0 or from_id == to_id:
+                continue
+            if from_id:
+                await self._post(f"/stock/products/{product_id}/transfer", {
+                    "amount": amount,
+                    "location_id_from": from_id,
+                    "location_id_to": to_id,
+                })
+                moved += amount
+
+        # Entries without a location can't be transferred, but changing the
+        # product's default location still re-buckets them on the dashboard.
+        await self._request("PUT", f"/objects/products/{product_id}",
+                            {"location_id": to_id})
+        return {"product_id": product_id, "moved_amount": moved, "location_id": to_id}
+
     async def import_item(self, item: FoodItem) -> dict:
         storage_name = _STORAGE_LABEL[item.storage_type.value]
         location_id = await self.ensure_location(storage_name)
@@ -211,4 +239,12 @@ _STORAGE_LABEL = {
     "frozen": "Freezer",
     "room_temp": "Counter / Room Temp",
     "dry": "Pantry / Dry Storage",
+}
+
+# Dashboard bucket → Grocy location name (pantry bucket maps to dry storage)
+BUCKET_LOCATION = {
+    "refrigerated": _STORAGE_LABEL["refrigerated"],
+    "frozen": _STORAGE_LABEL["frozen"],
+    "room_temp": _STORAGE_LABEL["room_temp"],
+    "pantry": _STORAGE_LABEL["dry"],
 }
