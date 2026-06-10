@@ -1,8 +1,13 @@
 # Project Instructions for AI Agents
 
-This file provides instructions and context for AI coding agents working on this project.
+> **⚠️ ALWAYS USE BEADS.** This repo tracks ALL work in **bd (beads)** — never in
+> markdown TODOs, TodoWrite, or ad-hoc lists. Start every session with `bd prime`,
+> pick work with `bd ready`, claim it (`bd update <id> --claim`), and close it when
+> done (`bd close <id>`). File a new bead for ANY follow-up work you discover.
+> Phase 0 (FoodAssistant-7cc) holds discussion items that gate later phases —
+> don't start blocked work; surface the blocking decision to Dan instead.
 
-<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:6cd5cc61 -->
+<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:970c3bf2 -->
 ## Beads Issue Tracker
 
 This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
@@ -46,6 +51,7 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 
    # Team-maintainer opt-in only, unless current instructions forbid it:
    git pull --rebase
+   bd dolt push
    git push
    git status
    ```
@@ -57,21 +63,46 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 - If a required sync or push is blocked, stop and report the exact command and error.
 <!-- END BEADS INTEGRATION -->
 
+## Authorship & Git
 
-## Build & Test
+- **All commits are authored by Dan** (`Dan <dm.marafino@gmail.com>`) — repo git
+  config is already set. Never add Co-Authored-By trailers, AI attributions, or
+  session links to commit messages.
+- Development happens on **`main`** directly.
+- GitHub interactions in cloud sessions go through the GitHub MCP integration
+  (no `gh` CLI available there); `gh` may be used on local machines.
 
-_Add your build and test commands here_
+## What This Is
 
-```bash
-# Example:
-# npm install
-# npm test
-```
+Self-hosted food spoilage tracker: FastAPI service (port 9284) backed by
+**Grocy** (inventory, port 9383), with optional **Mealie** (recipes/meal
+plan/shopping, port 9285) and **Ollama** (local LLM) — all via Docker Compose
+profiles (`--profile with-grocy / with-mealie / with-ollama`).
 
 ## Architecture Overview
 
-_Add a brief overview of your project architecture_
+- `service/app/main.py` — FastAPI app; middleware order matters (setup-redirect → auth → session)
+- `service/app/config.py` — pydantic settings; env vars override `service/data/settings.json` (written by the `/setup` wizard); `_SAVEABLE` lists persistable keys
+- `service/app/providers/` — `VisionProvider` ABC (gemini/openai/anthropic/ollama); built via `dependencies._build_provider()`, cached with `lru_cache`, invalidated by `reset_providers()` on settings save
+- `service/app/services/` — `grocy.py` (inventory client), `mealie.py` (recipes/mealplan/shopping client + `suggest_recipes` inventory matcher), `barcode.py` (Open Food Facts + LLM enrichment), `defaults.py` (expiry rules)
+- `service/app/routers/` — REST + UI routes; `templates/` are Bootstrap 5 dark-theme Jinja2
+- `homeassistant/` — REST sensor config, automations (barcode scanner via keyboard_remote), Lovelace dashboard
 
-## Conventions & Patterns
+## Conventions & Gotchas
 
-_Add your project-specific conventions here_
+- **HA sensors use the LAN URL** (`http://192.168.1.170:9284`), never the Pangolin public URL (headless requests get an HTML redirect). Lovelace buttons use the public URL.
+- App code is volume-mounted with `--reload`: `git pull` applies changes live; rebuild only for `requirements.txt`/Dockerfile changes.
+- Mealie client auto-detects v1 (`/api/groups/`) vs v2 (`/api/households/`) API paths.
+- HA template gotcha: compare `key_code` as integers (`key == 28`), never cast with `| string`.
+- LLM JSON replies may be fenced — always parse with `providers.base.parse_json_response`.
+
+## Build & Test
+
+```bash
+docker compose up -d --build                 # run (add profiles as needed)
+# local smoke test deps:
+pip install fastapi jinja2 itsdangerous pillow python-multipart sqlalchemy pydantic-settings httpx
+python -c "import sys; sys.path.insert(0,'service'); from app.main import app"
+```
+
+No automated test suite yet — see Phase 2 beads (FoodAssistant-rpz).
