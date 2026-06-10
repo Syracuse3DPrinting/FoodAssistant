@@ -83,6 +83,9 @@ rest_command:
     url: http://192.168.1.170:9284/pending/scan
     method: POST
     content_type: "application/json"
+    # Uncomment if FoodAssistant has API_KEY set — without the header the
+    # POST is rejected with 401 and HA only logs a warning (the automation
+    # trace still looks successful).
     # headers:
     #   X-API-Key: !secret foodassistant_api_key
     payload: '{"barcode": "{{ barcode }}", "source": "ha"}'

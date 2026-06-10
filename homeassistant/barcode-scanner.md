@@ -110,11 +110,20 @@ you'll need it in the next step.
 
 ### 2. Configure keyboard_remote
 
-In `configuration.yaml`:
+In `configuration.yaml` (requires a full HA restart, not just a YAML reload):
 
 ```yaml
 keyboard_remote:
-  - device_name: "Barcode Scanner HID"   # exact name from /dev/input
+  - device_name: "BarCode WPM USB"   # exact name from the hardware list
+    type:
+      - key_down
+```
+
+If the name is ambiguous, the stable by-id path is more reliable:
+
+```yaml
+keyboard_remote:
+  - device_descriptor: /dev/input/by-id/usb-BarCode_WPM_USB-event-kbd
     type:
       - key_down
 ```
@@ -129,6 +138,11 @@ rest_command:
     url: http://192.168.1.170:9284/pending/scan
     method: POST
     content_type: "application/json"
+    # Required if FoodAssistant has API_KEY set — without it the POST is
+    # rejected with 401 and HA only logs a warning (the automation trace
+    # still looks successful).
+    headers:
+      X-API-Key: !secret foodassistant_api_key
     payload: '{"barcode": "{{ barcode }}", "source": "ha"}'
 ```
 
@@ -137,41 +151,71 @@ rest_command:
 Scanners type one key per digit, so the automation buffers digits in a
 helper and submits on Enter. First create the helper — **Settings →
 Devices & Services → Helpers → Create Helper → Text**, name it
-`barcode_buffer` — then add:
+`barcode_buffer` — then create the automation (**Settings → Automations →
++ Create Automation → Skip → ⋮ → Edit in YAML**) and paste:
 
 ```yaml
-automation:
-  - alias: "Barcode scanner → FoodAssistant"
-    mode: queued
-    trigger:
-      - platform: event
-        event_type: keyboard_remote_command_received
-        event_data:
-          device_name: "Barcode Scanner HID"   # match your scanner
-    action:
-      - variables:
-          # key_code 28 = Enter; 2-11 are digits 1234567890 on row keys
-          key: "{{ trigger.event.data.key_code }}"
-          digit_map: { 2: "1", 3: "2", 4: "3", 5: "4", 6: "5",
-                       7: "6", 8: "7", 9: "8", 10: "9", 11: "0" }
-      - choose:
-          # Enter pressed → submit the buffered barcode
-          - conditions: "{{ key == 28 }}"
-            sequence:
-              - service: rest_command.foodassistant_scan
-                data:
-                  barcode: "{{ states('input_text.barcode_buffer') }}"
-              - service: input_text.set_value
-                target: { entity_id: input_text.barcode_buffer }
-                data: { value: "" }
-          # Digit pressed → append to the buffer
-          - conditions: "{{ key in digit_map }}"
-            sequence:
-              - service: input_text.set_value
-                target: { entity_id: input_text.barcode_buffer }
-                data:
-                  value: "{{ states('input_text.barcode_buffer') ~ digit_map[key] }}"
+alias: Barcode scanner → FoodAssistant
+mode: queued
+triggers:
+  - trigger: event
+    event_type: keyboard_remote_command_received
+    event_data:
+      device_name: BarCode WPM USB   # match your scanner's device name
+actions:
+  - variables:
+      # key_code 28 = Enter; 2-11 are digits 1234567890 on the number row.
+      # Compare as integers: HA coerces template variable results back to
+      # native types, so a |string cast gets undone and string comparisons
+      # silently never match.
+      key: "{{ trigger.event.data.key_code | int }}"
+      # Helper state is 'unknown' until first written — treat that as empty
+      buffer: >-
+        {{ states('input_text.barcode_buffer')
+           if states('input_text.barcode_buffer') not in ['unknown', 'unavailable']
+           else '' }}
+  - choose:
+      # Enter pressed → submit the buffered barcode
+      - conditions:
+          - condition: template
+            value_template: "{{ key == 28 }}"
+        sequence:
+          - action: rest_command.foodassistant_scan
+            data:
+              barcode: "{{ buffer }}"
+          - action: input_text.set_value
+            target:
+              entity_id: input_text.barcode_buffer
+            data:
+              value: ""
+      # Digit pressed → append to the buffer. Codes 2-11 are 1..9,0 in
+      # order, so the digit is computed arithmetically — no lookup table
+      # for the GUI editor to re-type into strings.
+      - conditions:
+          - condition: template
+            value_template: "{{ 2 <= key <= 11 }}"
+        sequence:
+          - action: input_text.set_value
+            target:
+              entity_id: input_text.barcode_buffer
+            data:
+              value: "{{ buffer ~ ((key - 1) % 10) }}"
 ```
+
+**Debugging tips:**
+
+- **Developer Tools → Events**, listen to `keyboard_remote_command_received`,
+  pull the trigger: you should see one event per digit plus Enter (28). No
+  events → `keyboard_remote` isn't attached; check the device name/descriptor
+  and do a full restart (YAML reload is not enough).
+- Watch `input_text.barcode_buffer` in **Developer Tools → States** while
+  scanning — digits should accumulate, then clear on Enter.
+- Automation triggers but "Choose: No action executed" in the trace →
+  key-code/type mismatch; check the `key` value in the trace's
+  Changed variables tab.
+- Buffer fills but nothing reaches `/ui/pending` → the `rest_command` is
+  failing (check **Settings → System → Logs**). If FoodAssistant has
+  `API_KEY` set, the `X-API-Key` header is required — see step 3.
 
 ### 5. Optional: scan-received notification
 
