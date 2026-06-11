@@ -247,25 +247,24 @@ async def suggest(top: int = Query(0, ge=0, le=20), mealie: bool = True, externa
     except Exception:
         stock = []
 
-    external_count = 0
+    ext_recipes: list[dict] = []
     if external and stock:
         # Search the external source by stock item names, perishables first.
         ordered = sorted(stock, key=lambda s: (s.get("days_remaining") is None,
                                                s.get("days_remaining") or 999))
         try:
-            ext = await recipes_external.find_recipes_for_ingredients(
+            ext_recipes = await recipes_external.find_recipes_for_ingredients(
                 [s["name"] for s in ordered])
         except Exception:
-            ext = []
+            ext_recipes = []
         mealie_names = {(r.get("name") or "").lower() for r in recipes}
-        ext = [r for r in ext if (r.get("name") or "").lower() not in mealie_names]
-        external_count = len(ext)
-        recipes = recipes + ext
+        ext_recipes = [r for r in ext_recipes if (r.get("name") or "").lower() not in mealie_names]
 
     return {
         "tiers": classify_recipes(recipes, stock, top_per_tier=top),
-        "recipes_considered": len(recipes),
-        "external_considered": external_count,
+        "external_tiers": classify_recipes(ext_recipes, stock, top_per_tier=top) if ext_recipes else {},
+        "recipes_considered": len(recipes) + len(ext_recipes),
+        "external_considered": len(ext_recipes),
         "inventory_items": len(stock),
         "mealie_url": settings.mealie_link_url(),
     }
@@ -322,7 +321,8 @@ async def suggest_llm():
     provider = get_enrich_provider()
     try:
         suggestions = await provider.suggest_from_inventory(
-            item_names, limit=settings.suggest_per_tier)
+            item_names, limit=settings.suggest_per_tier,
+            preferences=settings.cook_ai_context)
     except Exception as e:
         raise HTTPException(502, f"LLM error: {e}")
     return {"suggestions": suggestions or [], "inventory_items": len(stock)}

@@ -40,7 +40,8 @@ class VisionProvider(ABC):
         extract_recipe, or None if the provider doesn't support text generation."""
         return None
 
-    async def suggest_from_inventory(self, items: list[str], limit: int = 8) -> list[dict] | None:
+    async def suggest_from_inventory(self, items: list[str], limit: int = 8,
+                                      preferences: str = "") -> list[dict] | None:
         """Suggest recipes from a list of available ingredients. Returns a list of
         {name, description, uses} dicts, or None if unsupported."""
         return None

@@ -29,6 +29,15 @@
   </div>
 </div>
 
+<!-- External (web) recipe tiers — always visible regardless of local count -->
+<div class="d-none mt-3" id="ext-section">
+  <div class="d-flex align-items-baseline gap-2 mb-2">
+    <h5 class="text-secondary mb-0"><i class="bi bi-globe2 me-1"></i>From the Web</h5>
+    <span class="small text-secondary">External recipes matched against your inventory</span>
+  </div>
+  <div id="ext-tiers"></div>
+</div>
+
 <!-- AI suggestions section (hidden until asked) -->
 <div class="d-none mt-3" id="ai-section">
   <div class="d-flex align-items-baseline gap-2 mb-2">
@@ -186,17 +195,39 @@ function suggestionCard(s, tier) {
   </div>`;
 }
 
+function renderTiers(tiers, containerEl) {
+  containerEl.innerHTML = Object.entries(TIER_META).map(([key, m]) => {
+    const items = (tiers[key] || []);
+    if (!items.length) return '';
+    return `
+    <div class="col-12 mb-1">
+      <div class="d-flex align-items-baseline gap-2 mb-1">
+        <h6 class="text-${m.color} mb-0"><i class="bi ${m.icon} me-1"></i>${m.label}</h6>
+        <span class="badge bg-${m.color} text-dark">${items.length}</span>
+      </div>
+      <div class="row g-2 row-cols-1 row-cols-md-2 row-cols-lg-3 row-cols-xxl-4">
+        ${items.map(s => `<div class="col">${suggestionCard(s, key)}</div>`).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+
 async function loadSuggestions() {
   const el = document.getElementById('tiers');
   const meta = document.getElementById('cook-meta');
+  const extSection = document.getElementById('ext-section');
+  const extTiers = document.getElementById('ext-tiers');
   el.innerHTML = `<div class="col-12 text-secondary">
     <span class="spinner-border spinner-border-sm me-2"></span>Checking your recipes and the web against current stock…</div>`;
+  extSection.classList.add('d-none');
   try {
     const r = await fetch('/mealie/suggest');
     if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
     const data = await r.json();
     const tiers = data.tiers || {};
     meta.textContent = `${data.recipes_considered} recipes (${data.external_considered} from the web) matched against ${data.inventory_items} inventory items.`;
+
+    // Local (Mealie) tiers
     el.innerHTML = Object.entries(TIER_META).map(([key, m]) => {
       const items = tiers[key] || [];
       return `
@@ -212,6 +243,14 @@ async function loadSuggestions() {
         </div>` : `<div class="small text-secondary mb-2">${m.empty}</div>`}
       </div>`;
     }).join('');
+
+    // External (web) tiers — rendered separately so local results can't squeeze them out
+    const extData = data.external_tiers || {};
+    const hasExt = Object.values(extData).some(arr => arr.length > 0);
+    if (hasExt) {
+      renderTiers(extData, extTiers);
+      extSection.classList.remove('d-none');
+    }
   } catch (e) {
     el.innerHTML = `<div class="col-12"><div class="alert alert-danger">Could not load suggestions: ${e.message}</div></div>`;
     meta.textContent = '';

@@ -98,7 +98,7 @@ Return ONLY valid JSON. No markdown, no explanation.
 _SUGGEST_INVENTORY_PROMPT = """
 I have the following ingredients available:
 {items}
-
+{preferences_block}
 Suggest up to {limit} recipes I could make primarily with these ingredients
 plus common pantry staples. Prioritize recipes that use the most of the
 listed items, especially ones expiring soon. Avoid listing obvious single-item
@@ -166,9 +166,12 @@ class GeminiProvider(VisionProvider):
         response = await self.model.generate_content_async([prompt])
         return json.loads(response.text)
 
-    async def suggest_from_inventory(self, items: list[str], limit: int = 8) -> list[dict] | None:
+    async def suggest_from_inventory(self, items: list[str], limit: int = 8,
+                                      preferences: str = "") -> list[dict] | None:
+        pref_block = f"\nMy food preferences / restrictions:\n{preferences}\n" if preferences.strip() else ""
         prompt = _SUGGEST_INVENTORY_PROMPT.format(
-            items="\n".join(f"- {i}" for i in items), limit=limit)
+            items="\n".join(f"- {i}" for i in items), limit=limit,
+            preferences_block=pref_block)
         response = await self.model.generate_content_async([prompt])
         return json.loads(response.text).get("suggestions", [])
 

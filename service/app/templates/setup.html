@@ -295,6 +295,14 @@
               <div class="form-text">Items assumed on hand even when not in inventory — used by the
                 "With Pantry Staples" tier of recipe suggestions.</div>
             </div>
+            <div class="mb-3">
+              <label class="form-label"><i class="bi bi-stars me-1"></i>AI Recipe Preferences
+                <span class="text-secondary small">(optional)</span></label>
+              <textarea class="form-control" id="cook_ai_context" rows="3"
+                        placeholder="e.g. I prefer Italian and Mexican food. I don't eat pork. My family loves spicy dishes. Avoid nuts due to allergies.">{{ s.cook_ai_context }}</textarea>
+              <div class="form-text">Sent to the AI when generating recipe suggestions on the Cook page
+                ("Ask AI"). Describe tastes, restrictions, or cuisines you enjoy.</div>
+            </div>
             <div class="row g-2">
               <div class="col-sm-4">
                 <label class="form-label">Perishable window <span class="text-secondary small">(days)</span></label>
@@ -518,6 +526,7 @@ async function saveAll() {
     themealdb_api_key: secretVal('themealdb_api_key'),
     spoonacular_api_key: secretVal('spoonacular_api_key'),
     staple_items:    val('staple_items'),
+    cook_ai_context: val('cook_ai_context'),
     perishable_days: num('perishable_days', 14),
     expiring_soon_days: num('expiring_soon_days', 5),
     suggest_per_tier: num('suggest_per_tier', 8),

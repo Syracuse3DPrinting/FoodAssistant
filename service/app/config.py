@@ -12,7 +12,7 @@ _SAVEABLE = [
     "grocy_base_url", "grocy_api_key",
     "mealie_base_url", "mealie_api_key", "mealie_public_url",
     "recipe_source", "themealdb_api_key", "spoonacular_api_key",
-    "staple_items", "perishable_days", "expiring_soon_days", "suggest_per_tier",
+    "staple_items", "cook_ai_context", "perishable_days", "expiring_soon_days", "suggest_per_tier",
     "nav_order", "nav_hidden",
     "secret_key", "auth_password", "api_key",
 ]
@@ -74,6 +74,7 @@ class Settings(BaseSettings):
     # Suggestion tuning. staple_items: comma-separated pantry items assumed
     # on hand (empty = built-in list). Thresholds in days.
     staple_items: str = ""
+    cook_ai_context: str = ""
     perishable_days: int = 14
     expiring_soon_days: int = 5
     suggest_per_tier: int = 8

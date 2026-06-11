@@ -82,9 +82,12 @@ class OpenAIProvider(VisionProvider):
         raw = await self._generate(prompt, max_tokens=4096)
         return parse_json_response(raw)
 
-    async def suggest_from_inventory(self, items: list[str], limit: int = 8) -> list[dict] | None:
+    async def suggest_from_inventory(self, items: list[str], limit: int = 8,
+                                      preferences: str = "") -> list[dict] | None:
+        pref_block = f"\nMy food preferences / restrictions:\n{preferences}\n" if preferences.strip() else ""
         prompt = _SUGGEST_INVENTORY_PROMPT.format(
-            items="\n".join(f"- {i}" for i in items), limit=limit)
+            items="\n".join(f"- {i}" for i in items), limit=limit,
+            preferences_block=pref_block)
         raw = await self._generate(prompt, max_tokens=2048)
         return parse_json_response(raw).get("suggestions", [])
 
