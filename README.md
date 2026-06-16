@@ -6,19 +6,39 @@ Uses [Grocy](https://grocy.info/) as the inventory backend. All AI features are 
 
 Licensed under [PolyForm Noncommercial 1.0](LICENSE) - free for personal, educational, and non-commercial use.
 
+---
+
+![Inventory dashboard showing four storage panels with drag-and-drop](docs/screenshots/inventory.png)
+
+*Inventory dashboard — four storage panels (Refrigerated, Frozen, Room Temp, Pantry) with drag-and-drop moves, inline edits, and expiry badges.*
+
+---
+
 ## Features
 
-- **Inventory dashboard** - four-panel view (Refrigerated, Frozen, Room Temp, Pantry) with drag-and-drop moves, inline edits, and sorting
-- **Photo analysis** - photograph a food item and a vision model extracts name, brand, quantity, and any printed best-by date
-- **Receipt import** - photograph a grocery receipt and every food line item is extracted and queued for review
-- **Barcode lookup** - scan barcodes via camera, a USB/wireless scanner, or manual entry; backed by Open Food Facts with optional AI cleanup for messy product names
-- **Expiry defaults** - an editable rules table fills in best-by dates automatically based on product type; all values are overridable before import
-- **Recipe suggestions** - "What Can I Cook?" ranks your recipes by how much of them you already have in stock; items expiring soon float to the top
-- **Recipe import** - import from any webpage, photograph a recipe card or handwritten note, browse TheMealDB, or have the AI write a recipe from scratch
-- **Meal planning and shopping lists** - optional [Mealie](https://mealie.io) integration with a week view, shopping list with check-off, and inventory-aware recipe suggestions
-- **Home Assistant integration** - REST sensors, notification automations, and a Lovelace dashboard with inventory panels
-- **Web setup wizard** - configure everything at `/setup` with live connection tests; no config file editing required
-- **Two-factor authentication** - optional TOTP (app-based 2FA) on top of password login; works offline with any authenticator app
+- **Inventory dashboard** — panels for Refrigerated, Frozen, Room Temp, Pantry (plus custom storage locations you define), with drag-and-drop moves, inline edits, and sorting
+- **Photo analysis** — photograph a food item and a vision model extracts name, brand, quantity, and any printed best-by date
+- **Receipt import** — photograph a grocery receipt and every food line item is extracted and queued for review
+- **Barcode lookup** — scan barcodes via camera, a USB/wireless scanner, or manual entry; backed by Open Food Facts with optional AI cleanup for messy product names
+- **Expiry defaults** — an editable rules table fills in best-by dates automatically based on product type; all values are overridable before import
+- **Recipe suggestions** — "What Can I Cook?" ranks your recipes by how much of them you already have in stock; items expiring soon float to the top
+- **Recipe import** — import from any webpage, photograph a recipe card or handwritten note, browse TheMealDB, or have the AI write a recipe from scratch
+- **Meal planning and shopping lists** — optional [Mealie](https://mealie.io) integration with a week view, shopping list with check-off, and inventory-aware recipe suggestions
+- **Custom storage locations** — add buckets beyond the four built-ins (Wine Cellar, Garage Fridge, etc.) from the setup wizard
+- **Home Assistant integration** — REST sensors, notification automations, and a Lovelace dashboard with inventory panels
+- **Web setup wizard** — configure everything at `/setup` with live connection tests; no config file editing required
+- **Two-factor authentication** — optional TOTP (app-based 2FA) on top of password login; works offline with any authenticator app
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Inventory](docs/screenshots/inventory.png) | ![Add item / barcode scan](docs/screenshots/add.png) |
+| **Inventory** — stock grouped by storage, drag-to-move | **Add item** — barcode scan, photo analysis, manual entry |
+| ![Recipe suggestions](docs/screenshots/cook.png) | ![Meal plan](docs/screenshots/mealplan.png) |
+| **Cook** — recipes ranked by what's in stock | **Meal plan** — week view with Mealie integration |
+| ![Setup wizard](docs/screenshots/setup.png) | ![Expiring items](docs/screenshots/expiring.png) |
+| **Setup wizard** — configure providers and auth | **Expiring** — urgency-sorted view with HA sensor data |
 
 ## How AI works in this app
 
@@ -102,7 +122,7 @@ Startup is fully self-contained - no internet access is required to start or res
 
 ## Backup
 
-Download a zip of FoodAssistant's data at Settings > Security > Download Backup. API keys and passwords are stripped from the backup by default so it is safe to store off-box; tick "Include API keys & passwords" for a restore-complete copy you keep somewhere trusted.
+Download a zip of FoodAssistant's data at **Settings > Security > Download Backup**. API keys and passwords are stripped from the backup by default so it is safe to store off-box; tick "Include API keys & passwords" for a restore-complete copy you keep somewhere trusted.
 
 For a full backup including Grocy and Mealie data, run on the host:
 
@@ -110,11 +130,11 @@ For a full backup including Grocy and Mealie data, run on the host:
 ./scripts/backup.sh /path/to/backup-destination
 ```
 
-For automated cloud backup, configure an [rclone](https://rclone.org) remote in Settings > Security. Rclone supports S3, Backblaze B2, SFTP, Google Drive, Dropbox, and 40+ other backends.
+For automated cloud backup, configure an [rclone](https://rclone.org) remote in **Settings > Security**. Rclone supports S3, Backblaze B2, SFTP, Google Drive, Dropbox, and 40+ other backends.
 
 ## Home Assistant
 
-**Running Home Assistant OS or Supervised?** Install FoodAssistant as an add-on so it lives in the HA sidebar with no separate login - HA authenticates the UI through Ingress. In HA go to Settings > Add-ons > Add-on Store, open the menu, choose Repositories, and add `https://github.com/Syracuse3DPrinting/FoodAssistant`, then install FoodAssistant. Full instructions: [homeassistant/addon/foodassistant/DOCS.md](homeassistant/addon/foodassistant/DOCS.md).
+**Running Home Assistant OS or Supervised?** Install FoodAssistant as an add-on so it lives in the HA sidebar with no separate login - HA authenticates the UI through Ingress. In HA go to **Settings > Add-ons > Add-on Store**, open the menu, choose Repositories, and add `https://github.com/Syracuse3DPrinting/FoodAssistant`, then install FoodAssistant. Full instructions: [homeassistant/addon/foodassistant/DOCS.md](homeassistant/addon/foodassistant/DOCS.md).
 
 For a **standalone** install, see [homeassistant/README.md](homeassistant/README.md) for REST sensors, automations, and the Lovelace dashboard.
 
@@ -127,7 +147,7 @@ docker compose pull
 docker compose up -d
 ```
 
-Pin a specific version instead of latest by setting `FOODASSISTANT_TAG=v1.2.3` in `.env`.
+Pin a specific version instead of latest by setting `FOODASSISTANT_TAG=v1.1.0` in `.env`.
 
 **Home Assistant add-on:** update from the add-on page in Home Assistant when a new version is offered.
 
@@ -140,9 +160,7 @@ docker compose up -d --build service
 
 ### Upgrading pinned images
 
-The bundled backends (Grocy, Mealie, Ollama) are pinned to specific versions in
-the compose files rather than `:latest`, so an unattended `docker compose pull`
-can't silently move you onto a breaking release. Current pins:
+The bundled backends (Grocy, Mealie, Ollama) are pinned to specific versions in the compose files rather than `:latest`, so an unattended `docker compose pull` can't silently move you onto a breaking release. Current pins:
 
 | Service | Image | Tag |
 |---------|-------|-----|
@@ -150,18 +168,13 @@ can't silently move you onto a breaking release. Current pins:
 | Mealie  | `ghcr.io/mealie-recipes/mealie` | `v3.19.2` |
 | Ollama  | `ollama/ollama` | `0.30.8` |
 
-To move a backend to a newer version, **back up first** (`./scripts/backup.sh`
-plus the relevant `./grocy` / `./mealie` data dir), then bump the tag in
-`docker-compose.yml` (or `docker-compose.prod.yml`) and recreate just that
-service:
+To move a backend to a newer version, **back up first** (`./scripts/backup.sh` plus the relevant `./grocy` / `./mealie` data dir), then bump the tag in `docker-compose.yml` (or `docker-compose.prod.yml`) and recreate just that service:
 
 ```bash
 docker compose up -d grocy   # or mealie / ollama
 ```
 
-Check each project's release notes before a major bump - Mealie in particular
-has had breaking schema migrations between major versions. FoodAssistant's own
-image is versioned separately via `FOODASSISTANT_TAG` (see above).
+Check each project's release notes before a major bump - Mealie in particular has had breaking schema migrations between major versions. FoodAssistant's own image is versioned separately via `FOODASSISTANT_TAG` (see above).
 
 ## API Endpoints
 
