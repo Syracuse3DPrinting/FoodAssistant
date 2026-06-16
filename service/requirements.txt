@@ -1,15 +1,39 @@
+# Web framework and server (required)
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
+
+# Database ORM for SQLite inventory (required)
 sqlalchemy==2.0.35
+
+# Data validation and settings management (required)
 pydantic==2.9.2
 pydantic-settings==2.5.2
+
+# Async HTTP client - used for Grocy, Mealie, and cloud provider APIs (required)
 httpx==0.27.2
+
+# Form and file upload parsing for photo analysis endpoints (required)
 python-multipart==0.0.12
+
+# HTML templating engine for the web UI (required)
 jinja2==3.1.4
-google-generativeai==0.8.3
-anthropic>=0.45.0
+
+# AI vision providers (optional - install whichever providers you use)
+google-generativeai==0.8.3  # Gemini vision/enrichment provider
+anthropic>=0.45.0            # Anthropic Claude vision/enrichment provider
+# OpenAI is accessed via httpx directly - no SDK needed
+
+# Image resizing before sending to AI providers (required for photo analysis)
 Pillow==10.4.0
+
+# Flexible date parsing for expiry date extraction (required)
 python-dateutil==2.9.0
+
+# Signed session cookies for browser authentication (required)
 itsdangerous==2.2.0
+
+# TOTP two-factor authentication (required)
 pyotp==2.10.0
+
+# QR code generation for TOTP setup page (required)
 qrcode[pil]==8.2

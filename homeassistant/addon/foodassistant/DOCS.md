@@ -14,7 +14,7 @@ you through Ingress.
 
 ## Install
 
-1. In Home Assistant go to **Settings → Add-ons → Add-on Store**, open the
+1. In Home Assistant go to **Settings - Add-ons - Add-on Store**, open the
    three-dot menu, choose **Repositories**, and add:
    `https://github.com/Syracuse3DPrinting/FoodAssistant`
 2. Install **FoodAssistant** from the list and start it.
@@ -28,7 +28,7 @@ Everything is configured in the in-app setup wizard (it persists to the add-on's
 - **Grocy** - point it at your Grocy add-on. On the Supervisor network the
   community Grocy add-on is reachable at a hostname such as
   `http://a0d7b954-grocy:80` (check the Grocy add-on's "Hostname" on its info
-  page). Create an API key in Grocy under Profile → Manage API Keys.
+  page). Create an API key in Grocy under Profile - Manage API Keys.
 - **AI provider** - optional. On low-power HA hardware (Raspberry Pi, HA Green),
   a local vision model is impractical, so use a cloud key (Gemini has a free
   tier) or leave AI off and enter items manually. Photo/receipt/barcode-cleanup
@@ -37,11 +37,34 @@ Everything is configured in the in-app setup wizard (it persists to the add-on's
 Because Home Assistant secures the Ingress UI, the app's own password is **off
 by default** in the add-on. You will not be asked to log in twice.
 
+## Mealie (optional)
+
+Mealie adds recipe management, meal planning, and shopping lists. You can use
+any running Mealie instance - a separate Docker container, another server, or
+the community Mealie add-on.
+
+**Using the community Mealie add-on:**
+
+1. Install the Mealie add-on from the add-on store and start it.
+2. In FoodAssistant's setup wizard under **Recipes & Meal Plan**:
+   - **Mealie URL (LAN):** the Supervisor network address, e.g.
+     `http://mealie:9000` (check the Mealie add-on info page for the hostname)
+   - **Mealie URL (public):** leave blank to use the same URL, or enter
+     your Mealie add-on's Ingress URL for browser links
+   - **Mealie API token:** create one in Mealie under User Settings - API Tokens
+3. Save and the Recipes, Meal Plan, and Shopping List tabs will appear.
+
+**Using an external Mealie instance:**
+
+Enter the full URL (e.g. `http://192.168.1.10:9000`) and API token in the same
+fields. The "public" URL field is useful when the LAN address differs from what
+your browser uses (e.g. you access Mealie through a reverse proxy).
+
 ## Optional: direct LAN access for REST sensors
 
 The `homeassistant/` folder in the project ships REST sensors, automations, and
-a Lovelace dashboard for a **standalone** install. Those make HTTP calls to a
-fixed URL, which Ingress does not provide. If you want them with the add-on:
+a Lovelace dashboard. Those make HTTP calls to a fixed URL, which Ingress does
+not provide. If you want them with the add-on:
 
 1. Open the add-on **Network** tab and map port `8000` to a host port
    (e.g. `9284`).
@@ -53,6 +76,6 @@ If you only use the sidebar UI, leave the port unmapped (the secure default).
 
 ## Backups
 
-Use **Settings → Security → Download Backup** in the app, or the rclone remote
+Use **Settings - Security - Download Backup** in the app, or the rclone remote
 push, for the app's data. Home Assistant's own add-on backups also capture the
 add-on's `/data` directory.
