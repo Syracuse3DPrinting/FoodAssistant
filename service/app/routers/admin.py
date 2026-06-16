@@ -32,27 +32,38 @@ async def version():
     return {"version": APP_VERSION}
 
 
+def _is_version_tag(name: str) -> bool:
+    """Looks like a version tag, e.g. v1.0.0 or 1.2."""
+    body = name.lstrip("vV")
+    return bool(body) and body[0].isdigit()
+
+
 @router.get("/check-update")
 async def check_update():
-    """Compare the running version with the latest GitHub release.
+    """Compare the running version with the highest version tag on GitHub.
 
-    Makes one outbound call to the GitHub API; returns gracefully offline.
+    Uses the tags API, so a bare git tag is enough (no published Release
+    required). Makes one outbound call; returns gracefully offline. The repo
+    must be public for the unauthenticated call to succeed.
     """
     import httpx
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/tags"
     try:
         async with httpx.AsyncClient(timeout=6.0) as client:
-            r = await client.get(url, headers={"Accept": "application/vnd.github+json"})
+            r = await client.get(url, headers={"Accept": "application/vnd.github+json"},
+                                 params={"per_page": 100})
         if r.status_code != 200:
+            hint = " (private repo or no tags yet)" if r.status_code == 404 else ""
             return {"ok": False, "current": APP_VERSION,
-                    "error": f"GitHub returned HTTP {r.status_code}."}
-        latest = (r.json().get("tag_name") or "").strip()
-        if not latest:
-            return {"ok": False, "current": APP_VERSION, "error": "No releases found yet."}
+                    "error": f"GitHub returned HTTP {r.status_code}{hint}."}
+        tags = [t.get("name", "") for t in r.json() if _is_version_tag(t.get("name", ""))]
+        if not tags:
+            return {"ok": False, "current": APP_VERSION, "error": "No version tags found yet."}
+        latest = max(tags, key=_normalize)  # tags API isn't semver-sorted; pick the highest
         update = _normalize(latest) > _normalize(APP_VERSION)
         return {"ok": True, "current": APP_VERSION, "latest": latest,
                 "update_available": update,
-                "release_url": r.json().get("html_url")}
+                "release_url": f"https://github.com/{GITHUB_REPO}/releases/tag/{latest}"}
     except Exception as e:
         return {"ok": False, "current": APP_VERSION,
                 "error": f"Could not reach GitHub ({e.__class__.__name__})."}
