@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 from contextlib import asynccontextmanager
 
-from .config import settings
+from .config import settings, APP_VERSION
 from .database import engine, get_db, Base
 from .ingress import ingress_redirect
 from .models import db_models  # noqa: F401 — registers models with Base
@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="FoodAssistant",
     description="Food spoilage tracker with LLM-powered photo import and Grocy integration",
-    version="0.1.0",
+    version=APP_VERSION,
     lifespan=lifespan,
 )
 

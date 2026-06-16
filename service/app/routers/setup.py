@@ -3,7 +3,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-from ..config import settings
+from ..config import settings, APP_VERSION
 from ..dependencies import reset_providers
 from ..navigation import all_tabs
 from ..templating import templates
@@ -97,6 +97,7 @@ async def setup_page(request: Request):
         # booleans only — never the stored secrets themselves
         "has": {f: bool(getattr(settings, f, "")) for f in _SECRET_FIELDS},
         "tabs": all_tabs(),
+        "version": APP_VERSION,
     })
 
 

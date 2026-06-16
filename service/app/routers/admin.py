@@ -10,10 +10,52 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from ..config import settings, SECRET_SETTING_KEYS
+from ..config import settings, SECRET_SETTING_KEYS, APP_VERSION, GITHUB_REPO
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 logger = logging.getLogger(__name__)
+
+
+def _normalize(v: str) -> tuple:
+    """Turn a version string like 'v1.2.3' into a comparable tuple (1, 2, 3)."""
+    parts = v.lstrip("vV").split(".")
+    out = []
+    for p in parts:
+        num = "".join(c for c in p if c.isdigit())
+        out.append(int(num) if num else 0)
+    return tuple(out)
+
+
+@router.get("/version")
+async def version():
+    """Current running version (no network call)."""
+    return {"version": APP_VERSION}
+
+
+@router.get("/check-update")
+async def check_update():
+    """Compare the running version with the latest GitHub release.
+
+    Makes one outbound call to the GitHub API; returns gracefully offline.
+    """
+    import httpx
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+    try:
+        async with httpx.AsyncClient(timeout=6.0) as client:
+            r = await client.get(url, headers={"Accept": "application/vnd.github+json"})
+        if r.status_code != 200:
+            return {"ok": False, "current": APP_VERSION,
+                    "error": f"GitHub returned HTTP {r.status_code}."}
+        latest = (r.json().get("tag_name") or "").strip()
+        if not latest:
+            return {"ok": False, "current": APP_VERSION, "error": "No releases found yet."}
+        update = _normalize(latest) > _normalize(APP_VERSION)
+        return {"ok": True, "current": APP_VERSION, "latest": latest,
+                "update_available": update,
+                "release_url": r.json().get("html_url")}
+    except Exception as e:
+        return {"ok": False, "current": APP_VERSION,
+                "error": f"Could not reach GitHub ({e.__class__.__name__})."}
 
 
 @router.get("/backup")

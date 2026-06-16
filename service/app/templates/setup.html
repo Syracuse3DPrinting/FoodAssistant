@@ -445,6 +445,27 @@
           </div>
 
           <div class="section-card">
+            <div class="section-title"><i class="bi bi-arrow-repeat text-success"></i> Updates
+              <span class="badge bg-secondary">v{{ version }}</span></div>
+            <p class="text-secondary small">FoodAssistant can't update itself from the browser (that would
+              need Docker access from inside the container). Check for a new release here, then run the
+              matching command.</p>
+            <button class="btn btn-outline-info btn-sm" onclick="checkUpdate(this)">
+              <i class="bi bi-cloud-arrow-down me-1"></i>Check for updates
+            </button>
+            <div class="test-result" id="update-result"></div>
+            <div class="mt-3">
+              <div class="small text-secondary mb-1"><strong>Docker (prebuilt image):</strong></div>
+              <pre class="bg-dark border rounded p-2 small mb-2"><code>docker compose pull
+docker compose up -d</code></pre>
+              <div class="small text-secondary mb-1"><strong>Home Assistant add-on:</strong> update from the
+                add-on page when a new version is offered.</div>
+              <div class="small text-secondary"><strong>Built from source:</strong>
+                <code>git pull &amp;&amp; docker compose up -d --build service</code></div>
+            </div>
+          </div>
+
+          <div class="section-card">
             <div class="section-title"><i class="bi bi-info-circle text-secondary"></i> How secrets are stored</div>
             <ul class="small text-secondary mb-0">
               <li>Saved keys are never sent back to the browser — fields show a placeholder instead.</li>
@@ -486,6 +507,32 @@ function syncBackupLink() {
   const inc = document.getElementById('backup_include_secrets')?.checked;
   const a = document.getElementById('download-backup');
   if (a) a.href = 'admin/backup' + (inc ? '?include_secrets=true' : '');
+}
+
+async function checkUpdate(btn) {
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Checking…';
+  const el = document.getElementById('update-result');
+  try {
+    const r = await fetch('admin/check-update');
+    const d = await r.json();
+    if (!d.ok) {
+      el.innerHTML = '<span class="text-secondary"><i class="bi bi-dash-circle me-1"></i>' +
+        (d.error || 'Update check unavailable') + ' (running v' + d.current + ').</span>';
+    } else if (d.update_available) {
+      el.innerHTML = '<span class="text-warning"><i class="bi bi-exclamation-circle-fill me-1"></i>' +
+        'Update available: <strong>' + d.latest + '</strong> (you have v' + d.current + '). ' +
+        '<a href="' + (d.release_url || '#') + '" target="_blank">Release notes</a> — then run a command below.</span>';
+    } else {
+      el.innerHTML = '<span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>' +
+        'You are on the latest version (v' + d.current + ').</span>';
+    }
+  } catch (e) {
+    el.innerHTML = '<span class="text-secondary">Update check failed.</span>';
+  }
+  btn.disabled = false;
+  btn.innerHTML = orig;
 }
 
 function clearSecret(id) {

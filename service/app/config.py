@@ -3,6 +3,13 @@ import secrets as _secrets
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Single source of truth for the app version (shown in the UI, used by the
+# update checker, and reported by FastAPI). Bump on each tagged release.
+APP_VERSION = "1.0.0"
+
+# GitHub repo used by the in-app update checker.
+GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
+
 _SAVEABLE = [
     "vision_provider", "gemini_api_key", "gemini_model",
     "ollama_base_url", "ollama_model",
