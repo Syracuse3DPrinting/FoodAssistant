@@ -8,7 +8,7 @@ _SAVEABLE = [
     "ollama_base_url", "ollama_model",
     "openai_api_key", "openai_model",
     "anthropic_api_key", "anthropic_model",
-    "barcode_enrichment", "enrich_provider", "enrich_model",
+    "barcode_enrichment", "barcode_llm_fallback", "enrich_provider", "enrich_model",
     "grocy_base_url", "grocy_api_key",
     "mealie_base_url", "mealie_api_key", "mealie_public_url",
     "recipe_source", "themealdb_api_key", "spoonacular_api_key",
@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     # Barcode-scan enrichment: "llm" cleans up name/category/storage/shelf-life
     # via the LLM; "off" uses Open Food Facts heuristics only.
     barcode_enrichment: str = "llm"
+    # When a barcode is not found in Open Food Facts, try the LLM to identify
+    # the product by barcode/UPC number. Results are low-confidence guesses
+    # for rare or regional products. Default off — enable when enrichment is on.
+    barcode_llm_fallback: bool = False
     # Which provider enriches scans: gemini | ollama | openai | anthropic, or
     # "" to follow vision_provider. Set to "ollama" (or VISION_PROVIDER=ollama)
     # for a fully local pipeline.

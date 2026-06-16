@@ -190,6 +190,18 @@
               </select>
             </div>
             <div class="mb-3">
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="barcode_llm_fallback"
+                       {{ 'checked' if s.barcode_llm_fallback else '' }}>
+                <label class="form-check-label" for="barcode_llm_fallback">
+                  LLM fallback for unknown barcodes
+                </label>
+              </div>
+              <div class="form-text">When a barcode isn't in Open Food Facts, ask the AI to identify it
+                by barcode number. Results are low-confidence guesses — the item goes to the pending
+                queue for review. Only useful with LLM enrichment enabled.</div>
+            </div>
+            <div class="mb-3">
               <label class="form-label">Provider Override <span class="text-secondary small">(optional)</span></label>
               <select class="form-select" id="enrich_provider">
                 <option value="" {{ 'selected' if not s.enrich_provider else '' }}>Same as vision provider</option>
@@ -325,6 +337,17 @@
 
         <!-- ════ Security ════ -->
         <div class="tab-pane fade" id="pane-security">
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-archive text-success"></i> Backup &amp; Restore</div>
+            <p class="text-secondary small">Downloads a zip of FoodAssistant's data directory
+              (settings, database, staples list). Grocy and Mealie data live in separate
+              containers — use <code>scripts/backup.sh</code> on the host to capture everything,
+              or integrate with <a href="https://rclone.org" target="_blank">Rclone</a> for cloud storage.</p>
+            <a href="/admin/backup" class="btn btn-outline-info btn-sm" download>
+              <i class="bi bi-download me-1"></i>Download Backup
+            </a>
+          </div>
+
           <div class="section-card">
             <div class="section-title"><i class="bi bi-shield-lock text-success"></i> Authentication
               <span class="badge bg-secondary badge-req">Optional</span></div>
@@ -515,6 +538,7 @@ async function saveAll() {
     anthropic_api_key: secretVal('anthropic_api_key'),
     anthropic_model: val('anthropic_model') || 'claude-opus-4-8',
     barcode_enrichment: val('barcode_enrichment') || 'llm',
+    barcode_llm_fallback: document.getElementById('barcode_llm_fallback').checked,
     enrich_provider: val('enrich_provider'),
     enrich_model:    val('enrich_model'),
     grocy_base_url:  val('grocy_base_url'),

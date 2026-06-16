@@ -105,6 +105,11 @@ async def lookup_barcode(barcode: str, db: Session) -> FoodItem:
         raise BarcodeServiceError("Open Food Facts unavailable")
     data = r.json()
     if data.get("status") != 1:
+        # OFF didn't recognise this barcode — optionally try the LLM
+        if settings.barcode_llm_fallback:
+            item = await _llm_identify_barcode(barcode)
+            if item:
+                return apply_defaults(item, db, infer_storage=False)
         raise BarcodeNotFound(f"Barcode {barcode} not found in Open Food Facts")
 
     product = data["product"]
@@ -143,6 +148,66 @@ async def lookup_barcode(barcode: str, db: Session) -> FoodItem:
     tag_text = " ".join(tags).replace("-", " ")
     return apply_defaults(item, db, extra_match_text=f"{generic} {tag_text}",
                           infer_storage=not enriched)
+
+
+_BARCODE_IDENTIFY_PROMPT = """
+A product with barcode/UPC "{barcode}" was not found in the Open Food Facts database.
+Based on your training knowledge, what product might have this barcode?
+Return a JSON object:
+{{
+  "name": "specific product name with brand, e.g. 'Heinz Tomato Ketchup', or null if unknown",
+  "brand": "brand name or null",
+  "category": "Poultry | Meat | Seafood | Dairy | Produce | Grains | Condiments | Beverages | Snacks | Frozen | Canned | Other",
+  "storage_type": "refrigerated | frozen | room_temp | dry",
+  "shelf_life_days": 365
+}}
+If you don't recognise this barcode, set "name" to null.
+Return ONLY valid JSON. No markdown, no explanation.
+""".strip()
+
+
+async def _llm_identify_barcode(barcode: str) -> FoodItem | None:
+    """Ask the LLM to identify a barcode not found in Open Food Facts.
+
+    Passes the barcode as product data so the existing enrich_product path
+    handles it. Returns a low-confidence FoodItem or None if unrecognised.
+    """
+    try:
+        from ..dependencies import get_enrich_provider
+        provider = get_enrich_provider()
+        result = await provider.enrich_product({
+            "barcode": barcode,
+            "product_name": f"UNKNOWN — barcode {barcode} not in Open Food Facts database",
+            "note": "Identify this product by its UPC/EAN barcode if you recognise it. "
+                    "Return your best guess; leave name as-is if completely unknown.",
+        })
+    except Exception as e:
+        logger.warning("LLM barcode identification failed for %s: %s", barcode, e)
+        return None
+    if not isinstance(result, dict) or not result.get("name"):
+        return None
+    item = FoodItem(
+        name=str(result["name"]).strip(),
+        quantity=1.0,
+        unit="item",
+        brand=result.get("brand") or None,
+        confidence=0.35,
+    )
+    try:
+        item.category = FoodCategory(result.get("category"))
+    except (ValueError, TypeError):
+        pass
+    try:
+        item.storage_type = StorageType(result.get("storage_type"))
+    except (ValueError, TypeError):
+        pass
+    try:
+        days = int(result.get("shelf_life_days"))
+        if 0 < days <= 3650:
+            item.best_by_date = date.today() + timedelta(days=days)
+    except (ValueError, TypeError):
+        pass
+    return item
 
 
 async def _llm_enrich(item: FoodItem, product: dict, generic: str, tags: list[str]) -> bool:

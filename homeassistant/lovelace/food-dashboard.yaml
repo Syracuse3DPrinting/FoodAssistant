@@ -37,7 +37,7 @@ views:
             color: purple
             tap_action:
               action: url
-              url_path: https://fass.korolev.link/ui/pending
+              url_path: http://YOUR_HOST:9284/ui/pending
           - type: tile
             entity: sensor.shopping_list_items
             name: Shopping List
@@ -45,7 +45,7 @@ views:
             color: teal
             tap_action:
               action: url
-              url_path: https://fass.korolev.link/ui/shopping
+              url_path: http://YOUR_HOST:9284/ui/shopping
           - type: tile
             entity: sensor.meal_plan_today
             name: Meals Today
@@ -53,7 +53,7 @@ views:
             color: blue
             tap_action:
               action: url
-              url_path: https://fass.korolev.link/ui/mealplan
+              url_path: http://YOUR_HOST:9284/ui/mealplan
 
       # ── Alerts (only shows when something needs attention) ──────────────────
       - type: conditional
@@ -192,35 +192,35 @@ views:
             icon_height: 44px
             tap_action:
               action: url
-              url_path: https://fass.korolev.link/ui/add
+              url_path: http://YOUR_HOST:9284/ui/add
           - type: button
             name: Inventory
             icon: mdi:view-grid-outline
             icon_height: 44px
             tap_action:
               action: url
-              url_path: https://fass.korolev.link/ui/inventory
+              url_path: http://YOUR_HOST:9284/ui/inventory
           - type: button
             name: Expiring Items
             icon: mdi:clock-alert-outline
             icon_height: 44px
             tap_action:
               action: url
-              url_path: https://fass.korolev.link/ui/expiring
+              url_path: http://YOUR_HOST:9284/ui/expiring
           - type: button
             name: Expiry Defaults
             icon: mdi:table-edit
             icon_height: 44px
             tap_action:
               action: url
-              url_path: https://fass.korolev.link/ui/defaults
+              url_path: http://YOUR_HOST:9284/ui/defaults
           - type: button
             name: Pending Scans
             icon: mdi:barcode-scan
             icon_height: 44px
             tap_action:
               action: url
-              url_path: https://fass.korolev.link/ui/pending
+              url_path: http://YOUR_HOST:9284/ui/pending
           - type: button
             name: Grocy Stock
             icon: mdi:fridge

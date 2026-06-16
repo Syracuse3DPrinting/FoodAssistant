@@ -4,7 +4,7 @@ services:
     container_name: foodassistant-service
     env_file: .env
     environment:
-      - TZ=America/New_York
+      - TZ=${TZ:-America/New_York}
     volumes:
       - ./service/app:/app/app
       - ./service/data:/app/data
@@ -27,7 +27,7 @@ services:
     environment:
       - PUID=1000
       - PGID=1000
-      - TZ=America/New_York
+      - TZ=${TZ:-America/New_York}
     volumes:
       - ./grocy/config:/config
     ports:
@@ -44,7 +44,7 @@ services:
     container_name: foodassistant-mealie
     profiles: ["with-mealie"]
     environment:
-      - TZ=America/New_York
+      - TZ=${TZ:-America/New_York}
       - ALLOW_SIGNUP=false
       - BASE_URL=http://localhost:9285
     volumes:

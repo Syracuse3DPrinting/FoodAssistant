@@ -10,7 +10,7 @@ from .config import settings
 from .database import engine, get_db, Base
 from .models import db_models  # noqa: F401 — registers models with Base
 from .services.defaults import seed_defaults
-from .routers import analyze, defaults, inventory, expiring, ui, setup, pending, mealie
+from .routers import analyze, defaults, inventory, expiring, ui, setup, pending, mealie, admin
 
 
 @asynccontextmanager
@@ -91,6 +91,7 @@ from fastapi.staticfiles import StaticFiles
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 app.include_router(setup.router)
+app.include_router(admin.router)
 app.include_router(pending.router)
 app.include_router(mealie.router)
 app.include_router(analyze.router)

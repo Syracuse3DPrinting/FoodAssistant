@@ -135,7 +135,7 @@ Already included in this repo's `configuration.yaml`:
 ```yaml
 rest_command:
   foodassistant_scan:
-    url: http://192.168.1.170:9284/pending/scan
+    url: http://YOUR_HOST:9284/pending/scan
     method: POST
     content_type: "application/json"
     # Required if FoodAssistant has API_KEY set — without it the POST is
@@ -232,7 +232,7 @@ actions:
           message: >-
             Scanned item queued — {{ states('sensor.food_pending_scans') }} pending review.
           data:
-            url: https://fass.korolev.link/ui/pending
+            url: http://YOUR_HOST:9284/ui/pending
 ```
 
 ## ESP32 alternative
@@ -250,7 +250,7 @@ pantry), an ESP32 can host the scanner instead. Two options:
 Either way the ESP32 just needs to send:
 
 ```
-POST http://192.168.1.170:9284/pending/scan
+POST http://YOUR_HOST:9284/pending/scan
 Content-Type: application/json
 X-API-Key: <your key, if auth enabled>
 
@@ -260,7 +260,7 @@ X-API-Key: <your key, if auth enabled>
 ## Testing without a scanner
 
 ```bash
-curl -s -X POST http://192.168.1.170:9284/pending/scan \
+curl -s -X POST http://YOUR_HOST:9284/pending/scan \
   -H "Content-Type: application/json" \
   -H "X-API-Key: YOUR_KEY" \
   -d '{"barcode": "049000028935", "source": "manual"}'
