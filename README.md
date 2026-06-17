@@ -198,6 +198,10 @@ Check each project's release notes before a major bump - Mealie in particular ha
 
 Full interactive API docs at `/docs`.
 
+## Changelog
+
+Release notes are in [CHANGELOG.md](CHANGELOG.md).
+
 ## License
 
 [PolyForm Noncommercial 1.0](LICENSE) - free for personal, hobby, educational, and non-commercial use. Contact for commercial licensing.
