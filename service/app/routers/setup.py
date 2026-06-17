@@ -46,6 +46,7 @@ class SetupPayload(BaseModel):
     enrich_model: str = ""
     grocy_base_url: str = ""
     grocy_api_key: str = ""
+    grocy_public_url: str = ""
     mealie_base_url: str = ""
     mealie_api_key: str = ""
     mealie_public_url: str = ""
@@ -59,6 +60,7 @@ class SetupPayload(BaseModel):
     nav_order: str = ""
     nav_hidden: str = ""
     barcode_llm_fallback: bool = False
+    barcode_autocheck_shopping: bool = False
     cook_ai_context: str = ""
     auth_required: bool = True
     auth_password: str = ""

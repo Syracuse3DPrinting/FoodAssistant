@@ -74,6 +74,7 @@ async def inventory_page(request: Request):
         # Movable categories (built-in + custom) and the always-on "other" panel
         "categories": categories,
         "panels": categories + [{**OTHER, "custom": False}],
+        "grocy_url": settings.grocy_link_url(),
     })
 
 

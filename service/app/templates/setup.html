@@ -107,6 +107,13 @@
               <label class="form-label">Grocy API Key</label>
               {{ secret_input('grocy_api_key', 'Grocy → Profile → Manage API Keys') }}
             </div>
+            <div class="mb-3">
+              <label class="form-label">Grocy Public URL <span class="text-secondary small">(optional — for browser links via reverse proxy)</span></label>
+              <input type="url" class="form-control" id="grocy_public_url" name="grocy_public_url"
+                     placeholder="https://grocy.yourdomain.com"
+                     value="{{ s.grocy_public_url }}">
+              <div class="form-text">External address used when the UI links you to Grocy. Empty = internal URL.</div>
+            </div>
             <button class="btn btn-outline-info btn-sm" onclick="testGrocy()">
               <i class="bi bi-plug me-1"></i>Test Connection
             </button>
@@ -253,6 +260,12 @@
               <i class="bi bi-plug me-1"></i>Test Connection
             </button>
             <div class="test-result" id="mealie-result"></div>
+            <div class="form-check form-switch mt-2">
+              <input class="form-check-input" type="checkbox" id="barcode_autocheck_shopping" {% if s.barcode_autocheck_shopping %}checked{% endif %}>
+              <label class="form-check-label" for="barcode_autocheck_shopping">
+                Auto-check Mealie shopping list when item is scanned and committed
+              </label>
+            </div>
           </div>
 
           <div class="section-card">
@@ -787,10 +800,12 @@ async function saveAll() {
     anthropic_model: val('anthropic_model') || 'claude-opus-4-8',
     barcode_enrichment: val('barcode_enrichment') || 'llm',
     barcode_llm_fallback: document.getElementById('barcode_llm_fallback').checked,
+    barcode_autocheck_shopping: document.getElementById('barcode_autocheck_shopping').checked,
     enrich_provider: val('enrich_provider'),
     enrich_model:    val('enrich_model'),
     grocy_base_url:  val('grocy_base_url'),
     grocy_api_key:   secretVal('grocy_api_key'),
+    grocy_public_url: val('grocy_public_url'),
     mealie_base_url: val('mealie_base_url'),
     mealie_api_key:  secretVal('mealie_api_key'),
     mealie_public_url: val('mealie_public_url'),

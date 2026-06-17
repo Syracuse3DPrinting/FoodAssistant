@@ -15,8 +15,8 @@ _SAVEABLE = [
     "ollama_base_url", "ollama_model",
     "openai_api_key", "openai_model",
     "anthropic_api_key", "anthropic_model",
-    "barcode_enrichment", "barcode_llm_fallback", "enrich_provider", "enrich_model",
-    "grocy_base_url", "grocy_api_key",
+    "barcode_enrichment", "barcode_llm_fallback", "barcode_autocheck_shopping", "enrich_provider", "enrich_model",
+    "grocy_base_url", "grocy_api_key", "grocy_public_url",
     "mealie_base_url", "mealie_api_key", "mealie_public_url",
     "recipe_source", "themealdb_api_key", "spoonacular_api_key",
     "staple_items", "cook_ai_context", "perishable_days", "expiring_soon_days", "suggest_per_tier",
@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     # the product by barcode/UPC number. Results are low-confidence guesses
     # for rare or regional products. Default off — enable when enrichment is on.
     barcode_llm_fallback: bool = False
+    # When an item is committed to Grocy and Mealie is configured, auto-check
+    # any matching unchecked Mealie shopping-list items (token-matched by name).
+    barcode_autocheck_shopping: bool = False
     # Which provider enriches scans: gemini | ollama | openai | anthropic, or
     # "" to follow vision_provider. Set to "ollama" (or VISION_PROVIDER=ollama)
     # for a fully local pipeline.
@@ -70,6 +73,12 @@ class Settings(BaseSettings):
 
     grocy_base_url: str = _DEFAULT_GROCY_URL
     grocy_api_key: str = ""
+    # Browser-facing Grocy URL (reverse-proxy / public address). Empty = use base URL.
+    grocy_public_url: str = ""
+
+    def grocy_link_url(self) -> str:
+        """URL for browser-facing Grocy links (public address if set, else base)."""
+        return (self.grocy_public_url or self.grocy_base_url).rstrip("/")
 
     # Mealie recipe manager (optional) — enables the Recipes, Meal Plan and
     # Shopping List pages. base_url is for API calls (LAN/docker address);
