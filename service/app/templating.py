@@ -1,10 +1,33 @@
 """Shared Jinja2 environment so base.html globals work on every page."""
+from fastapi import Request
 from fastapi.templating import Jinja2Templates
 
+from .config import settings, theme_info
 from .ingress import template_globals
 from .navigation import visible_tabs
 
-# context_processors run per request, so ingress_path reflects the live header
-templates = Jinja2Templates(directory="app/templates", context_processors=[template_globals])
+
+def theme_context(request: Request) -> dict:
+    """Context processor: expose the current UI theme to every render.
+
+    ``ui_theme``      — the selected theme key (for the setup <select>).
+    ``theme_mode``    — "light"/"dark" for the <html data-bs-theme> attribute.
+    ``theme_css``     — a vendored Bootswatch stylesheet href, or None to use
+                        the default Bootstrap CSS. Resolved per request so a
+                        settings change applies on the next page load.
+    """
+    info = theme_info(settings.ui_theme)
+    return {
+        "ui_theme": settings.ui_theme,
+        "theme_mode": info["mode"],
+        "theme_css": info["stylesheet"],
+    }
+
+
+# context_processors run per request, so ingress_path/theme reflect live state
+templates = Jinja2Templates(
+    directory="app/templates",
+    context_processors=[template_globals, theme_context],
+)
 # Called per render, so nav reflects settings changes without a restart
 templates.env.globals["nav_tabs"] = visible_tabs

@@ -10,6 +10,27 @@ APP_VERSION = "1.2.0"
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
 
+# UI themes. Each entry carries the Bootstrap 5.3 colour mode (data-bs-theme)
+# and an optional vendored Bootswatch stylesheet served from /static. When
+# "stylesheet" is None the default Bootstrap CSS is used (native light/dark).
+# Bootswatch files are vendored locally (no CDN) under static/vendor/themes/.
+THEMES = {
+    "dark":   {"label": "Dark (default)", "mode": "dark",  "stylesheet": None},
+    "light":  {"label": "Light",          "mode": "light", "stylesheet": None},
+    "darkly": {"label": "Darkly (fun, dark)",  "mode": "dark",
+               "stylesheet": "static/vendor/themes/darkly.min.css"},
+    "cyborg": {"label": "Cyborg (fun, dark)",  "mode": "dark",
+               "stylesheet": "static/vendor/themes/cyborg.min.css"},
+    "flatly": {"label": "Flatly (fun, light)", "mode": "light",
+               "stylesheet": "static/vendor/themes/flatly.min.css"},
+}
+_DEFAULT_THEME = "dark"
+
+
+def theme_info(name: str) -> dict:
+    """Resolve a theme name to its descriptor, falling back to the default."""
+    return THEMES.get(name, THEMES[_DEFAULT_THEME])
+
 _SAVEABLE = [
     "vision_provider", "gemini_api_key", "gemini_model",
     "ollama_base_url", "ollama_model",
@@ -20,7 +41,7 @@ _SAVEABLE = [
     "mealie_base_url", "mealie_api_key", "mealie_public_url",
     "recipe_source", "themealdb_api_key", "spoonacular_api_key",
     "staple_items", "cook_ai_context", "perishable_days", "expiring_soon_days", "suggest_per_tier",
-    "nav_order", "nav_hidden", "custom_storage_categories",
+    "nav_order", "nav_hidden", "custom_storage_categories", "ui_theme",
     "secret_key", "auth_password", "totp_secret", "api_key", "auth_required",
     "rclone_remote", "rclone_schedule_hours",
 ]
@@ -114,6 +135,9 @@ class Settings(BaseSettings):
     nav_order: str = ""
     nav_hidden: str = ""
 
+    # UI colour theme. One of the keys in THEMES (dark | light | bootswatch).
+    ui_theme: str = _DEFAULT_THEME
+
     # User-defined storage categories beyond the four built-ins. Each is a
     # dict {key,label,icon,color,bg,location,match}. See storage_categories.py.
     custom_storage_categories: list = []
@@ -169,6 +193,9 @@ class Settings(BaseSettings):
                 existing = json.loads(sf.read_text())
             except Exception:
                 pass
+        # Reject an unknown theme rather than persisting a broken value.
+        if data.get("ui_theme") is not None and data["ui_theme"] not in THEMES:
+            data["ui_theme"] = _DEFAULT_THEME
         existing.update({k: v for k, v in data.items() if k in _SAVEABLE and v is not None})
         sf.write_text(json.dumps(existing, indent=2))
         sf.chmod(0o600)  # settings.json holds API keys — owner-only

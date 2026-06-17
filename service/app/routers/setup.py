@@ -3,7 +3,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-from ..config import settings, APP_VERSION
+from ..config import settings, APP_VERSION, THEMES, _DEFAULT_THEME
 from ..dependencies import reset_providers
 from ..navigation import all_tabs
 from ..storage_categories import custom_categories, _normalize_custom, storable
@@ -59,6 +59,7 @@ class SetupPayload(BaseModel):
     suggest_per_tier: int = 8
     nav_order: str = ""
     nav_hidden: str = ""
+    ui_theme: str = _DEFAULT_THEME
     barcode_llm_fallback: bool = False
     barcode_autocheck_shopping: bool = False
     cook_ai_context: str = ""
@@ -102,6 +103,7 @@ async def setup_page(request: Request):
         "tabs": all_tabs(),
         "version": APP_VERSION,
         "custom_categories": custom_categories(),
+        "themes": THEMES,
     })
 
 
