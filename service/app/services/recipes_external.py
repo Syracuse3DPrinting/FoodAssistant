@@ -17,8 +17,65 @@ import time
 import httpx
 
 from ..config import settings
+from .mealie import _PHRASE_MODIFIERS, _STOP_WORDS
 
 _client = httpx.AsyncClient(timeout=15.0)
+
+
+# ── Ingredient-name normalization ──────────────────────────────────────────────
+#
+# Grocy stock names are branded / sized / descriptor-laden ("Baby Spinach",
+# "Chicken Breast 1lb", "Organic Whole Milk"). External catalogs (TheMealDB's
+# filter.php especially) only match canonical single-ingredient terms, so we
+# reduce a stock name to its core ingredient word(s) first.
+#
+# Reuses the descriptor/stop-word sets already maintained in mealie.py and
+# extends them with brand/size/packaging words specific to retail product names.
+_NOISE_WORDS = (
+    _STOP_WORDS
+    | _PHRASE_MODIFIERS
+    | {
+        # quality / marketing descriptors
+        "organic", "natural", "premium", "free", "range", "grass", "fed",
+        "raw", "lean", "baby", "mini", "jumbo", "value", "family", "size",
+        "sized", "select", "choice", "grade", "all", "purpose", "pure",
+        "skinless", "boneless", "skin", "bone", "in", "on", "reduced", "low",
+        "fat", "nonfat", "skim", "light", "lite", "thick", "thin", "cut",
+        "cuts", "style", "homestyle", "classic", "original", "deluxe",
+        # packaging / quantity words
+        "pack", "packs", "packet", "carton", "tub", "tin", "tray", "loaf",
+        "bunch", "head", "stick", "sticks", "fillet", "fillets", "boneless",
+        "count", "ct", "ea", "each", "qty", "approx",
+        # units (single-letter handled by length filter)
+        "kg", "mg", "lbs", "pound", "pounds", "ounce", "ounces", "fl",
+        "liter", "litre", "liters", "litres", "quart", "quarts", "pint",
+        "pints", "gallon", "dozen",
+    }
+)
+
+
+def _core_ingredient(name: str) -> str:
+    """Reduce a Grocy stock name to its core ingredient term(s).
+
+    Strips brand/size/descriptor/packaging words, units, and embedded
+    quantities ("1lb", "500g", "2 x"), then drops trailing noise so a name
+    like "Boneless Skinless Chicken Thighs" -> "chicken thighs".
+
+    Pure and deterministic — returns a space-separated lowercase string
+    (possibly empty if every token was noise). Callers convert spaces to
+    underscores for TheMealDB's filter taxonomy.
+    """
+    text = (name or "").lower()
+    # drop embedded quantities glued to units: "1lb", "500g", "12oz"
+    text = re.sub(r"\b\d+(?:\.\d+)?\s*[a-z]+\b", " ", text)
+    # drop bare numbers and the multiplier "x"
+    text = re.sub(r"\b\d+(?:\.\d+)?\b", " ", text)
+    words = re.findall(r"[a-z]+", text)
+    core = [
+        w for w in words
+        if len(w) >= 3 and w not in _NOISE_WORDS and w != "x"
+    ]
+    return " ".join(core)
 
 # (source, query/id) keyed caches, expired together
 _search_cache: dict[tuple, list[str]] = {}
@@ -122,7 +179,15 @@ async def _mealdb_search_name(query: str, limit: int) -> list[dict]:
 
 
 async def _mealdb_find(ingredients: list[str], limit: int) -> list[dict]:
-    queries = [i for i in ingredients[:8] if i and len(i) >= 3]
+    # Reduce branded/sized stock names to canonical ingredient terms so
+    # filter.php (which only matches its single-ingredient taxonomy) gets hits.
+    seen: set[str] = set()
+    queries: list[str] = []
+    for raw in ingredients[:8]:
+        core = _core_ingredient(raw)
+        if len(core) >= 3 and core not in seen:
+            seen.add(core)
+            queries.append(core)
     if not queries:
         return []
     id_lists = await asyncio.gather(*(_mealdb_filter(q) for q in queries))
@@ -145,7 +210,18 @@ async def _spoon_find(ingredients: list[str], limit: int) -> list[dict]:
 
     Each call costs API points, so both phases are cached for the TTL.
     """
-    query = ",".join(i.strip().lower() for i in ingredients[:6] if i.strip())
+    # Normalize stock names to core terms (Spoonacular tolerates noise but
+    # matches more recipes against clean ingredient words); dedupe + cap at 6.
+    seen: set[str] = set()
+    terms: list[str] = []
+    for raw in ingredients:
+        core = _core_ingredient(raw) or (raw or "").strip().lower()
+        if core and core not in seen:
+            seen.add(core)
+            terms.append(core)
+        if len(terms) >= 6:
+            break
+    query = ",".join(terms)
     if not query:
         return []
     ck = ("spoonacular", query)
