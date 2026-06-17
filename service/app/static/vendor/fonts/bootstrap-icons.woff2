@@ -1,0 +1,1 @@
+Host not in allowlist: cdn.jsdelivr.net. Add this host to your network egress settings to allow access.
