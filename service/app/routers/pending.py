@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from ..config import settings
 from ..database import get_db
 from ..models.db_models import PendingItem
 from ..models.food import FoodItem, FoodCategory, StorageType
@@ -13,6 +14,25 @@ from ..services.defaults import apply_defaults
 from ..services.grocy import GrocyClient
 
 router = APIRouter(prefix="/pending", tags=["pending"])
+
+
+async def _autocheck_shopping(item_name: str) -> None:
+    """Check off any Mealie shopping-list items that token-match item_name."""
+    from ..services.mealie import MealieClient, _tokens
+    mealie = MealieClient()
+    item_toks = _tokens(item_name)
+    if not item_toks:
+        return
+    lists = await mealie.get_shopping_lists()
+    for lst in lists:
+        detail = await mealie.get_shopping_list(lst["id"])
+        for si in detail.get("listItems", []):
+            if si.get("checked"):
+                continue
+            si_toks = _tokens(si.get("note") or "")
+            if item_toks & si_toks:
+                updated = {**si, "checked": True}
+                await mealie.update_shopping_item(si["id"], updated)
 
 
 class ScanRequest(BaseModel):
@@ -168,6 +188,11 @@ async def commit_pending(body: CommitRequest, db: Session = Depends(get_db)):
             db.delete(row)
             db.commit()
             results.append({"id": row_id, "status": "ok", **result})
+            if settings.barcode_autocheck_shopping and settings.mealie_configured():
+                try:
+                    await _autocheck_shopping(item.name)
+                except Exception:
+                    pass  # never block a commit over a shopping-list failure
         except Exception as e:
             db.rollback()
             results.append({"id": row_id, "status": "error", "error": str(e)})
