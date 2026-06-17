@@ -40,7 +40,7 @@
       at: "08:00:00"
   condition:
     - condition: template
-      value_template: "{{ states('sensor.food_expiring_3d') | int > 0 }}"
+      value_template: "{{ states('sensor.food_expiring_3_days') | int > 0 }}"
     - condition: time
       weekday:
         - mon
@@ -50,5 +50,5 @@
       data:
         title: "🍗 Food Check"
         message: >
-          {{ states('sensor.food_expiring_3d') }} item(s) expire within 3 days.
+          {{ states('sensor.food_expiring_3_days') }} item(s) expire within 3 days.
           Plan your meals accordingly.

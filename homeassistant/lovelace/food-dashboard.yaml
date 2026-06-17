@@ -227,4 +227,4 @@ views:
             icon_height: 44px
             tap_action:
               action: url
-              url_path: http://192.168.1.170:9383/stockoverview
+              url_path: http://YOUR_GROCY_HOST/stockoverview
