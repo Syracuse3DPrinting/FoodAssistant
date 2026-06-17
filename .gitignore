@@ -15,3 +15,6 @@ service/data/
 .beads-credential-key
 .beads/proxieddb/
 backups/
+node_modules/
+package-lock.json
+package.json
