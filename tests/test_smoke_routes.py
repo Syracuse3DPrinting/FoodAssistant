@@ -21,13 +21,18 @@ def client(tmp_path_factory):
     os.chdir(_SERVICE_DIR)
     try:
         from app.config import settings
+
+        # Point data_dir at a temp dir BEFORE importing app.main: database.py
+        # runs os.makedirs(settings.data_dir) at import time, which would fail
+        # on the default /app/data outside the container (e.g. CI).
+        data_dir = tmp_path_factory.mktemp("data")
+        settings.data_dir = str(data_dir)
+
         from app.main import app
 
         # Make the app think it is fully configured so the setup-redirect
         # middleware is a no-op, and leave auth_password empty so the auth
         # middleware is a no-op too.
-        data_dir = tmp_path_factory.mktemp("data")
-        settings.data_dir = str(data_dir)
         settings.grocy_base_url = "http://grocy.test"
         settings.grocy_api_key = "test-grocy-key"
         settings.vision_provider = "gemini"
