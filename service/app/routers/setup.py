@@ -107,6 +107,16 @@ async def setup_page(request: Request):
     })
 
 
+class ThemePayload(BaseModel):
+    ui_theme: str = _DEFAULT_THEME
+
+
+@router.post("/theme")
+async def save_theme(payload: ThemePayload):
+    settings.save({"ui_theme": payload.ui_theme})
+    return {"ok": True}
+
+
 @router.post("/save")
 async def save_setup(payload: SetupPayload):
     data = payload.model_dump()
