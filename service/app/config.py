@@ -28,10 +28,27 @@ THEMES = {
 }
 _DEFAULT_THEME = "dark"
 
+# UI scale presets. The factor is applied as a CSS zoom on the document root so
+# the whole interface grows or shrinks uniformly. Lets one build look right on a
+# tiny HDMI panel, a countertop touchscreen, or a large monitor without editing
+# CSS. Selected in Settings (Interface) and the setup wizard.
+UI_SCALES = {
+    "small":  {"label": "Small",       "factor": 0.85},
+    "normal": {"label": "Normal",      "factor": 1.0},
+    "large":  {"label": "Large",       "factor": 1.2},
+    "xlarge": {"label": "Extra large", "factor": 1.4},
+}
+_DEFAULT_UI_SCALE = "normal"
+
 
 def theme_info(name: str) -> dict:
     """Resolve a theme name to its descriptor, falling back to the default."""
     return THEMES.get(name, THEMES[_DEFAULT_THEME])
+
+
+def ui_scale_factor(name: str) -> float:
+    """Resolve a UI scale name to its zoom factor, falling back to the default."""
+    return UI_SCALES.get(name, UI_SCALES[_DEFAULT_UI_SCALE])["factor"]
 
 _SAVEABLE = [
     "vision_provider", "gemini_api_key", "gemini_model",
@@ -43,7 +60,7 @@ _SAVEABLE = [
     "mealie_base_url", "mealie_api_key", "mealie_public_url",
     "recipe_source", "themealdb_api_key", "spoonacular_api_key",
     "staple_items", "cook_ai_context", "perishable_days", "expiring_soon_days", "suggest_per_tier",
-    "nav_order", "nav_hidden", "custom_storage_categories", "ui_theme",
+    "nav_order", "nav_hidden", "custom_storage_categories", "ui_theme", "ui_scale",
     "secret_key", "auth_password", "totp_secret", "api_key", "auth_required",
     "rclone_remote", "rclone_schedule_hours",
     "tunnel_mode", "tunnel_token", "tunnel_url",
@@ -67,7 +84,7 @@ class Settings(BaseSettings):
     # Vision provider: gemini | ollama | openai | anthropic
     vision_provider: str = "gemini"
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-1.5-flash"
+    gemini_model: str = "gemini-2.5-flash"
 
     ollama_base_url: str = "http://ollama:11434"
     ollama_model: str = "llava:7b"
@@ -140,6 +157,10 @@ class Settings(BaseSettings):
 
     # UI colour theme. One of the keys in THEMES (dark | light | bootswatch).
     ui_theme: str = _DEFAULT_THEME
+
+    # UI scale. One of the keys in UI_SCALES; applied as a document zoom so the
+    # interface fits small or large displays.
+    ui_scale: str = _DEFAULT_UI_SCALE
 
     # User-defined storage categories beyond the four built-ins. Each is a
     # dict {key,label,icon,color,bg,location,match}. See storage_categories.py.

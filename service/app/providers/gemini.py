@@ -116,7 +116,7 @@ _HEALTH_CACHE_TTL = 3600  # seconds — avoid hammering the API on every /health
 
 
 class GeminiProvider(VisionProvider):
-    def __init__(self, api_key: str, model: str = "gemini-1.5-flash"):
+    def __init__(self, api_key: str, model: str = "gemini-2.5-flash"):
         genai.configure(api_key=api_key)
         self.model_name = model
         self.model = genai.GenerativeModel(

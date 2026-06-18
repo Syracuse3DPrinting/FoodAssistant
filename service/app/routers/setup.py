@@ -3,7 +3,10 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-from ..config import settings, APP_VERSION, THEMES, _DEFAULT_THEME
+from ..config import (
+    settings, APP_VERSION, THEMES, _DEFAULT_THEME,
+    UI_SCALES, _DEFAULT_UI_SCALE,
+)
 from ..dependencies import reset_providers
 from ..navigation import all_tabs
 from ..storage_categories import custom_categories, _normalize_custom, storable
@@ -34,7 +37,7 @@ def _safe_error(e: Exception | str, *secrets: str) -> str:
 class SetupPayload(BaseModel):
     vision_provider: str = "gemini"
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-1.5-flash"
+    gemini_model: str = "gemini-2.5-flash"
     ollama_base_url: str = ""
     ollama_model: str = "llava:7b"
     openai_api_key: str = ""
@@ -60,6 +63,7 @@ class SetupPayload(BaseModel):
     nav_order: str = ""
     nav_hidden: str = ""
     ui_theme: str = _DEFAULT_THEME
+    ui_scale: str = _DEFAULT_UI_SCALE
     barcode_llm_fallback: bool = False
     barcode_autocheck_shopping: bool = False
     cook_ai_context: str = ""
@@ -104,7 +108,29 @@ async def setup_page(request: Request):
         "version": APP_VERSION,
         "custom_categories": custom_categories(),
         "themes": THEMES,
+        "ui_scales": UI_SCALES,
     })
+
+
+class ThemePayload(BaseModel):
+    ui_theme: str = _DEFAULT_THEME
+
+
+@router.post("/theme")
+async def save_theme(payload: ThemePayload):
+    settings.save({"ui_theme": payload.ui_theme})
+    return {"ok": True}
+
+
+class ScalePayload(BaseModel):
+    ui_scale: str = _DEFAULT_UI_SCALE
+
+
+@router.post("/scale")
+async def save_scale(payload: ScalePayload):
+    scale = payload.ui_scale if payload.ui_scale in UI_SCALES else _DEFAULT_UI_SCALE
+    settings.save({"ui_scale": scale})
+    return {"ok": True}
 
 
 @router.post("/save")
@@ -189,7 +215,7 @@ async def test_provider(payload: TestProviderPayload):
         try:
             import google.generativeai as genai
             genai.configure(api_key=key)
-            model = payload.model or "gemini-1.5-flash"
+            model = payload.model or "gemini-2.5-flash"
             genai.get_model(f"models/{model}")
             return {"ok": True, "message": f"Connected — model {model} available."}
         except Exception as e:

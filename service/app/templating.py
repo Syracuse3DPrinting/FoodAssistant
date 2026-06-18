@@ -2,7 +2,7 @@
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
 
-from .config import settings, theme_info
+from .config import settings, theme_info, ui_scale_factor
 from .ingress import template_globals
 from .navigation import visible_tabs
 
@@ -24,6 +24,8 @@ def theme_context(request: Request) -> dict:
         "theme_mode": info["mode"],
         "theme_css": info["stylesheet"],
         "theme_overlay": info.get("overlay"),
+        "ui_scale": settings.ui_scale,
+        "ui_scale_factor": ui_scale_factor(settings.ui_scale),
     }
 
 

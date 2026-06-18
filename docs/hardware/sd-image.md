@@ -52,43 +52,93 @@ prepare step is required).
 ## Step 2 — Add the FoodAssistant first-boot payload
 
 After flashing, the card's **boot partition** (`bootfs`) reappears as a small
-FAT volume. Add the provisioner to it.
+FAT volume on your PC. You need to copy the provisioner files onto it and edit
+one config file.
 
-### Option A — automated (Linux/macOS)
+First, clone the repository if you haven't already:
 
 ```bash
 git clone https://github.com/Syracuse3DPrinting/FoodAssistant
 cd FoodAssistant
-# Edit the appliance config first (timezone, kiosk, Mealie/Ollama, hostname):
-$EDITOR image/config.env
-# Point at the mounted boot volume (path varies by OS):
+```
+
+Then follow the section for your operating system.
+
+### Windows 11
+
+You need two things from the repo: the `image\config.env` you edit, and a
+helper script that copies everything onto the card for you. Clone the repo (or
+download it as a ZIP from GitHub and extract it), then open **PowerShell** in
+that folder.
+
+**2a. Edit the config file**
+
+Open `image\config.env` in any text editor (Notepad, VS Code) and set at least
+the timezone:
+
+```
+TZ=America/New_York    # change to your IANA timezone
+HOSTNAME=foodassistant # optional, sets the mDNS name (foodassistant.local)
+```
+
+Save and close the file.
+
+**2b. Find the boot drive letter**
+
+In File Explorer, look for a small (~256 MB) drive that appeared when you
+inserted the card, labelled `bootfs`. Note its letter (often **D:** or **E:**).
+
+**2c. Run the helper script**
+
+```powershell
+.\scripts\image-build\prepare-image.ps1 -BootDrive D:
+```
+
+Replace `D:` with your boot drive letter. The script copies the provisioner
+files onto the card, installs your config, and wires `cmdline.txt` for you. It
+refuses to run if the drive doesn't look like a Pi boot partition, so it won't
+touch the wrong drive.
+
+If PowerShell blocks the script with an execution-policy error, run it for this
+one session only:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\image-build\prepare-image.ps1 -BootDrive D:
+```
+
+When it prints `Payload installed`, eject the card safely from the system tray
+and skip to [Step 3](#step-3--first-boot).
+
+### Linux / macOS (automated)
+
+```bash
+# Edit the appliance config first:
+nano image/config.env
+# Then point at the mounted boot volume (path varies by OS):
 scripts/image-build/prepare-image.sh --boot-dir /Volumes/bootfs        # macOS
 scripts/image-build/prepare-image.sh --boot-dir /media/$USER/bootfs    # Linux
 ```
 
-You can also bake it into an `.img` *before* flashing (Linux, as root):
+You can also bake it into an `.img` before flashing (Linux, as root):
 
 ```bash
 sudo scripts/image-build/prepare-image.sh --image path/to/raspios-lite-arm64.img
 ```
 
-### Option B — manual copy
+### Linux / macOS (manual)
 
-Copy these onto the boot partition:
+If you prefer not to run the script, copy these files to the boot partition:
 
-- `scripts/image-build/firstrun.sh` → `bootfs/firstrun.sh`
-- the whole `scripts/image-build/` payload → `bootfs/foodassistant-setup/`
-  (must contain `firstboot.sh`, `foodassistant-firstboot.service`,
-  `docker-compose.appliance.yml`)
-- `image/config.env` → `bootfs/foodassistant.config.env` (edit as desired)
+- `scripts/image-build/firstrun.sh` to `bootfs/firstrun.sh`
+- All four files from `scripts/image-build/` into `bootfs/foodassistant-setup/`
+- `image/config.env` to both `bootfs/foodassistant-setup/config.env` and `bootfs/foodassistant.config.env`
 
-Then append to the single line in `bootfs/cmdline.txt`:
+Then append this to the single line in `bootfs/cmdline.txt` (one space before
+it, no newline):
 
 ```
 systemd.run=/boot/firmware/firstrun.sh systemd.run_success_action=reboot systemd.unit=kernel-command-line.target
 ```
-
-`prepare-image.sh` does all of this for you (Option A).
 
 Eject the card safely.
 
