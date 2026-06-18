@@ -39,6 +39,9 @@ ASSET_DIR="${ASSET_DIR:-$(cd "$(dirname "$0")" && pwd)}"
 COMPOSE_SRC="${COMPOSE_SRC:-$ASSET_DIR/docker-compose.appliance.yml}"
 # Marker so the systemd unit can disable itself after a successful run.
 DONE_MARKER="${DONE_MARKER:-/var/lib/foodassistant/firstboot.done}"
+# Path to a local clone of the repo. Used as the Docker build context when the
+# pre-built GHCR image is unavailable (see deploy_stack).
+REPO_DIR="${REPO_DIR:-/home/foodassistant/FoodAssistant}"
 
 # ── Logging helpers ────────────────────────────────────────────────────────
 log()  { printf '%s [firstboot] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
@@ -232,11 +235,26 @@ deploy_stack() {
   log "Compose profiles: ${profiles:-<none>}"
 
   if [ "$DRY_RUN" = "1" ]; then
-    log "DRY_RUN would run: (cd $INSTALL_DIR && docker compose $profiles up -d)"
+    log "DRY_RUN would run: (cd $INSTALL_DIR && docker compose $profiles pull service || docker compose $profiles build service && docker compose $profiles up -d)"
     return 0
   fi
+
+  # Try the pre-built image first; fall back to building from local source
+  # if the registry pull fails (e.g. image not yet public or no internet).
+  # Export REPO_DIR so the compose build: context variable resolves correctly.
+  export REPO_DIR
   # shellcheck disable=SC2086
-  ( cd "$INSTALL_DIR" && docker compose $profiles pull && docker compose $profiles up -d )
+  if ! ( cd "$INSTALL_DIR" && docker compose $profiles pull service ) 2>/dev/null; then
+    log "Image pull failed; building from local source at $REPO_DIR/service (this takes a few minutes)"
+    if [ ! -d "$REPO_DIR/service" ]; then
+      die "Local source not found at $REPO_DIR/service and image pull failed. Clone the repo to $REPO_DIR or make the GHCR package public."
+    fi
+    # shellcheck disable=SC2086
+    ( cd "$INSTALL_DIR" && docker compose $profiles build service ) \
+      || die "Local build also failed. Check $REPO_DIR/service and Docker logs."
+  fi
+  # shellcheck disable=SC2086
+  ( cd "$INSTALL_DIR" && docker compose $profiles up -d )
 }
 
 # ── Step: kiosk (opt-in, display-gated) ────────────────────────────────────
