@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-bs-theme="{{ theme_mode }}">
+<html lang="en" data-bs-theme="{{ theme_mode }}" style="zoom: {{ ui_scale_factor | default(1.0) }};">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -422,6 +422,23 @@
                 {% endfor %}
               </select>
               <div class="form-text" id="theme-hint">Theme applies immediately.</div>
+            </div>
+          </div>
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-aspect-ratio text-success"></i> Display Scale</div>
+            <p class="text-secondary small">Sizes the whole interface up or down so it fits the screen it runs on.
+              Pick a larger scale for a small HDMI panel or a countertop touchscreen, a smaller one for a big monitor.
+              Stored on the server, so it applies to the appliance display and every browser.</p>
+            <div class="mb-1">
+              <label class="form-label" for="ui_scale">Scale</label>
+              <select class="form-select" id="ui_scale" style="max-width:320px"
+                      onchange="applyScale(this.value)">
+                {% for key, sc in ui_scales.items() %}
+                <option value="{{ key }}" {{ 'selected' if s.ui_scale == key else '' }}>{{ sc.label }}</option>
+                {% endfor %}
+              </select>
+              <div class="form-text" id="scale-hint">Scale applies immediately.</div>
             </div>
           </div>
 
@@ -922,6 +939,23 @@ async function applyTheme(value) {
   }
 }
 
+// ── Display scale ─────────────────────────────────────────────────────────────
+
+async function applyScale(value) {
+  const hint = document.getElementById('scale-hint');
+  hint.textContent = 'Saving…';
+  try {
+    await fetch('setup/scale', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ui_scale: value}),
+    });
+    location.reload();
+  } catch (e) {
+    hint.textContent = 'Save failed, try Save All.';
+  }
+}
+
 // ── Save ─────────────────────────────────────────────────────────────────────
 
 async function saveAll() {
@@ -932,7 +966,7 @@ async function saveAll() {
   const payload = {
     vision_provider: document.getElementById('vision_provider').value,
     gemini_api_key:  secretVal('gemini_api_key'),
-    gemini_model:    val('gemini_model') || 'gemini-1.5-flash',
+    gemini_model:    val('gemini_model') || 'gemini-2.5-flash',
     ollama_base_url: val('ollama_base_url'),
     ollama_model:    val('ollama_model') || 'llava:7b',
     openai_api_key:  secretVal('openai_api_key'),
@@ -961,6 +995,7 @@ async function saveAll() {
     nav_order:       navState.map(t => t.key).join(','),
     nav_hidden:      navState.filter(t => t.hidden).map(t => t.key).join(','),
     ui_theme:        document.getElementById('ui_theme').value,
+    ui_scale:        document.getElementById('ui_scale').value,
     auth_required:   document.getElementById('auth_required').checked,
     auth_password:   secretVal('auth_password'),
     api_key:         secretVal('api_key'),
