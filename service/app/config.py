@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.5.0"
 
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
@@ -40,6 +40,11 @@ UI_SCALES = {
 }
 _DEFAULT_UI_SCALE = "normal"
 
+# Orientation of a hardware display attached to the appliance (the Pi's HDMI
+# panel). Applied only to the kiosk display, never to a regular browser.
+DISPLAY_ROTATIONS = (0, 90, 180, 270)
+_DEFAULT_DISPLAY_ROTATION = 0
+
 
 def theme_info(name: str) -> dict:
     """Resolve a theme name to its descriptor, falling back to the default."""
@@ -60,7 +65,7 @@ _SAVEABLE = [
     "mealie_base_url", "mealie_api_key", "mealie_public_url",
     "recipe_source", "themealdb_api_key", "spoonacular_api_key",
     "staple_items", "cook_ai_context", "perishable_days", "expiring_soon_days", "suggest_per_tier",
-    "nav_order", "nav_hidden", "custom_storage_categories", "ui_theme", "ui_scale",
+    "nav_order", "nav_hidden", "custom_storage_categories", "ui_theme", "ui_scale", "display_rotation",
     "secret_key", "auth_password", "totp_secret", "api_key", "auth_required",
     "rclone_remote", "rclone_schedule_hours",
     "tunnel_mode", "tunnel_token", "tunnel_url",
@@ -158,9 +163,14 @@ class Settings(BaseSettings):
     # UI colour theme. One of the keys in THEMES (dark | light | bootswatch).
     ui_theme: str = _DEFAULT_THEME
 
-    # UI scale. One of the keys in UI_SCALES; applied as a document zoom so the
-    # interface fits small or large displays.
+    # UI scale. One of the keys in UI_SCALES; applied as a document zoom on the
+    # kiosk display only, so the interface fits a small or large hardware panel
+    # without changing what other browsers see.
     ui_scale: str = _DEFAULT_UI_SCALE
+
+    # Rotation (degrees) of the attached hardware display. One of
+    # DISPLAY_ROTATIONS; applied to the kiosk display only.
+    display_rotation: int = _DEFAULT_DISPLAY_ROTATION
 
     # User-defined storage categories beyond the four built-ins. Each is a
     # dict {key,label,icon,color,bg,location,match}. See storage_categories.py.

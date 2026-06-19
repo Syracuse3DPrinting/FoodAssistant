@@ -88,7 +88,9 @@ load_config() {
   ENABLE_MEALIE="${ENABLE_MEALIE:-false}"
   ENABLE_OLLAMA="${ENABLE_OLLAMA:-false}"
   ENABLE_KIOSK="${ENABLE_KIOSK:-false}"
-  KIOSK_URL="${KIOSK_URL:-http://localhost:9284/ui/}"
+  # ?kiosk=1 latches kiosk mode in the browser so the attached-display scale
+  # and orientation settings apply (and never affect other browsers).
+  KIOSK_URL="${KIOSK_URL:-http://localhost:9284/ui/?kiosk=1}"
   ENABLE_STREAMDECK="${ENABLE_STREAMDECK:-false}"
   FOODASSISTANT_TAG="${FOODASSISTANT_TAG:-latest}"
   INSTALL_DIR="${INSTALL_DIR:-/opt/foodassistant}"
