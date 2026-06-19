@@ -344,7 +344,44 @@
   <!-- ── Step 5: Optional Integrations ── -->
   <div class="wiz-card d-none" id="wiz-step-5">
     <div class="wiz-card-title"><i class="bi bi-puzzle text-secondary me-2"></i>Optional Integrations</div>
-    <div class="wiz-card-sub">Connect Mealie for recipes and meal planning. You can skip this and add it later.</div>
+    <div class="wiz-card-sub">Connect a barcode scanner, Mealie for recipes, and more. All optional — add later in Settings.</div>
+
+    <!-- Collapsible barcode scanner section -->
+    <div class="section-card mb-3">
+      <button class="btn btn-link p-0 text-decoration-none d-flex align-items-center gap-2 w-100"
+              type="button" data-bs-toggle="collapse" data-bs-target="#scanner-collapse" aria-expanded="false">
+        <i class="bi bi-upc-scan text-success"></i>
+        <span class="fw-semibold">Barcode Scanner</span>
+        <span class="badge bg-secondary ms-1">Optional</span>
+        <i class="bi bi-chevron-down ms-auto"></i>
+      </button>
+      <div class="collapse mt-3" id="scanner-collapse">
+        <p class="text-secondary small">Choose how barcodes are read. You can also scan from the Add Food page without any setup.</p>
+        <div class="mb-3">
+          <label class="form-label">Scanner type</label>
+          <select class="form-select" id="scanner_type" onchange="scannerTypeChanged()">
+            <option value=""    {{ 'selected' if not s.scanner_type else '' }}>Not set (pick on Add Food page)</option>
+            <option value="usb" {{ 'selected' if s.scanner_type == 'usb' else '' }}>USB / Bluetooth HID (keyboard wedge)</option>
+            <option value="camera" {{ 'selected' if s.scanner_type == 'camera' else '' }}>Camera / built-in scan module</option>
+          </select>
+        </div>
+        <div id="scanner-usb-hint" class="d-none">
+          <p class="text-secondary small">USB and Bluetooth HID scanners emit barcodes as keystrokes. No drivers needed — plug in and scan.
+            Test below: click the field and scan a barcode.</p>
+          <div class="input-group mb-2">
+            <span class="input-group-text"><i class="bi bi-upc"></i></span>
+            <input type="text" class="form-control font-monospace" id="scanner-test-input"
+                   placeholder="Scan a barcode here…" autocomplete="off" spellcheck="false"
+                   oninput="scannerTestInput(this.value)" onkeydown="if(event.key==='Enter'){scannerTestEnter(this.value);this.select();}">
+          </div>
+          <div class="test-result" id="scanner-test-result"></div>
+        </div>
+        <div id="scanner-camera-hint" class="d-none">
+          <p class="text-secondary small">Camera scanning runs in the browser on the Add Food page — no server-side setup needed.
+            Make sure your browser has camera permission for this site.</p>
+        </div>
+      </div>
+    </div>
 
     <!-- Collapsible Mealie section -->
     <div class="section-card mb-3">
@@ -504,6 +541,33 @@
               <i class="bi bi-plug me-1"></i>Test Connection
             </button>
             <div class="test-result" id="grocy-result"></div>
+          </div>
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-upc-scan text-success"></i> Barcode Scanner</div>
+            <p class="text-secondary small">Choose how barcodes are read. USB and Bluetooth HID scanners work as keyboard
+              wedges — no drivers needed. Camera scanning runs in the browser on the Add Food page.</p>
+            <div class="mb-3">
+              <label class="form-label">Scanner type</label>
+              <select class="form-select" id="scanner_type" onchange="scannerTypeChanged()">
+                <option value=""    {{ 'selected' if not s.scanner_type else '' }}>Not set (pick on Add Food page)</option>
+                <option value="usb" {{ 'selected' if s.scanner_type == 'usb' else '' }}>USB / Bluetooth HID (keyboard wedge)</option>
+                <option value="camera" {{ 'selected' if s.scanner_type == 'camera' else '' }}>Camera / built-in scan module</option>
+              </select>
+            </div>
+            <div id="scanner-usb-hint" class="{{ '' if s.scanner_type == 'usb' else 'd-none' }}">
+              <p class="text-secondary small mb-2">Plug in the scanner and test below — click the field and scan a barcode.</p>
+              <div class="input-group mb-2">
+                <span class="input-group-text"><i class="bi bi-upc"></i></span>
+                <input type="text" class="form-control font-monospace" id="scanner-test-input"
+                       placeholder="Scan a barcode here…" autocomplete="off" spellcheck="false"
+                       oninput="scannerTestInput(this.value)" onkeydown="if(event.key==='Enter'){scannerTestEnter(this.value);this.select();}">
+              </div>
+              <div class="test-result" id="scanner-test-result"></div>
+            </div>
+            <div id="scanner-camera-hint" class="{{ '' if s.scanner_type == 'camera' else 'd-none' }}">
+              <p class="text-secondary small">Camera scanning runs in the browser — make sure this site has camera permission.</p>
+            </div>
           </div>
 
           <div class="section-card">
@@ -1259,6 +1323,32 @@ async function testMealie() {
   setResult('mealie-result', d.ok, d.ok ? d.message : d.error);
 }
 
+function scannerTypeChanged() {
+  var v = val('scanner_type');
+  document.getElementById('scanner-usb-hint').classList.toggle('d-none', v !== 'usb');
+  document.getElementById('scanner-camera-hint').classList.toggle('d-none', v !== 'camera');
+  if (v !== 'usb') {
+    var inp = document.getElementById('scanner-test-input');
+    if (inp) inp.value = '';
+    setResult('scanner-test-result', true, '');
+  }
+}
+
+function scannerTestInput(v) {
+  // Clears stale result when the user starts typing / scanning
+  if (v.length < 6) setResult('scanner-test-result', true, '');
+}
+
+function scannerTestEnter(v) {
+  v = v.trim();
+  if (!v) return;
+  if (/^[\x20-\x7E]{6,}$/.test(v)) {
+    setResult('scanner-test-result', true, 'Barcode received: ' + v);
+  } else {
+    setResult('scanner-test-result', false, 'Input looks unexpected — check scanner is in HID mode.');
+  }
+}
+
 function providerTestPayload(provider, modelOverride) {
   return {
     provider,
@@ -1419,6 +1509,7 @@ function buildPayload() {
     openai_model:    val('openai_model') || 'gpt-4o-mini',
     anthropic_api_key: secretVal('anthropic_api_key'),
     anthropic_model: val('anthropic_model') || 'claude-opus-4-8',
+    scanner_type:       val('scanner_type') || '',
     barcode_enrichment: val('barcode_enrichment') || 'llm',
     barcode_llm_fallback: document.getElementById('barcode_llm_fallback')?.checked || false,
     barcode_autocheck_shopping: document.getElementById('barcode_autocheck_shopping')?.checked || false,
@@ -1994,6 +2085,7 @@ async function wizSaveAll() {
 (function init() {
   showProvider();
   showRecipeSource();
+  scannerTypeChanged();
   renderNavEditor();
   tunnelModeChanged();
   _initTunnelStatus();
