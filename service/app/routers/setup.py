@@ -142,6 +142,23 @@ async def _detect_local_grocy() -> str:
     return ""
 
 
+def _grocy_url_for_browser(request: Request, detected: str) -> str:
+    """Adjust a locally-detected Grocy URL for the browser making the request.
+
+    When Grocy is detected at localhost:9383 but the setup page is opened from
+    another machine, localhost resolves to the user's own computer, not the Pi.
+    In that case, substitute the hostname the browser used to reach us (same IP,
+    port 9383) so the pre-filled URL is immediately usable.
+    """
+    if not detected:
+        return detected
+    client_host = (request.client.host if request.client else "") or ""
+    if client_host in ("127.0.0.1", "::1", "localhost", ""):
+        return detected
+    server_host = request.url.hostname or client_host
+    return f"http://{server_host}:9383"
+
+
 def available_modes() -> dict:
     """Deployment modes offered on this host.
 
@@ -156,7 +173,8 @@ def available_modes() -> dict:
 async def setup_page(request: Request):
     suggested_grocy_url = ""
     if not settings.grocy_base_url or settings.grocy_base_url == "http://grocy:80":
-        suggested_grocy_url = await _detect_local_grocy()
+        raw = await _detect_local_grocy()
+        suggested_grocy_url = _grocy_url_for_browser(request, raw)
     modes = available_modes()
     # Default the picker: keep the saved choice if still valid, else the only
     # mode that fits this host (or the generic default).
