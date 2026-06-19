@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from ..config import (
     settings, APP_VERSION, THEMES, _DEFAULT_THEME,
     UI_SCALES, _DEFAULT_UI_SCALE,
+    DISPLAY_ROTATIONS, _DEFAULT_DISPLAY_ROTATION,
 )
 from ..dependencies import reset_providers
 from ..navigation import all_tabs
@@ -64,6 +65,7 @@ class SetupPayload(BaseModel):
     nav_hidden: str = ""
     ui_theme: str = _DEFAULT_THEME
     ui_scale: str = _DEFAULT_UI_SCALE
+    display_rotation: int = _DEFAULT_DISPLAY_ROTATION
     barcode_llm_fallback: bool = False
     barcode_autocheck_shopping: bool = False
     cook_ai_context: str = ""
@@ -132,6 +134,7 @@ async def setup_page(request: Request):
         "custom_categories": custom_categories(),
         "themes": THEMES,
         "ui_scales": UI_SCALES,
+        "display_rotations": DISPLAY_ROTATIONS,
         "suggested_grocy_url": suggested_grocy_url,
     })
 
@@ -148,12 +151,14 @@ async def save_theme(payload: ThemePayload):
 
 class ScalePayload(BaseModel):
     ui_scale: str = _DEFAULT_UI_SCALE
+    display_rotation: int = _DEFAULT_DISPLAY_ROTATION
 
 
 @router.post("/scale")
 async def save_scale(payload: ScalePayload):
     scale = payload.ui_scale if payload.ui_scale in UI_SCALES else _DEFAULT_UI_SCALE
-    settings.save({"ui_scale": scale})
+    rot = payload.display_rotation if payload.display_rotation in DISPLAY_ROTATIONS else _DEFAULT_DISPLAY_ROTATION
+    settings.save({"ui_scale": scale, "display_rotation": rot})
     return {"ok": True}
 
 
@@ -165,6 +170,8 @@ async def save_setup(payload: SetupPayload):
             data.pop(f, None)        # blank = keep existing value
         elif data.get(f) == _CLEAR:
             data[f] = ""             # explicit clear
+    if data.get("display_rotation") not in DISPLAY_ROTATIONS:
+        data["display_rotation"] = _DEFAULT_DISPLAY_ROTATION
     settings.save(data)
     reset_providers()   # apply new provider/model/key without a restart
     from ..services.mealie import reset_cache as reset_mealie_cache, reset_staple_cache

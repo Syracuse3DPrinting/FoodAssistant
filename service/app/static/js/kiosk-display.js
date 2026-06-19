@@ -1,0 +1,70 @@
+/*
+ * Kiosk display settings (scale + orientation).
+ *
+ * These apply ONLY to a hardware screen running in kiosk mode (the Pi's
+ * attached HDMI panel), never to a regular desktop browser. A browser becomes
+ * a kiosk by either:
+ *   - loading the UI with ?kiosk=1 (how the appliance kiosk service launches), or
+ *   - toggling kiosk mode from the nav bar.
+ * The latched flag lives in localStorage, so it is per device.
+ *
+ * Scale is a document zoom (it reflows the layout so text wraps to the panel).
+ * Orientation rotates the whole page for a physically turned screen; 90/270
+ * swap width and height. The screen is non-touch, so pointer mapping after a
+ * rotation is not a concern.
+ */
+(function () {
+  try {
+    var params = new URLSearchParams(window.location.search);
+    if (params.get('kiosk') === '1') {
+      localStorage.setItem('kioskMode', 'true');
+    }
+  } catch (e) { /* private mode / no storage: fall through */ }
+
+  if (localStorage.getItem('kioskMode') !== 'true') return;
+
+  var html = document.documentElement;
+  var scale = parseFloat(html.getAttribute('data-ui-scale') || '1') || 1;
+  var rot = parseInt(html.getAttribute('data-display-rotation') || '0', 10) || 0;
+
+  if (scale && scale !== 1) html.style.zoom = scale;
+
+  if (!rot) return;
+
+  function applyRotation() {
+    var wrap = document.createElement('div');
+    wrap.id = 'kiosk-rotate';
+    while (document.body.firstChild) wrap.appendChild(document.body.firstChild);
+    document.body.appendChild(wrap);
+    document.body.style.margin = '0';
+    document.body.style.overflow = 'hidden';
+
+    var vw = window.innerWidth, vh = window.innerHeight;
+    var s = wrap.style;
+    s.position = 'absolute';
+    s.top = '0';
+    s.left = '0';
+    s.overflow = 'auto';
+    s.transformOrigin = 'top left';
+
+    if (rot === 180) {
+      s.width = vw + 'px';
+      s.height = vh + 'px';
+      s.transform = 'translate(' + vw + 'px,' + vh + 'px) rotate(180deg)';
+    } else if (rot === 90) {
+      s.width = vh + 'px';
+      s.height = vw + 'px';
+      s.transform = 'translate(' + vw + 'px,0) rotate(90deg)';
+    } else if (rot === 270) {
+      s.width = vh + 'px';
+      s.height = vw + 'px';
+      s.transform = 'translate(0,' + vh + 'px) rotate(270deg)';
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', applyRotation);
+  } else {
+    applyRotation();
+  }
+})();

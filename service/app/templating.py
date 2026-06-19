@@ -26,6 +26,7 @@ def theme_context(request: Request) -> dict:
         "theme_overlay": info.get("overlay"),
         "ui_scale": settings.ui_scale,
         "ui_scale_factor": ui_scale_factor(settings.ui_scale),
+        "display_rotation": settings.display_rotation,
     }
 
 
