@@ -412,6 +412,60 @@
       </div>
     </div>
 
+    <!-- Collapsible External Recipes section -->
+    <div class="section-card mb-3">
+      <button class="btn btn-link p-0 text-decoration-none d-flex align-items-center gap-2 w-100"
+              type="button" data-bs-toggle="collapse" data-bs-target="#recipes-collapse" aria-expanded="false">
+        <i class="bi bi-globe2 text-info"></i>
+        <span class="fw-semibold">External Recipe Suggestions</span>
+        <span class="badge bg-secondary ms-1">Optional</span>
+        <i class="bi bi-chevron-down ms-auto"></i>
+      </button>
+      <div class="collapse mt-3" id="recipes-collapse">
+        <p class="text-secondary small">Powers the "What can I cook?" page with web recipes.
+          TheMealDB is free with no key. Spoonacular needs a free API key but has a much larger catalog.
+          You can always change this in Settings.</p>
+        <div class="mb-3">
+          <label class="form-label">Source</label>
+          <select class="form-select" id="recipe_source_wiz" onchange="showRecipeSourceWiz()">
+            <option value="themealdb" {{ 'selected' if s.recipe_source not in ('spoonacular','off') else '' }}>TheMealDB (free, no key needed)</option>
+            <option value="spoonacular" {{ 'selected' if s.recipe_source == 'spoonacular' else '' }}>Spoonacular (free API key required)</option>
+            <option value="off" {{ 'selected' if s.recipe_source == 'off' else '' }}>Off</option>
+          </select>
+        </div>
+        <div id="wiz-source-spoonacular" class="{{ '' if s.recipe_source == 'spoonacular' else 'd-none' }}">
+          <div class="mb-2">
+            <label class="form-label">Spoonacular API Key</label>
+            <input type="password" class="form-control font-monospace" id="spoonacular_api_key_wiz"
+                   placeholder="Your Spoonacular API key"
+                   value="{{ '***' if s.spoonacular_api_key else '' }}"
+                   autocomplete="new-password">
+            <div class="form-text">Get a free key at <a href="https://spoonacular.com/food-api" target="_blank">spoonacular.com/food-api</a>.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Collapsible Remote Access section -->
+    <div class="section-card mb-3">
+      <button class="btn btn-link p-0 text-decoration-none d-flex align-items-center gap-2 w-100"
+              type="button" data-bs-toggle="collapse" data-bs-target="#tunnel-wiz-collapse" aria-expanded="false">
+        <i class="bi bi-cloud-arrow-up text-warning"></i>
+        <span class="fw-semibold">Remote Access</span>
+        <span class="badge bg-secondary ms-1">Optional</span>
+        <i class="bi bi-chevron-down ms-auto"></i>
+      </button>
+      <div class="collapse mt-3" id="tunnel-wiz-collapse">
+        <p class="text-secondary small">Access FoodAssistant from outside your home without port-forwarding,
+          using a free <a href="https://www.cloudflare.com/products/tunnel/" target="_blank">Cloudflare Tunnel</a>.</p>
+        <p class="text-secondary small">Full setup is available in <strong>Settings → Remote Access</strong>
+          after the wizard. Paste your Cloudflare token there and the tunnel starts automatically.</p>
+        <a class="btn btn-sm btn-outline-secondary" href="setup#pane-tunnel" target="_self">
+          <i class="bi bi-box-arrow-up-right me-1"></i>Go to Remote Access settings
+        </a>
+      </div>
+    </div>
+
     <div class="d-flex justify-content-between">
       <button class="btn btn-outline-secondary" onclick="wizBack()"><i class="bi bi-arrow-left me-1"></i>Back</button>
       <div class="d-flex gap-2">
@@ -1313,6 +1367,12 @@ function showRecipeSource() {
   if (sd) sd.style.display = src === 'spoonacular' ? '' : 'none';
 }
 
+function showRecipeSourceWiz() {
+  const src = document.getElementById('recipe_source_wiz')?.value;
+  const sd = document.getElementById('wiz-source-spoonacular');
+  if (sd) sd.classList.toggle('d-none', src !== 'spoonacular');
+}
+
 // Connection tests
 async function postJson(url, body) {
   const r = await fetch(url, {
@@ -1529,9 +1589,9 @@ function buildPayload() {
     mealie_base_url: val('mealie_base_url'),
     mealie_api_key:  secretVal('mealie_api_key'),
     mealie_public_url: val('mealie_public_url'),
-    recipe_source:   document.getElementById('recipe_source')?.value || 'themealdb',
+    recipe_source:   (document.getElementById('recipe_source_wiz') || document.getElementById('recipe_source'))?.value || 'themealdb',
     themealdb_api_key: secretVal('themealdb_api_key'),
-    spoonacular_api_key: secretVal('spoonacular_api_key'),
+    spoonacular_api_key: secretVal('spoonacular_api_key_wiz') || secretVal('spoonacular_api_key'),
     staple_items:    val('staple_items'),
     cook_ai_context: val('cook_ai_context'),
     perishable_days: num('perishable_days', 14),
