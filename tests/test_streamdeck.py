@@ -419,3 +419,62 @@ def test_timer_press_via_action_context():
     )
     asyncio.run(actions.run_action(actions.ACTIONS["timer_1"], ctx))
     assert pressed.get("name") == "timer_1"
+
+
+# -- weather widget ---------------------------------------------------------
+
+
+def test_weather_action_registered():
+    assert "weather" in actions.ACTIONS
+    spec = actions.ACTIONS["weather"]
+    assert spec.kind == "weather"
+
+
+def test_weather_idle_shows_base_label():
+    w = actions.WeatherState(location="", units="f")
+    assert w.label("Weather") == "Weather"
+
+
+def test_weather_label_after_fake_fetch():
+    w = actions.WeatherState(location="", units="f")
+    # Simulate a successful fetch by poking internal state directly.
+    w._label = "72°F Sunny"
+    w._fetched_at = __import__("time").monotonic()
+    assert w.label("Weather") == "72°F Sunny"
+
+
+def test_weather_color_default():
+    w = actions.WeatherState()
+    assert w.color("#123456") == "#1e40af"
+
+
+def test_weather_config_loaded(tmp_path):
+    f = tmp_path / "config.toml"
+    f.write_text('weather_location = "New York"\nweather_units = "c"\nweather_poll_minutes = 30\n')
+    cfg = config.load(f)
+    assert cfg.weather_location == "New York"
+    assert cfg.weather_units == "c"
+    assert cfg.weather_poll_minutes == 30
+
+
+def test_weather_refresh_via_context():
+    refreshed = []
+
+    async def fake_weather_refresh():
+        refreshed.append(True)
+
+    async def noop():
+        pass
+
+    ctx = actions.ActionContext(
+        client=None,
+        base_url="http://x",
+        refresh=noop,
+        navigate=lambda _: noop(),
+        cycle_brightness=lambda: 80,
+        page_next=lambda: None,
+        page_prev=lambda: None,
+        weather_refresh=fake_weather_refresh,
+    )
+    asyncio.run(actions.run_action(actions.ACTIONS["weather"], ctx))
+    assert refreshed, "weather_refresh should have been called"

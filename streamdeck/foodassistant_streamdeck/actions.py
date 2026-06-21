@@ -81,6 +81,78 @@ class TimerState:
         return False
 
 
+_WEATHER_CONDITION_CODES: dict[int, str] = {
+    113: "Sunny", 116: "Partly\nCloudy", 119: "Cloudy", 122: "Overcast",
+    143: "Mist", 176: "Patchy\nRain", 179: "Patchy\nSnow",
+    182: "Sleet", 185: "Drizzle", 200: "Thunder", 227: "Blowing\nSnow",
+    230: "Blizzard", 248: "Fog", 260: "Ice Fog", 263: "Drizzle",
+    266: "Drizzle", 281: "Drizzle", 284: "Ice Drizzle",
+    293: "Light\nRain", 296: "Light\nRain", 299: "Rain", 302: "Rain",
+    305: "Heavy\nRain", 308: "Heavy\nRain", 311: "Sleet", 314: "Sleet",
+    317: "Light\nSleet", 320: "Mod.\nSleet", 323: "Light\nSnow",
+    326: "Light\nSnow", 329: "Snow", 332: "Snow", 335: "Heavy\nSnow",
+    338: "Heavy\nSnow", 350: "Ice", 353: "Showers", 356: "Showers",
+    359: "Heavy\nRain", 362: "Sleet", 365: "Sleet", 368: "Snow\nShowers",
+    371: "Snow\nShowers", 374: "Ice", 377: "Ice", 386: "Thunder",
+    389: "Thunder", 392: "T-Storm", 395: "Blizzard",
+}
+
+
+class WeatherState:
+    """Fetches and caches current weather from wttr.in (no API key required).
+
+    ``location`` is any city name, zip code, or lat,lon string. When empty,
+    wttr.in auto-detects the location from the requester's IP address.
+    ``units`` is 'f' (Fahrenheit) or 'c' (Celsius).
+    """
+
+    def __init__(self, location: str = "", units: str = "f") -> None:
+        self.location = location
+        self.units = units.lower()
+        self._label: str = "Weather"
+        self._color: str = "#1e40af"
+        self._fetched_at: float = 0.0
+        self._error: bool = False
+
+    def age_seconds(self) -> float:
+        return time.monotonic() - self._fetched_at
+
+    def label(self, base_label: str) -> str:
+        return self._label if self._fetched_at else base_label
+
+    def color(self, base_color: str) -> str:
+        return self._color
+
+    async def refresh(self) -> None:
+        try:
+            import httpx
+            loc = self.location.strip().replace(" ", "+") if self.location.strip() else ""
+            url = f"https://wttr.in/{loc}?format=j1"
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                r = await client.get(url, headers={"User-Agent": "foodassistant-streamdeck/1.0"})
+            if r.status_code != 200:
+                self._label = "No signal"
+                self._color = "#6b7280"
+                self._error = True
+                return
+            data = r.json()
+            cond = data["current_condition"][0]
+            temp_key = "temp_F" if self.units == "f" else "temp_C"
+            temp = cond.get(temp_key, "?")
+            unit_sym = "F" if self.units == "f" else "C"
+            code = int(cond.get("weatherCode", 113))
+            desc = _WEATHER_CONDITION_CODES.get(code, cond.get("weatherDesc", [{}])[0].get("value", ""))
+            self._label = f"{temp}°{unit_sym} {desc}"
+            self._color = "#1e40af"
+            self._error = False
+        except Exception:
+            self._label = "No signal"
+            self._color = "#6b7280"
+            self._error = True
+        finally:
+            self._fetched_at = time.monotonic()
+
+
 @dataclass(frozen=True)
 class ActionSpec:
     """Static description of one bindable action."""
@@ -188,6 +260,14 @@ ACTIONS: dict[str, ActionSpec] = {
         kind="timer",
         description="Third independent countdown timer.",
     ),
+    "weather": ActionSpec(
+        name="weather",
+        label="Weather",
+        color="#1e40af",
+        kind="weather",
+        description="Current weather from wttr.in. Configure location and units in config.toml. "
+        "Press to refresh. No API key required.",
+    ),
 }
 
 # Order used when no explicit key list is configured. The controller trims or
@@ -249,6 +329,9 @@ class ActionContext:
     page_next: Callable[[], None]
     page_prev: Callable[[], None]
     timer_press: Callable[[str], None] = field(default=lambda _name: None)
+    weather_refresh: Callable[[], Awaitable[None]] = field(
+        default=lambda: __import__("asyncio").sleep(0)
+    )
 
 
 async def run_action(spec: ActionSpec, ctx: ActionContext) -> str:
@@ -293,5 +376,9 @@ async def run_action(spec: ActionSpec, ctx: ActionContext) -> str:
     if spec.kind == "timer":
         ctx.timer_press(spec.name)
         return f"{spec.name} pressed"
+
+    if spec.kind == "weather":
+        await ctx.weather_refresh()
+        return "weather refreshed"
 
     return ""

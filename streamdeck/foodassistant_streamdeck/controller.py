@@ -17,7 +17,7 @@ from typing import Optional
 import httpx
 
 from . import actions, layout, render
-from .actions import ActionContext, ActionSpec, TimerState
+from .actions import ActionContext, ActionSpec, TimerState, WeatherState
 from .config import BRIGHTNESS_STEPS, Config
 
 log = logging.getLogger("foodassistant.streamdeck")
@@ -37,6 +37,9 @@ class Controller:
         self.page = 0
         self.status: dict[str, int] = {"expiring": 0, "pending": 0}
         self.timers: dict[str, TimerState] = {}  # action name -> timer state
+        self.weather: WeatherState = WeatherState(
+            location=config.weather_location, units=config.weather_units
+        )
 
         try:
             self._bright_idx = BRIGHTNESS_STEPS.index(
@@ -57,6 +60,7 @@ class Controller:
             self.deck.set_brightness(BRIGHTNESS_STEPS[self._bright_idx])
             self.deck.set_key_callback(self._on_key)
             await self._poll_once()
+            await self._refresh_weather()
             self._draw_page()
             log.info(
                 "Connected to %s (%d keys, %d page(s))",
@@ -91,6 +95,11 @@ class Controller:
                     label = t.label(spec.label) if t else spec.label
                     color = t.color(spec.color) if t else spec.color
                     alert = t.alert_active() if t else False
+                    count = None
+                elif spec.kind == "weather":
+                    label = self.weather.label(spec.label)
+                    color = self.weather.color(spec.color)
+                    alert = False
                     count = None
                 else:
                     count = (
@@ -171,6 +180,7 @@ class Controller:
             page_next=self._page_next,
             page_prev=self._page_prev,
             timer_press=self._timer_press,
+            weather_refresh=self._refresh_weather,
         )
         try:
             msg = await actions.run_action(spec, ctx)
@@ -183,6 +193,16 @@ class Controller:
 
     async def _refresh(self) -> None:
         await self._poll_once()
+        self._draw_page()
+
+    async def _refresh_weather(self) -> None:
+        has_weather_key = any(
+            spec is not None and spec.kind == "weather"
+            for page in self.pages for spec in page
+        )
+        if not has_weather_key:
+            return
+        await self.weather.refresh()
         self._draw_page()
 
     def _cycle_brightness(self) -> int:
@@ -266,6 +286,10 @@ class Controller:
                     tick = 0
                     await self._poll_once()
                     self._draw_page()
+                weather_secs = self.config.weather_poll_minutes * 60
+                if (weather_secs > 0
+                        and self.weather.age_seconds() >= weather_secs):
+                    await self._refresh_weather()
             except Exception as e:  # noqa: BLE001 - keep polling
                 log.debug("poll cycle failed: %s", e)
 

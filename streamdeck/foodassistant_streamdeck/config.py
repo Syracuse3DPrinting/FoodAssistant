@@ -39,6 +39,13 @@ class Config:
     # values in ALLOWED_ROTATIONS are accepted; anything else falls back to 0.
     rotation: int = 0
     keys: list[str] = field(default_factory=lambda: list(DEFAULT_ORDER))
+    # Weather widget. Uses wttr.in (no API key needed).
+    # location: city name, zip, or "lat,lon". Empty = auto-detect from device IP.
+    # units: "f" (Fahrenheit) or "c" (Celsius).
+    # weather_poll_minutes: background refresh cadence (default 15).
+    weather_location: str = ""
+    weather_units: str = "f"
+    weather_poll_minutes: int = 15
 
     def validated(self) -> "Config":
         """Drop unknown action names and clamp numbers into sane ranges."""
@@ -89,10 +96,10 @@ def load(path: str | os.PathLike | None = None) -> Config:
 
 
 def _apply(cfg: Config, data: dict) -> None:
-    for name in ("base_url", "api_key", "kiosk_cdp_url"):
+    for name in ("base_url", "api_key", "kiosk_cdp_url", "weather_location", "weather_units"):
         if isinstance(data.get(name), str):
             setattr(cfg, name, data[name])
-    for name in ("brightness", "poll_seconds", "soon_days", "rotation"):
+    for name in ("brightness", "poll_seconds", "soon_days", "rotation", "weather_poll_minutes"):
         if isinstance(data.get(name), int):
             setattr(cfg, name, data[name])
 
