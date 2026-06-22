@@ -268,7 +268,7 @@ async def save_scale(payload: ScalePayload):
 
 @router.post("/save")
 async def save_setup(payload: SetupPayload):
-    data = payload.model_dump()
+    data = payload.model_dump(exclude_unset=True)
     for f in _SECRET_FIELDS:
         if data.get(f) == "":
             data.pop(f, None)        # blank = keep existing value
