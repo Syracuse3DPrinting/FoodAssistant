@@ -31,7 +31,8 @@ set -euo pipefail
 DRY_RUN="${DRY_RUN:-0}"
 # STEPS= comma-list of step names to run instead of the full sequence, bypassing
 # the done-marker check and skipping mark_done.  Valid names: hostname, timezone,
-# mdns, docker, stack, rotation, kiosk, streamdeck.  Leave empty (the default) to run all.
+# mdns, docker, stack, rotation, kiosk, streamdeck, hostbridge.  Leave empty (the
+# default) to run all.
 # Example: STEPS=streamdeck sudo bash firstboot.sh
 STEPS="${STEPS:-}"
 LOG_FILE="${LOG_FILE:-/var/log/foodassistant-firstboot.log}"
@@ -654,6 +655,47 @@ EOF
   systemctl start foodassistant-streamdeck.service || warn "streamdeck service start failed (will retry on boot)"
 }
 
+# Step: host bridge (Pi Hosted / server modes only, not Pi Remote)
+# Installs a small localhost HTTP helper that lets the Docker container call
+# host-level operations (Wi-Fi, hostname, KMS rotation, service restarts)
+# without needing privileged access inside the container. The app container
+# reaches it on 127.0.0.1:9299 because docker-compose.appliance.yml uses
+# network_mode: host.
+install_host_bridge() {
+  is_remote_mode && return 0   # thin remote has no local app container
+
+  local bridge_src="" svc_src=""
+  for candidate in "$ASSET_DIR/foodassistant-host-bridge" \
+                   "$REPO_DIR/scripts/image-build/foodassistant-host-bridge"; do
+    [ -f "$candidate" ] && bridge_src="$candidate" && break
+  done
+  for candidate in "$ASSET_DIR/foodassistant-host-bridge.service" \
+                   "$REPO_DIR/scripts/image-build/foodassistant-host-bridge.service"; do
+    [ -f "$candidate" ] && svc_src="$candidate" && break
+  done
+
+  if [ -z "$bridge_src" ]; then
+    warn "foodassistant-host-bridge not found; skipping host bridge install"
+    return 0
+  fi
+
+  log "Installing host bridge from $bridge_src"
+  if [ "$DRY_RUN" = "1" ]; then
+    log "DRY_RUN would install host bridge and systemd unit"
+    return 0
+  fi
+
+  install -m 755 "$bridge_src" /usr/local/bin/foodassistant-host-bridge
+  if [ -n "$svc_src" ]; then
+    install -m 644 "$svc_src" /etc/systemd/system/foodassistant-host-bridge.service
+    systemctl daemon-reload
+    systemctl enable --now foodassistant-host-bridge.service \
+      || warn "host bridge service enable failed"
+  else
+    warn "foodassistant-host-bridge.service not found; bridge installed but not started"
+  fi
+}
+
 # Step: mark done
 mark_done() {
   if [ "$DRY_RUN" = "1" ]; then
@@ -735,6 +777,7 @@ main() {
 
   _step_requested "docker"      && install_docker
   _step_requested "stack"       && deploy_stack
+  _step_requested "hostbridge"  && install_host_bridge
   _step_requested "rotation"    && configure_display_rotation
   _step_requested "kiosk"       && configure_kiosk
   _step_requested "streamdeck"  && configure_streamdeck
