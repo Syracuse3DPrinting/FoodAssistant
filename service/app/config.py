@@ -306,7 +306,7 @@ if _sf.exists():
     try:
         _saved = json.loads(_sf.read_text())
         for _k, _v in _saved.items():
-            if _k in _SAVEABLE and _v and not getattr(settings, _k, ""):
+            if _k in _SAVEABLE and _k not in settings.model_fields_set:
                 object.__setattr__(settings, _k, _v)
     except Exception:
         pass
