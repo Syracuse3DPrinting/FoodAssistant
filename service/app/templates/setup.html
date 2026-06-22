@@ -458,27 +458,44 @@
         <i class="bi bi-chevron-down ms-auto"></i>
       </button>
       <div class="collapse mt-3" id="mealie-collapse">
-        <p class="text-secondary small">Enables the Recipes, Cook, Meal Plan, and Shopping pages.
-          Run with <code>docker compose --profile with-mealie up -d</code> (port 9285).</p>
-        <div class="mb-3">
-          <label class="form-label">Mealie URL <span class="text-secondary small">(internal — for API calls)</span></label>
-          <input type="url" class="form-control" id="mealie_base_url"
-                 placeholder="http://192.168.1.10:9285" value="{{ s.mealie_base_url }}">
-        </div>
-        <div class="mb-3">
-          <label class="form-label">Mealie Public URL <span class="text-secondary small">(optional — for browser links)</span></label>
-          <input type="url" class="form-control" id="mealie_public_url"
-                 placeholder="https://mealie.example.com" value="{{ s.mealie_public_url }}">
-        </div>
-        <div class="mb-3">
-          <label class="form-label">Mealie API Token</label>
-          {{ secret_input('mealie_api_key', 'Mealie → User Profile → API Tokens') }}
-        </div>
-        <button class="btn btn-outline-info btn-sm" onclick="testMealie()">
-          <i class="bi bi-plug me-1"></i>Test Connection
-        </button>
-        <div class="test-result" id="mealie-result"></div>
-      </div>
+  <p class="text-secondary small">Mealie manages recipes, meal plans, and shopping lists. Add it any time from Settings.</p>
+  {% if is_pi %}
+  <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+    <button class="btn btn-outline-info btn-sm" type="button" onclick="startMealie(this)">
+      <i class="bi bi-play me-1"></i>Start Mealie on this device
+    </button>
+    <a class="btn btn-outline-secondary btn-sm" id="wiz-mealie-open" href="{{ suggested_mealie_url or '#' }}" target="_blank">
+      <i class="bi bi-box-arrow-up-right me-1"></i>Open Mealie
+    </a>
+  </div>
+  <div class="test-result mb-2" id="mealie-start-result"></div>
+  <p class="text-secondary small">Start Mealie, open it in a new tab, sign in as admin, go to User Profile, and create an API token. Paste the token below.</p>
+  {% endif %}
+  <div class="mb-3">
+    <label class="form-label">Mealie URL <span class="text-secondary small">(internal, for API calls)</span></label>
+    <div class="input-group">
+      <input type="url" class="form-control" id="mealie_base_url"
+             placeholder="http://192.168.1.10:9285"
+             value="{{ s.mealie_base_url or suggested_mealie_url }}">
+      <a class="btn btn-outline-secondary" id="mealie-url-open" href="{{ suggested_mealie_url or '#' }}" target="_blank" title="Open Mealie in new tab">
+        <i class="bi bi-box-arrow-up-right"></i>
+      </a>
+    </div>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Mealie Public URL <span class="text-secondary small">(optional, for browser links)</span></label>
+    <input type="url" class="form-control" id="mealie_public_url"
+           placeholder="https://mealie.example.com" value="{{ s.mealie_public_url }}">
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Mealie API Token</label>
+    {{ secret_input('mealie_api_key', 'Mealie: User Profile > API Tokens') }}
+  </div>
+  <button class="btn btn-outline-info btn-sm" onclick="testMealie()">
+    <i class="bi bi-plug me-1"></i>Test Connection
+  </button>
+  <div class="test-result" id="mealie-result"></div>
+</div>
     </div>
 
     <!-- Collapsible External Recipes section -->
@@ -663,7 +680,7 @@
           <div class="section-card">
             <div class="section-title"><i class="bi bi-fridge text-info"></i> Grocy — Inventory Backend</div>
             <p class="text-secondary small">Grocy stores your stock, locations, and consumption history.
-              Run one with <code>docker compose --profile with-grocy up -d</code> (port 9383).</p>
+              {% if is_pi %}Grocy is running on this device at port 9383.{% else %}Connect to a Grocy instance running on your network or server.{% endif %}</p>
             <div class="mb-3">
               <label class="form-label">Grocy URL</label>
               <input type="url" class="form-control" id="grocy_base_url"
@@ -890,12 +907,29 @@
           <div class="section-card">
             <div class="section-title"><i class="bi bi-journal-richtext text-primary"></i> Mealie — Recipe Manager
               <span class="badge bg-secondary badge-req">Optional</span></div>
-            <p class="text-secondary small">Enables the Recipes, Cook, Meal Plan, and Shopping pages.
-              Run one with <code>docker compose --profile with-mealie up -d</code> (port 9285).</p>
+            <p class="text-secondary small">Enables the Recipes, Cook, Meal Plan, and Shopping pages.</p>
+            {% if is_pi %}
+            <div class="mb-3">
+              <button class="btn btn-outline-info btn-sm" type="button" onclick="startMealie(this)">
+                <i class="bi bi-play me-1"></i>Start Mealie on this device
+              </button>
+              {% if suggested_mealie_url %}
+              <a class="btn btn-outline-secondary btn-sm ms-1" href="{{ suggested_mealie_url }}" target="_blank">
+                <i class="bi bi-box-arrow-up-right me-1"></i>Open Mealie
+              </a>
+              {% endif %}
+              <div class="test-result mt-1" id="mealie-start-result"></div>
+            </div>
+            {% endif %}
             <div class="mb-3">
               <label class="form-label">Mealie URL <span class="text-secondary small">(internal — used for API calls)</span></label>
-              <input type="url" class="form-control" id="mealie_base_url"
-                     placeholder="http://192.168.1.10:9285" value="{{ s.mealie_base_url }}">
+              <div class="input-group">
+                <input type="url" class="form-control" id="mealie_base_url"
+                       placeholder="http://192.168.1.10:9285" value="{{ s.mealie_base_url or suggested_mealie_url }}">
+                <a class="btn btn-outline-secondary" id="mealie-open-link" href="{{ suggested_mealie_url or s.mealie_base_url or '#' }}" target="_blank" title="Open Mealie in new tab">
+                  <i class="bi bi-box-arrow-up-right"></i>
+                </a>
+              </div>
             </div>
             <div class="mb-3">
               <label class="form-label">Mealie Public URL <span class="text-secondary small">(optional — used for browser links)</span></label>
@@ -1642,6 +1676,22 @@ async function testGrocy() {
   const d = await postJson('setup/test/grocy',
     {grocy_base_url: val('grocy_base_url'), grocy_api_key: secretVal('grocy_api_key')});
   setResult('grocy-result', d.ok, d.ok ? d.message : d.error);
+}
+
+async function startMealie(btn) {
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Starting...';
+  try {
+    const r = await fetch('setup/mealie/start', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
+    const d = await r.json();
+    setResult('mealie-start-result', d.ok, d.ok ? 'Mealie started. Open it to create an API token, then paste it below.' : (d.error || 'Failed.'));
+  } catch(e) {
+    setResult('mealie-start-result', false, e.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
 }
 
 async function testMealie() {

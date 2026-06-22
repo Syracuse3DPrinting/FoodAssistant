@@ -17,6 +17,8 @@ POST /hostname             change hostname       {hostname}
 GET  /display/rotation     current KMS rotation (from /boot/firmware/config.txt)
 POST /display/rotation     set KMS rotation      {degrees, reboot?}
 POST /streamdeck/restart   restart Stream Deck service
+GET  /mealie/status        whether the Mealie container is running
+POST /mealie/start         start Mealie via docker compose --profile with-mealie up -d
 """
 import http.server
 import json
@@ -26,6 +28,7 @@ import sys
 
 LISTEN_HOST = "127.0.0.1"
 LISTEN_PORT = 9299
+INSTALL_DIR = "/opt/foodassistant"
 
 
 class _Handler(http.server.BaseHTTPRequestHandler):
@@ -48,6 +51,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._get_hostname()
         elif self.path == "/display/rotation":
             self._get_rotation()
+        elif self.path == "/mealie/status":
+            self._mealie_status()
         else:
             self._send(404, {"error": "not found"})
 
@@ -60,6 +65,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._set_rotation()
         elif self.path == "/streamdeck/restart":
             self._streamdeck_restart()
+        elif self.path == "/mealie/start":
+            self._mealie_start()
         else:
             self._send(404, {"error": "not found"})
 
@@ -171,6 +178,34 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, {"ok": True})
         except subprocess.CalledProcessError as e:
             self._send(500, {"ok": False, "error": str(e)})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _mealie_status(self):
+        try:
+            r = subprocess.run(
+                ["docker", "compose", "ps", "--format=json", "mealie"],
+                cwd=INSTALL_DIR,
+                capture_output=True, text=True, timeout=10
+            )
+            running = bool(r.stdout.strip()) and r.returncode == 0
+            self._send(200, {"ok": True, "running": running})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _mealie_start(self):
+        try:
+            r = subprocess.run(
+                ["docker", "compose", "--profile", "with-mealie", "up", "-d"],
+                cwd=INSTALL_DIR,
+                capture_output=True, text=True, timeout=120
+            )
+            if r.returncode == 0:
+                self._send(200, {"ok": True})
+            else:
+                self._send(500, {"ok": False, "error": (r.stderr or r.stdout).strip()})
+        except subprocess.TimeoutExpired:
+            self._send(500, {"ok": False, "error": "Timed out starting Mealie."})
         except Exception as e:
             self._send(500, {"ok": False, "error": str(e)})
 
