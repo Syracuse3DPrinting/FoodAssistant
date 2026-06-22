@@ -383,6 +383,23 @@ REMOTE_SERVER_URL=${REMOTE_SERVER_URL:-}
 ENV
   chmod 600 "$env_file"
 
+  # Seed the app's settings.json so it starts as "configured" without going
+  # through the wizard. auth_required=false because Pi Remote is a LAN-only
+  # control surface; the main server handles all sensitive data.
+  local settings_file="$INSTALL_DIR/data/settings.json"
+  mkdir -p "$(dirname "$settings_file")"
+  if [ ! -f "$settings_file" ]; then
+    cat > "$settings_file" <<EOF
+{
+  "deployment_mode": "pi_remote",
+  "remote_server_url": "${REMOTE_SERVER_URL:-}",
+  "auth_required": false
+}
+EOF
+    chmod 600 "$settings_file"
+    log "Seeded $settings_file for Pi Remote"
+  fi
+
   # Write the remote compose file
   local compose_src="$REPO_DIR/scripts/image-build/docker-compose.remote.yml"
   if [ ! -f "$compose_src" ]; then

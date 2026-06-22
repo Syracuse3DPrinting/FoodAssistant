@@ -27,6 +27,14 @@ services:
       - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-pi_remote}
       - REMOTE_SERVER_URL=${REMOTE_SERVER_URL:-}
       - FOODASSISTANT_FORCE_MODEL=Raspberry Pi
+      # Pi Remote is a LAN-only control surface — no local auth needed.
+      # Set AUTH_REQUIRED=true in .env if you want to password-protect the
+      # local settings UI (e.g. if the device is on a shared network).
+      - AUTH_REQUIRED=${AUTH_REQUIRED:-false}
+      # API_KEY lets the main FoodAssistant server reach this device's API
+      # to push config changes (Stream Deck layout, display rotation, etc.).
+      # Generate one with: openssl rand -hex 32
+      - API_KEY=${API_KEY:-}
     volumes:
       - ./data:/app/data
     restart: unless-stopped
