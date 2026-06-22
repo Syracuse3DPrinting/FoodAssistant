@@ -138,8 +138,8 @@ _load_mode_from_settings() {
   local sf="${SETTINGS_JSON:-$INSTALL_DIR/data/settings.json}"
   [ -r "$sf" ] || return 0
   local mode url
-  mode="$(grep -o '"deployment_mode"[[:space:]]*:[[:space:]]*"[^"]*"' "$sf" 2>/dev/null | sed 's/.*"\([^"]*\)"$/\1/')"
-  url="$(grep -o '"remote_server_url"[[:space:]]*:[[:space:]]*"[^"]*"' "$sf" 2>/dev/null | sed 's/.*"\([^"]*\)"$/\1/')"
+  mode="$(grep -o '"deployment_mode"[[:space:]]*:[[:space:]]*"[^"]*"' "$sf" 2>/dev/null | sed 's/.*"\([^"]*\)"$/\1/' || true)"
+  url="$(grep -o '"remote_server_url"[[:space:]]*:[[:space:]]*"[^"]*"' "$sf" 2>/dev/null | sed 's/.*"\([^"]*\)"$/\1/' || true)"
   [ -n "$mode" ] && DEPLOYMENT_MODE="$mode"
   [ -n "$url" ] && REMOTE_SERVER_URL="$url"
 }
