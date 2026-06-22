@@ -597,17 +597,22 @@
   <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 my-3">
     <div class="logo"><i class="bi bi-fridge me-2 text-primary"></i>FoodAssistant
       <span class="text-secondary fw-normal fs-6 ms-1">Settings</span></div>
+    {% if s.deployment_mode == 'pi_remote' and s.remote_server_url %}
+    <a href="{{ s.remote_server_url }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Back to app</a>
+    {% else %}
     <a href="ui/" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Back to app</a>
+    {% endif %}
   </div>
 
+  {% set _is_remote = (s.deployment_mode == 'pi_remote') %}
   {% set _inv_ok = s.grocy_api_key and s.grocy_base_url and s.grocy_base_url != 'http://grocy:80' %}
   {% set _sec_ok = (not s.auth_required) or s.auth_password %}
-  {% if not _inv_ok or not _sec_ok %}
+  {% if (not _is_remote and not _inv_ok) or not _sec_ok %}
   <div class="alert alert-warning py-2 small mb-3 d-flex align-items-center gap-2">
     <i class="bi bi-exclamation-triangle-fill flex-shrink-0"></i>
     <span>
-      {%- if not _inv_ok %}Grocy is not configured — inventory features need a Grocy URL and API key.{% endif %}
-      {%- if not _inv_ok and not _sec_ok %} &nbsp;{% endif %}
+      {%- if not _is_remote and not _inv_ok %}Grocy is not configured — inventory features need a Grocy URL and API key.{% endif %}
+      {%- if not _is_remote and not _inv_ok and not _sec_ok %} &nbsp;{% endif %}
       {%- if not _sec_ok %}Set a password in Security to protect the app.{% endif %}
     </span>
   </div>
@@ -624,6 +629,12 @@
         {% set rec_ok = s.mealie_api_key %}
         {% set sec_ok = (not s.auth_required) or s.auth_password %}
         <div class="nav flex-column nav-pills gap-1" role="tablist">
+          {% if s.deployment_mode == 'pi_remote' %}
+          <button class="nav-link active d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-remote-control" type="button">
+            <i class="bi bi-dpad me-2"></i>Remote Control
+            <i class="bi bi-{{ 'check-circle-fill text-success' if s.remote_server_url else 'exclamation-circle-fill text-warning' }} ms-auto" title="{{ 'Configured' if s.remote_server_url else 'Not configured' }}"></i>
+          </button>
+          {% else %}
           <button class="nav-link active d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-inventory" type="button">
             <i class="bi bi-fridge me-2"></i>Inventory
             <i class="bi bi-{{ 'check-circle-fill text-success' if inv_ok else 'exclamation-circle-fill text-warning' }} ms-auto" title="{{ 'Configured' if inv_ok else 'Not configured' }}"></i>
@@ -636,6 +647,7 @@
             <i class="bi bi-journal-richtext me-2"></i>Recipes
             <i class="bi bi-{{ 'check-circle-fill text-success' if rec_ok else 'dash-circle text-secondary' }} ms-auto" title="{{ 'Configured' if rec_ok else 'Optional' }}"></i>
           </button>
+          {% endif %}
           <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-interface" type="button">
             <i class="bi bi-layout-sidebar me-2"></i>Interface
           </button>
@@ -643,12 +655,14 @@
             <i class="bi bi-shield-lock me-2"></i>Security
             <i class="bi bi-{{ 'check-circle-fill text-success' if sec_ok else 'exclamation-circle-fill text-warning' }} ms-auto" title="{{ 'Configured' if sec_ok else 'Password required' }}"></i>
           </button>
+          {% if s.deployment_mode != 'pi_remote' %}
           <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-data" type="button">
             <i class="bi bi-cloud-arrow-down me-2"></i>Backup &amp; Updates
           </button>
           <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-tunnel" type="button">
             <i class="bi bi-globe me-2"></i>Remote Access
           </button>
+          {% endif %}
           {% if is_pi %}
           <div class="nav-link text-secondary px-2 mt-2 mb-0" style="font-size:0.7rem;letter-spacing:.06em;text-transform:uppercase;">Appliance</div>
           <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-display" type="button" onclick="loadDisplayStatus(); loadHardwareStatus()">
@@ -673,6 +687,29 @@
     <div class="col-md-9">
       <div class="tab-content">
 
+        {% if s.deployment_mode == 'pi_remote' %}
+        <!-- Remote Control (Pi Remote only) -->
+        <div class="tab-pane fade show active" id="pane-remote-control">
+          <p class="pane-intro">The FoodAssistant server this remote node controls.</p>
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-server text-info"></i> Target Server</div>
+            <p class="text-secondary small">This remote node acts as a display and Stream Deck controller for a
+              full FoodAssistant instance running elsewhere on your network.</p>
+            <div class="mb-3">
+              <label class="form-label">Server URL</label>
+              <input type="url" class="form-control" id="remote_server_url_settings"
+                     placeholder="http://192.168.1.10:9284"
+                     value="{{ s.remote_server_url }}">
+              <div class="form-text">Full URL including port (usually 9284).</div>
+            </div>
+            <button class="btn btn-outline-info btn-sm" onclick="testRemoteSettings()">
+              <i class="bi bi-plug me-1"></i>Test Connection
+            </button>
+            <div class="test-result" id="remote-settings-result"></div>
+          </div>
+        </div>
+        {% else %}
         <!-- Inventory (Grocy + storage) -->
         <div class="tab-pane fade show active" id="pane-inventory">
           <p class="pane-intro">Where your stock lives: the Grocy backend and the storage buckets it's grouped into.</p>
@@ -1024,6 +1061,7 @@
             </div>
           </div>
         </div>
+        {% endif %}
 
         <!-- Interface -->
         <div class="tab-pane fade" id="pane-interface">
@@ -1159,6 +1197,7 @@
           </div>
         </div>
 
+        {% if s.deployment_mode != 'pi_remote' %}
         <!-- Remote Access -->
         <div class="tab-pane fade" id="pane-tunnel">
           <p class="pane-intro">Expose FoodAssistant over the internet without port-forwarding your router.</p>
@@ -1306,6 +1345,7 @@ docker compose up -d</code></pre>
             </div>
           </div>
         </div>
+        {% endif %}
 
         {% if is_pi %}
 
@@ -1958,9 +1998,29 @@ function buildPayload() {
     // _installMode is defined only in the first-time wizard; on the settings
     // form it is undefined and these are simply omitted (kept as-is server-side).
     deployment_mode: (typeof _installMode !== 'undefined' && _installMode) ? _installMode : undefined,
-    remote_server_url: val('remote_server_url') || undefined,
+    remote_server_url: val('remote_server_url') || val('remote_server_url_settings') || undefined,
   };
 }
+
+async function testRemoteSettings() {
+  const out = document.getElementById('remote-settings-result');
+  if (out) { out.className = 'test-result text-secondary'; out.textContent = 'Testing…'; }
+  try {
+    const r = await fetch('setup/test/remote', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({remote_server_url: val('remote_server_url_settings') || ''}),
+    });
+    const d = await r.json();
+    if (out) {
+      out.className = 'test-result ' + (d.ok ? 'text-success' : 'text-danger');
+      out.textContent = d.ok ? d.message : (d.error || 'Connection failed.');
+    }
+  } catch (e) {
+    if (out) { out.className = 'test-result text-danger'; out.textContent = String(e); }
+  }
+}
+
 
 // TOTP 2FA
 let _totpSecret = '';
