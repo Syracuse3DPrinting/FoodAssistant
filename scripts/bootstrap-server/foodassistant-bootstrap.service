@@ -1,0 +1,18 @@
+[Unit]
+Description=FoodAssistant Web Installer (bootstrap)
+Documentation=https://github.com/Syracuse3DPrinting/FoodAssistant
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/foodassistant-src/scripts/bootstrap-server/bootstrap_server.py
+Environment=REPO_DIR=/opt/foodassistant-src
+Environment=BOOTSTRAP_PORT=80
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

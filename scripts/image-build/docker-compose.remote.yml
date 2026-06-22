@@ -1,0 +1,31 @@
+# FoodAssistant Pi Remote compose
+# ================================
+# Used by Pi Remote devices: runs the FoodAssistant app only (no Grocy/Mealie)
+# on port 80 so users can reach the settings UI at http://<hostname>.local
+#
+# Differences from docker-compose.appliance.yml:
+#   - No Grocy service (Pi Remote has no local inventory stack).
+#   - Port 80:9284 instead of network_mode: host (keeps the footprint light).
+#   - DEPLOYMENT_MODE and REMOTE_SERVER_URL are injected so the app knows it's
+#     a thin client and points hardware features at the remote server.
+services:
+  service:
+    image: ghcr.io/syracuse3dprinting/foodassistant:${FOODASSISTANT_TAG:-latest}
+    build:
+      context: ${REPO_DIR:-/opt/foodassistant-src}/service
+      dockerfile: Dockerfile
+    container_name: foodassistant-service
+    # Port 80 → 9284: the local settings UI is reachable at http://<hostname>.local
+    ports:
+      - "80:9284"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - TZ=${TZ:-America/New_York}
+      - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-pi_remote}
+      - REMOTE_SERVER_URL=${REMOTE_SERVER_URL:-}
+      - FOODASSISTANT_FORCE_MODEL=Raspberry Pi
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

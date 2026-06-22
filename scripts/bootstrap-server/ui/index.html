@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FoodAssistant Setup</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d0f14;
+      --bg2:       #13161e;
+      --bg3:       #1c202b;
+      --border:    #2a2f3e;
+      --primary:   #4f8ef7;
+      --primary-h: #3a7af0;
+      --success:   #22c55e;
+      --warning:   #f59e0b;
+      --danger:    #ef4444;
+      --text:      #e8eaf0;
+      --text-dim:  #8b91a8;
+      --text-muted:#525878;
+      --radius:    12px;
+      --radius-sm: 8px;
+      --shadow:    0 4px 24px rgba(0,0,0,.45);
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem 4rem;
+    }
+
+    /* ── Header ── */
+    .header {
+      text-align: center;
+      margin-bottom: 2.5rem;
+    }
+    .logo {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-size: 1.6rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      margin-bottom: 0.4rem;
+    }
+    .logo-icon {
+      width: 2.2rem;
+      height: 2.2rem;
+      background: linear-gradient(135deg, #4f8ef7 0%, #a855f7 100%);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+    }
+    .header-sub {
+      color: var(--text-dim);
+      font-size: 0.9rem;
+      font-weight: 400;
+    }
+
+    /* ── Progress stepper ── */
+    .stepper {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      margin-bottom: 2.5rem;
+      width: 100%;
+      max-width: 520px;
+    }
+    .step-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      flex: 1;
+      position: relative;
+    }
+    .step-circle {
+      width: 2.2rem;
+      height: 2.2rem;
+      border-radius: 50%;
+      border: 2px solid var(--border);
+      background: var(--bg3);
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8rem;
+      font-weight: 600;
+      transition: all 0.3s;
+      z-index: 1;
+    }
+    .step-circle.active {
+      border-color: var(--primary);
+      background: var(--primary);
+      color: #fff;
+      box-shadow: 0 0 0 4px rgba(79,142,247,.2);
+    }
+    .step-circle.done {
+      border-color: var(--success);
+      background: var(--success);
+      color: #fff;
+    }
+    .step-label {
+      font-size: 0.65rem;
+      color: var(--text-muted);
+      margin-top: 0.35rem;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .step-label.active { color: var(--primary); font-weight: 600; }
+    .step-label.done   { color: var(--success); }
+    .step-line {
+      flex: 1;
+      height: 2px;
+      background: var(--border);
+      margin-bottom: 1.5rem;
+      transition: background 0.3s;
+    }
+    .step-line.done { background: var(--success); }
+
+    /* ── Card ── */
+    .card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 2rem;
+      width: 100%;
+      max-width: 640px;
+      box-shadow: var(--shadow);
+    }
+    .card-title {
+      font-size: 1.15rem;
+      font-weight: 600;
+      margin-bottom: 0.3rem;
+    }
+    .card-sub {
+      font-size: 0.85rem;
+      color: var(--text-dim);
+      margin-bottom: 1.5rem;
+    }
+
+    /* ── Hardware badges ── */
+    .hw-badges {
+      display: flex;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+      margin-bottom: 1.5rem;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.35rem 0.75rem;
+      border-radius: 99px;
+      font-size: 0.78rem;
+      font-weight: 500;
+      border: 1px solid;
+    }
+    .badge-ok   { background: rgba(34,197,94,.1); border-color: rgba(34,197,94,.3); color: var(--success); }
+    .badge-info { background: rgba(79,142,247,.1); border-color: rgba(79,142,247,.3); color: var(--primary); }
+    .badge-dim  { background: rgba(139,145,168,.08); border-color: var(--border); color: var(--text-muted); }
+
+    /* ── Mode cards ── */
+    .mode-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 0.75rem;
+      margin-bottom: 1.5rem;
+    }
+    @media (max-width: 520px) { .mode-grid { grid-template-columns: 1fr; } }
+
+    .mode-card {
+      background: var(--bg3);
+      border: 2px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 1.1rem 0.9rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-align: center;
+      user-select: none;
+    }
+    .mode-card:hover { border-color: var(--primary); background: rgba(79,142,247,.06); }
+    .mode-card.selected {
+      border-color: var(--primary);
+      background: rgba(79,142,247,.1);
+      box-shadow: 0 0 0 3px rgba(79,142,247,.15);
+    }
+    .mode-icon { font-size: 2rem; margin-bottom: 0.5rem; }
+    .mode-name { font-size: 0.85rem; font-weight: 600; margin-bottom: 0.25rem; }
+    .mode-desc { font-size: 0.72rem; color: var(--text-dim); line-height: 1.4; }
+
+    /* ── Form fields ── */
+    .field { margin-bottom: 1rem; }
+    .field label { display: block; font-size: 0.82rem; font-weight: 500; margin-bottom: 0.4rem; color: var(--text-dim); }
+    .field input[type=text], .field input[type=url] {
+      width: 100%;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 0.6rem 0.85rem;
+      color: var(--text);
+      font-size: 0.88rem;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .field input:focus { border-color: var(--primary); }
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.7rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .toggle-row:last-child { border-bottom: none; }
+    .toggle-info { font-size: 0.85rem; }
+    .toggle-hint { font-size: 0.72rem; color: var(--text-dim); margin-top: 0.15rem; }
+
+    /* Toggle switch */
+    .toggle { position: relative; display: inline-block; width: 2.4rem; height: 1.3rem; flex-shrink: 0; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute; inset: 0;
+      background: var(--border);
+      border-radius: 99px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .toggle-slider::before {
+      content: "";
+      position: absolute;
+      width: 1rem; height: 1rem;
+      left: 0.15rem; top: 0.15rem;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.2s;
+    }
+    .toggle input:checked + .toggle-slider { background: var(--primary); }
+    .toggle input:checked + .toggle-slider::before { transform: translateX(1.1rem); }
+
+    /* ── Terminal log ── */
+    .terminal {
+      background: #080a0f;
+      border: 1px solid #1e2433;
+      border-radius: var(--radius-sm);
+      padding: 1rem;
+      height: 340px;
+      overflow-y: auto;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.78rem;
+      line-height: 1.6;
+      color: #c8cdd8;
+      margin-bottom: 1.25rem;
+      scroll-behavior: smooth;
+    }
+    .terminal .log-line { white-space: pre-wrap; word-break: break-all; }
+    .terminal .log-ok   { color: var(--success); }
+    .terminal .log-warn { color: var(--warning); }
+    .terminal .log-err  { color: var(--danger); }
+    .terminal .log-info { color: var(--primary); }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.65rem 1.4rem;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-size: 0.88rem;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-decoration: none;
+    }
+    .btn-primary {
+      background: var(--primary);
+      color: #fff;
+    }
+    .btn-primary:hover:not(:disabled) { background: var(--primary-h); transform: translateY(-1px); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost:hover { border-color: var(--text-dim); color: var(--text); }
+
+    .btn-row {
+      display: flex;
+      gap: 0.75rem;
+      justify-content: flex-end;
+      margin-top: 1.5rem;
+    }
+
+    /* ── Success state ── */
+    .success-icon {
+      width: 4rem; height: 4rem;
+      background: rgba(34,197,94,.15);
+      border: 2px solid var(--success);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.8rem;
+      margin: 0 auto 1.25rem;
+    }
+    .success-url {
+      display: inline-block;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 0.5rem 1rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.88rem;
+      color: var(--primary);
+      margin-top: 0.5rem;
+      word-break: break-all;
+    }
+
+    /* ── Spinner ── */
+    .spinner {
+      width: 1rem; height: 1rem;
+      border: 2px solid rgba(255,255,255,.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Step visibility ── */
+    .step-pane { display: none; }
+    .step-pane.active { display: block; }
+
+    /* ── Error alert ── */
+    .alert-err {
+      background: rgba(239,68,68,.1);
+      border: 1px solid rgba(239,68,68,.3);
+      border-radius: var(--radius-sm);
+      padding: 0.75rem 1rem;
+      font-size: 0.82rem;
+      color: #fca5a5;
+      margin-bottom: 1rem;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="logo">
+      <div class="logo-icon">🍽</div>
+      FoodAssistant
+    </div>
+    <div class="header-sub">Device Setup</div>
+  </div>
+
+  <!-- Stepper -->
+  <div class="stepper" id="stepper">
+    <div class="step-item">
+      <div class="step-circle active" id="sc-0">1</div>
+      <div class="step-label active" id="sl-0">Detect</div>
+    </div>
+    <div class="step-line" id="line-0"></div>
+    <div class="step-item">
+      <div class="step-circle" id="sc-1">2</div>
+      <div class="step-label" id="sl-1">Choose Mode</div>
+    </div>
+    <div class="step-line" id="line-1"></div>
+    <div class="step-item">
+      <div class="step-circle" id="sc-2">3</div>
+      <div class="step-label" id="sl-2">Install</div>
+    </div>
+    <div class="step-line" id="line-2"></div>
+    <div class="step-item">
+      <div class="step-circle" id="sc-3">4</div>
+      <div class="step-label" id="sl-3">Done</div>
+    </div>
+  </div>
+
+  <!-- ── Step 0: Hardware Detection ── -->
+  <div class="card step-pane active" id="pane-0">
+    <div class="card-title">Detecting your hardware…</div>
+    <div class="card-sub">Checking what's connected to this device.</div>
+    <div class="hw-badges" id="hw-badges">
+      <span class="badge badge-dim"><span class="spinner"></span> Scanning…</span>
+    </div>
+    <div class="alert-err" id="detect-err">Could not reach the device API. Make sure the bootstrap server is running.</div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="btn-next-0" disabled onclick="goStep(1)">Continue →</button>
+    </div>
+  </div>
+
+  <!-- ── Step 1: Mode Selection ── -->
+  <div class="card step-pane" id="pane-1">
+    <div class="card-title">How will this device be used?</div>
+    <div class="card-sub">Choose the deployment mode. You can change this later in Settings.</div>
+
+    <div class="mode-grid">
+      <div class="mode-card" id="mode-pi_hosted" onclick="selectMode('pi_hosted')">
+        <div class="mode-icon">🖥️</div>
+        <div class="mode-name">Pi Hosted</div>
+        <div class="mode-desc">Full stack on this Pi — FoodAssistant, Grocy &amp; optional Mealie</div>
+      </div>
+      <div class="mode-card" id="mode-pi_remote" onclick="selectMode('pi_remote')">
+        <div class="mode-icon">📡</div>
+        <div class="mode-name">Pi Remote</div>
+        <div class="mode-desc">Thin client — kiosk &amp; Stream Deck pointed at another server</div>
+      </div>
+      <div class="mode-card" id="mode-server" onclick="selectMode('server')">
+        <div class="mode-icon">🌐</div>
+        <div class="mode-name">Server</div>
+        <div class="mode-desc">Generic Debian / Ubuntu host (no Pi hardware features)</div>
+      </div>
+    </div>
+
+    <!-- Pi Remote: server URL -->
+    <div class="field" id="remote-url-field" style="display:none">
+      <label for="remote-url">Main FoodAssistant Server URL</label>
+      <input type="url" id="remote-url" placeholder="http://192.168.1.50:9284" autocomplete="off">
+    </div>
+
+    <!-- Hardware toggles (auto-detected, user can override) -->
+    <div id="hw-toggles">
+      <div class="toggle-row" id="toggle-kiosk-row">
+        <div class="toggle-info">
+          <div>Enable Kiosk display</div>
+          <div class="toggle-hint" id="kiosk-hint">HDMI display not detected — enable anyway?</div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="toggle-kiosk"><span class="toggle-slider"></span></label>
+      </div>
+      <div class="toggle-row" id="toggle-sd-row">
+        <div class="toggle-info">
+          <div>Enable Stream Deck</div>
+          <div class="toggle-hint" id="sd-hint">Stream Deck not detected — enable anyway?</div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="toggle-sd"><span class="toggle-slider"></span></label>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-ghost" onclick="goStep(0)">← Back</button>
+      <button class="btn btn-primary" id="btn-install" onclick="startInstall()" disabled>Install →</button>
+    </div>
+  </div>
+
+  <!-- ── Step 2: Installing ── -->
+  <div class="card step-pane" id="pane-2">
+    <div class="card-title">Installing…</div>
+    <div class="card-sub" id="install-sub">This takes 3–8 minutes depending on internet speed. Don't close this tab.</div>
+
+    <div class="terminal" id="terminal"></div>
+
+    <div class="alert-err" id="install-err"></div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="btn-next-2" style="display:none" onclick="goStep(3)">Continue →</button>
+    </div>
+  </div>
+
+  <!-- ── Step 3: Done ── -->
+  <div class="card step-pane" id="pane-3" style="text-align:center">
+    <div class="success-icon">✅</div>
+    <div class="card-title" style="text-align:center;margin-bottom:.5rem">FoodAssistant is ready!</div>
+    <p style="color:var(--text-dim);font-size:.88rem;margin-bottom:1.25rem">
+      Open the link below to complete configuration in the web UI.
+    </p>
+    <div id="done-url"></div>
+    <div class="btn-row" style="justify-content:center;margin-top:1.5rem">
+      <a class="btn btn-primary" id="btn-open" href="#" target="_blank">Open FoodAssistant →</a>
+    </div>
+  </div>
+
+<script>
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let currentStep = 0;
+let hw = { is_pi: false, has_display: false, has_streamdeck: false, hostname: 'foodassistant' };
+let selectedMode = null;
+
+// ---------------------------------------------------------------------------
+// Step navigation
+// ---------------------------------------------------------------------------
+function goStep(n) {
+  document.querySelectorAll('.step-pane').forEach((p, i) => p.classList.toggle('active', i === n));
+  document.querySelectorAll('.step-circle').forEach((c, i) => {
+    c.className = 'step-circle' + (i < n ? ' done' : i === n ? ' active' : '');
+    if (i < n) c.textContent = '✓';
+  });
+  document.querySelectorAll('.step-label').forEach((l, i) => {
+    l.className = 'step-label' + (i < n ? ' done' : i === n ? ' active' : '');
+  });
+  document.querySelectorAll('.step-line').forEach((l, i) => {
+    l.classList.toggle('done', i < n);
+  });
+  currentStep = n;
+}
+
+// ---------------------------------------------------------------------------
+// Step 0: Hardware detect
+// ---------------------------------------------------------------------------
+async function detectHardware() {
+  try {
+    const res = await fetch('/api/detect');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    hw = await res.json();
+    renderHWBadges();
+    document.getElementById('btn-next-0').disabled = false;
+  } catch (e) {
+    document.getElementById('detect-err').style.display = 'block';
+    document.getElementById('hw-badges').innerHTML =
+      '<span class="badge badge-dim">⚠ Detection failed</span>';
+    document.getElementById('btn-next-0').disabled = false; // let them proceed anyway
+  }
+}
+
+function renderHWBadges() {
+  const el = document.getElementById('hw-badges');
+  const badges = [];
+
+  if (hw.is_pi) {
+    badges.push(`<span class="badge badge-ok">🍓 ${hw.board_model || 'Raspberry Pi'}</span>`);
+  } else {
+    badges.push(`<span class="badge badge-info">💻 Generic host</span>`);
+  }
+
+  if (hw.has_display) {
+    badges.push(`<span class="badge badge-ok">🖥 Display detected</span>`);
+  } else {
+    badges.push(`<span class="badge badge-dim">🖥 No display</span>`);
+  }
+
+  if (hw.has_streamdeck) {
+    badges.push(`<span class="badge badge-ok">🎛 Stream Deck detected</span>`);
+  } else {
+    badges.push(`<span class="badge badge-dim">🎛 No Stream Deck</span>`);
+  }
+
+  badges.push(`<span class="badge badge-info">📡 ${hw.hostname || 'foodassistant'}.local</span>`);
+  el.innerHTML = badges.join('');
+}
+
+// ---------------------------------------------------------------------------
+// Step 1: Mode selection
+// ---------------------------------------------------------------------------
+function selectMode(mode) {
+  selectedMode = mode;
+  document.querySelectorAll('.mode-card').forEach(c => c.classList.remove('selected'));
+  document.getElementById('mode-' + mode).classList.add('selected');
+
+  const isRemote = mode === 'pi_remote';
+  document.getElementById('remote-url-field').style.display = isRemote ? 'block' : 'none';
+
+  // Populate hardware toggles based on detection + mode
+  const kiosk = document.getElementById('toggle-kiosk');
+  const sd = document.getElementById('toggle-sd');
+  const kioskHint = document.getElementById('kiosk-hint');
+  const sdHint = document.getElementById('sd-hint');
+
+  if (hw.has_display) {
+    kiosk.checked = true;
+    kioskHint.textContent = 'HDMI display detected.';
+  } else {
+    kiosk.checked = false;
+    kioskHint.textContent = 'No display detected — enable anyway?';
+  }
+
+  if (hw.has_streamdeck) {
+    sd.checked = true;
+    sdHint.textContent = 'Stream Deck detected.';
+  } else {
+    sd.checked = false;
+    sdHint.textContent = 'No Stream Deck detected — enable anyway?';
+  }
+
+  document.getElementById('btn-install').disabled = false;
+  validateInstall();
+}
+
+function validateInstall() {
+  const btn = document.getElementById('btn-install');
+  if (!selectedMode) { btn.disabled = true; return; }
+  if (selectedMode === 'pi_remote') {
+    const url = document.getElementById('remote-url').value.trim();
+    btn.disabled = !url;
+  } else {
+    btn.disabled = false;
+  }
+}
+
+document.getElementById('remote-url').addEventListener('input', validateInstall);
+
+// ---------------------------------------------------------------------------
+// Step 2: Install with SSE log streaming
+// ---------------------------------------------------------------------------
+async function startInstall() {
+  const config = {
+    deployment_mode: selectedMode,
+    remote_server_url: document.getElementById('remote-url').value.trim(),
+    enable_kiosk: document.getElementById('toggle-kiosk').checked,
+    enable_streamdeck: document.getElementById('toggle-sd').checked,
+  };
+
+  // Move to install step
+  goStep(2);
+  const terminal = document.getElementById('terminal');
+  terminal.innerHTML = '';
+
+  // POST to start the install
+  try {
+    const res = await fetch('/api/install', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.error || 'HTTP ' + res.status);
+    }
+  } catch (e) {
+    showInstallErr('Failed to start install: ' + e.message);
+    return;
+  }
+
+  // Open SSE stream
+  const evtSource = new EventSource('/api/log');
+
+  evtSource.onmessage = (e) => {
+    appendLog(e.data);
+  };
+
+  evtSource.addEventListener('done', (e) => {
+    evtSource.close();
+    if (e.data === 'success') {
+      buildDoneScreen();
+      setTimeout(() => goStep(3), 1200);
+    } else {
+      document.getElementById('install-sub').textContent = 'Installation failed. See log above for details.';
+      document.getElementById('btn-next-2').style.display = 'none';
+      showInstallErr('The provisioner exited with an error. Check the log window above.');
+    }
+  });
+
+  evtSource.onerror = () => {
+    // SSE closed — check if install actually succeeded
+    fetch('/api/status').then(r => r.json()).then(s => {
+      if (s.success) {
+        buildDoneScreen();
+        setTimeout(() => goStep(3), 800);
+      } else if (!s.running && s.done) {
+        showInstallErr('Lost connection to the installer. Re-open this page to check status.');
+      }
+      // If still running, the browser will reconnect automatically
+    }).catch(() => {});
+  };
+}
+
+function appendLog(text) {
+  const terminal = document.getElementById('terminal');
+  const line = document.createElement('div');
+  line.className = 'log-line';
+
+  // Colorize common patterns
+  const lower = text.toLowerCase();
+  if (lower.includes('error') || lower.includes('❌') || lower.includes('fail')) {
+    line.classList.add('log-err');
+  } else if (lower.includes('warn')) {
+    line.classList.add('log-warn');
+  } else if (lower.includes('✅') || lower.includes('[ok]') || lower.includes('complete')) {
+    line.classList.add('log-ok');
+  } else if (lower.includes('==>') || lower.includes('[firstboot]') || lower.includes('step:')) {
+    line.classList.add('log-info');
+  }
+
+  line.textContent = text;
+  terminal.appendChild(line);
+  terminal.scrollTop = terminal.scrollHeight;
+}
+
+function showInstallErr(msg) {
+  const el = document.getElementById('install-err');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+// ---------------------------------------------------------------------------
+// Step 3: Done
+// ---------------------------------------------------------------------------
+function buildDoneScreen() {
+  const h = hw.hostname || 'foodassistant';
+  let url, label;
+
+  if (selectedMode === 'pi_remote') {
+    // Pi Remote: settings are on this device at port 80 (the same app)
+    url = `http://${h}.local/setup`;
+    label = 'Configure this Pi Remote device';
+  } else {
+    url = `http://${h}.local:9284/setup`;
+    label = 'Complete setup in the web wizard';
+  }
+
+  const urlEl = document.getElementById('done-url');
+  urlEl.innerHTML = `<div style="font-size:.82rem;color:var(--text-dim);margin-bottom:.4rem">${label}</div>
+    <a class="success-url" href="${url}" target="_blank">${url}</a>`;
+
+  document.getElementById('btn-open').href = url;
+}
+
+// ---------------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------------
+detectHardware();
+</script>
+</body>
+</html>

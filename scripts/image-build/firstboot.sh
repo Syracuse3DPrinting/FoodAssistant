@@ -364,6 +364,52 @@ deploy_stack() {
   ( cd "$INSTALL_DIR" && docker compose $profiles up -d )
 }
 
+# Step: deploy the Pi Remote stack — FoodAssistant only, no Grocy/Mealie,
+# mapped to port 80 so the local settings UI is reachable at http://<device>/
+deploy_remote_stack() {
+  log "Step: deploy remote stack (port 80, no Grocy)"
+  if [ "$DRY_RUN" = "1" ]; then
+    log "DRY_RUN would deploy remote stack at $INSTALL_DIR"; return 0
+  fi
+  ensure_repo
+  mkdir -p "$INSTALL_DIR"
+
+  # Write a minimal .env for this device
+  local env_file="$INSTALL_DIR/.env"
+  cat > "$env_file" <<ENV
+TZ=${TZ:-America/New_York}
+DEPLOYMENT_MODE=pi_remote
+REMOTE_SERVER_URL=${REMOTE_SERVER_URL:-}
+ENV
+  chmod 600 "$env_file"
+
+  # Write the remote compose file
+  local compose_src="$REPO_DIR/scripts/image-build/docker-compose.remote.yml"
+  if [ ! -f "$compose_src" ]; then
+    warn "docker-compose.remote.yml not found at $compose_src; falling back to appliance compose"
+    compose_src="$REPO_DIR/scripts/image-build/docker-compose.appliance.yml"
+  fi
+  cp -f "$compose_src" "$INSTALL_DIR/docker-compose.yml"
+
+  export REPO_DIR
+  if ! ( cd "$INSTALL_DIR" && docker compose pull service ) 2>/dev/null; then
+    log "Image pull failed; building from source at $REPO_DIR/service"
+    [ -d "$REPO_DIR/service" ] || ensure_repo
+    ( cd "$INSTALL_DIR" && docker compose build service ) \
+      || die "Local build failed. Check $REPO_DIR/service and Docker logs."
+  fi
+  ( cd "$INSTALL_DIR" && docker compose up -d service )
+}
+
+# Stop (and disable) the bootstrap web server if it is running.
+# Called at the very end of provisioning so the main app can take port 80.
+_stop_bootstrap_server() {
+  if systemctl is-active --quiet foodassistant-bootstrap.service 2>/dev/null; then
+    log "Stopping bootstrap web installer"
+    systemctl disable --now foodassistant-bootstrap.service 2>/dev/null || true
+  fi
+}
+
 # Detect and install the Adafruit LSM6DSOX accelerometer rotation helper.
 # If an LSM6DSOX is wired to I2C-1 (the Pi's default), install smbus2 and
 # copy the helper script so the kiosk service can call it to auto-orient.
@@ -809,19 +855,24 @@ main() {
   _step_requested "mdns"        && configure_mdns
 
   if is_remote_mode; then
-    # Thin client: no Docker, no Grocy/Mealie, no local FoodAssistant service.
-    # Just a kiosk and/or Stream Deck pointed at the remote server. This is what
-    # keeps a Pi Remote viable on low-spec hardware (Pi 3).
+    # Pi Remote: runs the FoodAssistant app in Docker on port 80 so the user
+    # can configure the device (display rotation, Stream Deck, network) via a
+    # browser. Grocy/Mealie are disabled; the app proxy-controls the remote server.
     if [ -z "$REMOTE_SERVER_URL" ]; then
-      warn "Pi Remote mode selected but REMOTE_SERVER_URL is empty; the kiosk/Stream Deck will have no server to talk to. Set REMOTE_SERVER_URL in config.env."
+      warn "Pi Remote mode selected but REMOTE_SERVER_URL is empty; the kiosk/Stream Deck will have no server to talk to."
     fi
-    log "Pi Remote mode: skipping Docker and the local stack; controlling ${REMOTE_SERVER_URL:-<unset>}"
+    log "Pi Remote mode: installing Docker + local config web UI (port 80); controlling ${REMOTE_SERVER_URL:-<unset>}"
+    _step_requested "docker"      && install_docker
+    _step_requested "stack"       && deploy_remote_stack
+    _step_requested "hostbridge"  && install_host_bridge
     _step_requested "rotation"    && configure_display_rotation
     _step_requested "kiosk"       && configure_kiosk
     _step_requested "streamdeck"  && configure_streamdeck
     [ -z "$STEPS" ] && mark_done
+    _stop_bootstrap_server
     log "FoodAssistant Pi Remote first-boot complete."
-    log "  This device controls: ${REMOTE_SERVER_URL:-<set REMOTE_SERVER_URL>}"
+    log "  Settings UI: http://${HOSTNAME}.local/setup"
+    log "  Controls:    ${REMOTE_SERVER_URL:-<set REMOTE_SERVER_URL>}"
     return 0
   fi
 
@@ -832,6 +883,7 @@ main() {
   _step_requested "kiosk"       && configure_kiosk
   _step_requested "streamdeck"  && configure_streamdeck
   [ -z "$STEPS" ] && mark_done
+  _stop_bootstrap_server
 
   log "FoodAssistant first-boot complete. Reach the UI at:"
   log "  http://${HOSTNAME}.local:9284/   (or http://<device-ip>:9284/)"
