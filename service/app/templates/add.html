@@ -300,7 +300,8 @@ async function analyzePhoto() {
   const type = document.querySelector('input[name=photoType]:checked').value;
   const endpoint = type === 'receipt' ? 'analyze/receipt' : 'analyze/food';
 
-  showStatus('photo-status', '<span class="spinner-border spinner-border-sm me-1"></span>Analyzing with Gemini...', 'info');
+  const what = type === 'receipt' ? 'receipt' : 'photo';
+  showStatus('photo-status', `<span class="spinner-border spinner-border-sm me-1"></span>Analyzing ${what}...`, 'info');
   document.getElementById('analyzeBtn').disabled = true;
 
   const fd = new FormData();
