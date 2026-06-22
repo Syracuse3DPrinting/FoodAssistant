@@ -119,6 +119,11 @@ class Controller:
                     color = self.weather.color(spec.color)
                     alert = False
                     count = None
+                elif spec.kind == "forecast":
+                    label = self.weather.forecast_label(spec.label)
+                    color = self.weather.forecast_color(spec.color)
+                    alert = False
+                    count = None
                 elif spec.kind == "ha_entity":
                     ha = self.ha_entities.get(spec.name)
                     label = ha.label(spec.label) if ha else spec.label
@@ -230,7 +235,7 @@ class Controller:
 
     async def _refresh_weather(self) -> None:
         has_weather_key = any(
-            spec is not None and spec.kind == "weather"
+            spec is not None and spec.kind in ("weather", "forecast")
             for page in self.pages for spec in page
         )
         if not has_weather_key:

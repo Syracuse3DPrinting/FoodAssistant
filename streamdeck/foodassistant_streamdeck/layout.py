@@ -62,6 +62,12 @@ def _specs(names: list[str]) -> list[ActionSpec]:
     return [ACTIONS[n] for n in names if n in ACTIONS]
 
 
+def _to_slot(name: str) -> Optional[ActionSpec]:
+    if name == "blank":
+        return None
+    return ACTIONS.get(name)
+
+
 def build_pages(
     action_names: list[str], key_count: int
 ) -> list[list[Optional[ActionSpec]]]:
@@ -70,24 +76,21 @@ def build_pages(
     With a single page everything fits and no key is sacrificed for paging.
     When more actions are configured than fit, the final key of every page
     becomes a wrapping "More" key and the remaining actions continue on the
-    next page.
+    next page. An explicit "blank" name produces an empty slot in place,
+    preserving the positions of the keys around it.
     """
     if key_count < 1:
         raise ValueError("key_count must be positive")
-
-    specs = _specs(action_names)
-
-    if len(specs) <= key_count:
-        page: list[Optional[ActionSpec]] = list(specs)
-        page += [None] * (key_count - len(page))
+    # Keep known actions and explicit blanks, preserving order/position.
+    slots = [(_to_slot(n)) for n in action_names if n == "blank" or n in ACTIONS]
+    if len(slots) <= key_count:
+        page = list(slots) + [None] * (key_count - len(slots))
         return [page]
-
-    usable = key_count - 1  # last slot is the page-cycle key
-    pages: list[list[Optional[ActionSpec]]] = []
-    for start in range(0, len(specs), usable):
-        chunk = specs[start : start + usable]
-        page = list(chunk)
-        page += [None] * (usable - len(page))
+    usable = key_count - 1
+    pages = []
+    for start in range(0, len(slots), usable):
+        chunk = slots[start:start + usable]
+        page = list(chunk) + [None] * (usable - len(chunk))
         page.append(ACTIONS["page_next"])
         pages.append(page)
     return pages

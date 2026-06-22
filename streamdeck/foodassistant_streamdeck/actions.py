@@ -113,6 +113,8 @@ class WeatherState:
         self._color: str = "#1e40af"
         self._fetched_at: float = 0.0
         self._error: bool = False
+        self._fc_label: str = "Forecast"
+        self._fc_color: str = "#0e7490"
 
     def age_seconds(self) -> float:
         return time.monotonic() - self._fetched_at
@@ -122,6 +124,12 @@ class WeatherState:
 
     def color(self, base_color: str) -> str:
         return self._color
+
+    def forecast_label(self, base_label: str) -> str:
+        return self._fc_label if self._fetched_at else base_label
+
+    def forecast_color(self, base_color: str) -> str:
+        return self._fc_color
 
     async def refresh(self) -> None:
         try:
@@ -134,6 +142,7 @@ class WeatherState:
                 self._label = "No signal"
                 self._color = "#6b7280"
                 self._error = True
+                self._fc_label = "No signal"
                 return
             data = r.json()
             cond = data["current_condition"][0]
@@ -145,10 +154,21 @@ class WeatherState:
             self._label = f"{temp}°{unit_sym} {desc}"
             self._color = "#1e40af"
             self._error = False
+            try:
+                today = data["weather"][0]
+                hi_key = "maxtempF" if self.units == "f" else "maxtempC"
+                lo_key = "mintempF" if self.units == "f" else "mintempC"
+                hi = today.get(hi_key, "?")
+                lo = today.get(lo_key, "?")
+                self._fc_label = f"H{hi} L{lo}"
+                self._fc_color = "#0e7490"
+            except Exception:
+                self._fc_label = "Forecast"
         except Exception:
             self._label = "No signal"
             self._color = "#6b7280"
             self._error = True
+            self._fc_label = "No signal"
         finally:
             self._fetched_at = time.monotonic()
 
@@ -282,6 +302,38 @@ ACTIONS: dict[str, ActionSpec] = {
         target_path="ui/cook",
         description="Open the recipe suggestions page on the attached display.",
     ),
+    "recipes": ActionSpec(
+        name="recipes",
+        label="Recipes",
+        color="#7e22ce",
+        kind="nav",
+        target_path="ui/recipes",
+        description="Open the Recipes page.",
+    ),
+    "mealplan": ActionSpec(
+        name="mealplan",
+        label="Plan",
+        color="#7e22ce",
+        kind="nav",
+        target_path="ui/mealplan",
+        description="Open the Meal Plan page.",
+    ),
+    "shopping": ActionSpec(
+        name="shopping",
+        label="Shop",
+        color="#7e22ce",
+        kind="nav",
+        target_path="ui/shopping",
+        description="Open the Shopping list page.",
+    ),
+    "defaults": ActionSpec(
+        name="defaults",
+        label="Defaults",
+        color="#7e22ce",
+        kind="nav",
+        target_path="ui/defaults",
+        description="Open the storage Defaults page.",
+    ),
     "brightness": ActionSpec(
         name="brightness",
         label="Bright",
@@ -332,6 +384,14 @@ ACTIONS: dict[str, ActionSpec] = {
         description="Current weather from wttr.in. Configure location and units in config.toml. "
         "Press to refresh. No API key required.",
     ),
+    "forecast": ActionSpec(
+        name="forecast",
+        label="Forecast",
+        color="#0e7490",
+        kind="forecast",
+        description="Today's high/low from wttr.in. Shares the weather fetch. "
+        "Press to refresh. No API key required.",
+    ),
     "ha_1": ActionSpec(name="ha_1", label="HA 1", color=_HA_STATE_COLOR_OFF, kind="ha_entity",
                        description="Home Assistant entity slot 1. Configure in config.toml."),
     "ha_2": ActionSpec(name="ha_2", label="HA 2", color=_HA_STATE_COLOR_OFF, kind="ha_entity",
@@ -355,6 +415,27 @@ DEFAULT_ORDER: list[str] = [
     "cook",
     "brightness",
 ]
+
+
+_GROUP_BY_KIND = {
+    "status": "Status", "trigger": "Actions", "nav": "Navigation",
+    "system": "System", "timer": "Timers", "weather": "Weather",
+    "forecast": "Weather", "ha_entity": "Home Assistant",
+}
+
+
+def catalog() -> list[dict]:
+    """Describe every assignable action for the web grid editor."""
+    items = [{
+        "name": spec.name,
+        "label": spec.label,
+        "kind": spec.kind,
+        "group": _GROUP_BY_KIND.get(spec.kind, "Other"),
+        "description": getattr(spec, "description", ""),
+    } for spec in ACTIONS.values()]
+    items.append({"name": "blank", "label": "Empty", "kind": "blank",
+                  "group": "System", "description": "Leave this key blank."})
+    return items
 
 
 def resolve(name: str) -> Optional[ActionSpec]:
@@ -459,6 +540,10 @@ async def run_action(spec: ActionSpec, ctx: ActionContext) -> str:
     if spec.kind == "weather":
         await ctx.weather_refresh()
         return "weather refreshed"
+
+    if spec.kind == "forecast":
+        await ctx.weather_refresh()
+        return "forecast refreshed"
 
     if spec.kind == "ha_entity":
         entity_id = spec.ha_entity_id
