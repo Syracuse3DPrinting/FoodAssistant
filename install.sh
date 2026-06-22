@@ -130,7 +130,12 @@ ok "Bootstrap web server is running on port $BOOTSTRAP_PORT"
 hr
 printf '%s  Open this URL in your browser on any device on the same network:%s\n' "$C_GREEN" "$C_OFF"
 printf '\n'
-printf '    %shttp://%s.local%s\n' "$C_CYAN" "$THIS_HOST" "$C_OFF"
+if [ "$BOOTSTRAP_PORT" = "80" ]; then
+  printf '    %shttp://%s.local%s\n' "$C_CYAN" "$THIS_HOST" "$C_OFF"
+else
+  printf '    %shttp://%s.local:%s%s\n' "$C_CYAN" "$THIS_HOST" "$BOOTSTRAP_PORT" "$C_OFF"
+fi
 printf '\n'
-say "(If .local doesn't resolve, use the device's IP address instead.)"
+say "(If .local doesn't resolve, use the device's IP address instead, e.g. http://<ip>:$BOOTSTRAP_PORT)"
 hr
+
