@@ -398,7 +398,10 @@ ENV
     ( cd "$INSTALL_DIR" && docker compose build service ) \
       || die "Local build failed. Check $REPO_DIR/service and Docker logs."
   fi
+  # Free port 80 before starting the container that binds it.
+  _stop_bootstrap_server
   ( cd "$INSTALL_DIR" && docker compose up -d service )
+
 }
 
 # Stop (and disable) the bootstrap web server if it is running.
