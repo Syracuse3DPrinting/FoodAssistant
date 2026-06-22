@@ -117,14 +117,21 @@ def _run_install(config: dict) -> None:
         if proc.returncode == 0:
             LOG_QUEUE.put("\n✅ Installation complete! Redirecting...\n")
             INSTALL_SUCCESS = True
-            # Disable ourselves so we don't start again after reboot
-            try:
-                subprocess.run(
-                    ["systemctl", "disable", "--now", "foodassistant-bootstrap.service"],
-                    check=False,
-                )
-            except Exception:
-                pass
+            # Signal SSE clients that we're done BEFORE shutting down, so the
+            # browser can advance to Step 4. Schedule the actual shutdown 4s
+            # later so all connected clients have time to drain the queue.
+            def _deferred_shutdown():
+                time.sleep(4)
+                try:
+                    subprocess.run(
+                        ["systemctl", "disable", "--now", "foodassistant-bootstrap.service"],
+                        check=False,
+                    )
+                except Exception:
+                    pass
+                # Hard exit in case systemctl didn't kill us
+                os._exit(0)
+            threading.Thread(target=_deferred_shutdown, daemon=True).start()
         else:
             LOG_QUEUE.put(f"\n❌ Provisioner exited with code {proc.returncode}\n")
     except Exception as exc:
