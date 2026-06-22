@@ -394,7 +394,7 @@ install_accel_rotation() {
     return 0
   fi
 
-  pip3 install --quiet smbus2 2>/dev/null || warn "smbus2 install failed; accelerometer rotation may not work"
+  pip3 install --quiet --break-system-packages smbus2 2>/dev/null || warn "smbus2 install failed; accelerometer rotation may not work"
   cp "$helper" /usr/local/bin/foodassistant-accel-rotation
   chmod +x /usr/local/bin/foodassistant-accel-rotation
   log "Installed /usr/local/bin/foodassistant-accel-rotation"
@@ -578,6 +578,8 @@ configure_streamdeck() {
   if [ -d "$venv_dir" ]; then
     log "venv at $venv_dir already exists; reusing"
   else
+    log "Installing python3-venv and Stream Deck USB dependencies"
+    apt_install python3-venv libhidapi-hidraw0 libudev-dev || warn "streamdeck dependencies install failed"
     log "Creating Python venv at $venv_dir"
     run python3 -m venv "$venv_dir"
   fi
@@ -605,6 +607,18 @@ configure_streamdeck() {
     warn "foodassistant_streamdeck source not found (looked in boot payload and $REPO_DIR/streamdeck); skipping package copy"
   fi
 
+  # Run the controller as the interactive user (the account Imager created),
+  # not a fixed name, and add them to plugdev so they can open the USB device.
+  local sd_user
+  sd_user="$(primary_user)"
+  [ -n "$sd_user" ] || { warn "No interactive (uid 1000) user found; skipping Stream Deck service"; return 0; }
+
+  # Give the interactive user ownership of the streamdeck directory and venv
+  # so they can write local logs and state files.
+  if [ "$DRY_RUN" != "1" ]; then
+    chown -R "$sd_user" "$sd_dst" "$venv_dir" 2>/dev/null || true
+  fi
+
   # Install udev rule so the service user can open the USB device.
   log "Installing Elgato Stream Deck udev rule"
   if [ "$DRY_RUN" = "1" ]; then
@@ -614,12 +628,6 @@ configure_streamdeck() {
       > /etc/udev/rules.d/99-streamdeck.rules
     udevadm control --reload-rules || warn "udevadm reload failed"
   fi
-
-  # Run the controller as the interactive user (the account Imager created),
-  # not a fixed name, and add them to plugdev so they can open the USB device.
-  local sd_user
-  sd_user="$(primary_user)"
-  [ -n "$sd_user" ] || { warn "No interactive (uid 1000) user found; skipping Stream Deck service"; return 0; }
 
   if getent group plugdev >/dev/null 2>&1; then
     run usermod -aG plugdev "$sd_user" || warn "Could not add $sd_user to plugdev"
