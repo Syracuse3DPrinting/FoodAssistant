@@ -681,6 +681,19 @@ async def streamdeck_config_set(request: Request):
     return JSONResponse(status_code=500, content={"ok": False, "error": "bridge unavailable"})
 
 
+@router.get("/streamdeck/actions")
+async def streamdeck_actions():
+    """List assignable Stream Deck actions for the grid editor (Pi only)."""
+    if not is_raspberry_pi():
+        return {"ok": False, "error": "Not available on this platform."}
+    try:
+        async with httpx.AsyncClient(timeout=12.0) as c:
+            r = (await c.get(f"{_HOST_BRIDGE}/streamdeck/actions")).json()
+        return r
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 @router.post("/streamdeck/install")
 async def streamdeck_install():
     """Provision the Stream Deck service for a deck attached after first install."""

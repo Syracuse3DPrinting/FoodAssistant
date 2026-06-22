@@ -64,7 +64,7 @@ class Config:
 
     def validated(self) -> "Config":
         """Drop unknown action names and clamp numbers into sane ranges."""
-        self.keys = [k for k in self.keys if k in ACTIONS] or list(DEFAULT_ORDER)
+        self.keys = [k for k in self.keys if k in ACTIONS or k == "blank"] or list(DEFAULT_ORDER)
         self.brightness = _clamp(self.brightness, 5, 100)
         self.poll_seconds = max(5, int(self.poll_seconds))
         self.soon_days = _clamp(self.soon_days, 0, 365)

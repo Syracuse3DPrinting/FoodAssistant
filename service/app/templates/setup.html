@@ -1398,7 +1398,7 @@ docker compose up -d</code></pre>
             <div id="streamdeck-opts" class="{{ '' if s.has_streamdeck else 'd-none' }}">
               <div class="mb-3">
                 <label class="form-label">Model (key count)</label>
-                <select class="form-select form-select-sm" id="streamdeck_key_count" style="max-width:280px">
+                <select class="form-select form-select-sm" id="streamdeck_key_count" style="max-width:280px" onchange="_sdRenderGrid()">
                   <option value="6" {{ 'selected' if s.streamdeck_key_count == 6 else '' }}>6 keys (Stream Deck Mini)</option>
                   <option value="15" {{ 'selected' if (s.streamdeck_key_count == 15 or not s.streamdeck_key_count) else '' }}>15 keys (Stream Deck MK.2 / Classic)</option>
                   <option value="32" {{ 'selected' if s.streamdeck_key_count == 32 else '' }}>32 keys (Stream Deck XL)</option>
@@ -1421,9 +1421,9 @@ docker compose up -d</code></pre>
                 </div>
               </div>
               <div class="mb-3">
-                <label class="form-label">Keys Layout (comma separated)</label>
-                <textarea class="form-control form-control-sm" id="streamdeck_keys" rows="3" placeholder="inventory, expiring, mealplan, cook, shopping, recipes, timer_1, timer_2, brightness"></textarea>
-                <div class="form-text">Available actions: inventory, expiring, mealplan, cook, shopping, recipes, timer_1, timer_2, timer_3, commit, weather, brightness, page_next, page_prev</div>
+                <label class="form-label">Key Layout</label>
+                <div class="form-text mb-2">Click a key to assign an action. The grid matches your deck; the top-left cell is physical key 1.</div>
+                <div id="streamdeck-grid" class="d-inline-grid gap-1" style="grid-template-columns: repeat(5, minmax(0,1fr));"></div>
               </div>
               <div class="row g-3 mb-3">
                 <div class="col-md-6">
@@ -1461,7 +1461,7 @@ docker compose up -d</code></pre>
               <li>The Stream Deck service starts automatically at boot after it is enabled by the installer.</li>
               <li>If the deck was not attached at install time, use the Install button above after plugging it in.</li>
               <li>Logs: <code>journalctl -u foodassistant-streamdeck -f</code></li>
-              <li>Config file: <code>/opt/foodassistant/foodassistant_streamdeck/config.toml</code></li>
+              <li>Config file: <code>/opt/foodassistant/config.toml</code></li>
             </ul>
           </div>
         </div>
@@ -2634,6 +2634,94 @@ async function setKmsRotation(reboot) {
 
 // Appliance-only: Stream Deck pane
 
+// Stream Deck visual key-grid editor
+const SD_GRID = { 6: {cols:3, rows:2}, 15: {cols:5, rows:3}, 32: {cols:8, rows:4} };
+let _sdCatalog = null;       // [{name,label,kind,group,description}]
+let _sdKeys = [];            // flat, deck-index order; "blank" for empty
+
+async function _sdLoadCatalog() {
+  if (_sdCatalog) return _sdCatalog;
+  try {
+    const r = await fetch('setup/streamdeck/actions').then(x => x.json());
+    if (r.ok && Array.isArray(r.actions)) { _sdCatalog = r.actions; return _sdCatalog; }
+  } catch (e) { /* fall through to fallback */ }
+  // Fallback list so the editor still renders if the bridge is unreachable.
+  _sdCatalog = [
+    {name:'blank',label:'Empty',group:'System'},
+    {name:'expiring',label:'Expiring',group:'Status'},
+    {name:'pending',label:'Pending',group:'Status'},
+    {name:'commit',label:'Commit',group:'Actions'},
+    {name:'add',label:'Add',group:'Navigation'},
+    {name:'inventory',label:'Stock',group:'Navigation'},
+    {name:'cook',label:'Cook',group:'Navigation'},
+    {name:'recipes',label:'Recipes',group:'Navigation'},
+    {name:'mealplan',label:'Plan',group:'Navigation'},
+    {name:'shopping',label:'Shop',group:'Navigation'},
+    {name:'defaults',label:'Defaults',group:'Navigation'},
+    {name:'timer_1',label:'Timer 1',group:'Timers'},
+    {name:'timer_2',label:'Timer 2',group:'Timers'},
+    {name:'timer_3',label:'Timer 3',group:'Timers'},
+    {name:'weather',label:'Weather',group:'Weather'},
+    {name:'forecast',label:'Forecast',group:'Weather'},
+    {name:'ha_1',label:'HA 1',group:'Home Assistant'},
+    {name:'ha_2',label:'HA 2',group:'Home Assistant'},
+    {name:'ha_3',label:'HA 3',group:'Home Assistant'},
+    {name:'ha_4',label:'HA 4',group:'Home Assistant'},
+    {name:'ha_5',label:'HA 5',group:'Home Assistant'},
+    {name:'brightness',label:'Bright',group:'System'},
+    {name:'page_next',label:'More',group:'System'},
+    {name:'page_prev',label:'Back',group:'System'},
+  ];
+  return _sdCatalog;
+}
+
+function _sdOptionsHtml(selected) {
+  // Group catalog into <optgroup>s; mark the selected one.
+  const groups = {};
+  for (const a of _sdCatalog) { (groups[a.group] = groups[a.group] || []).push(a); }
+  let html = '';
+  for (const g of Object.keys(groups)) {
+    html += `<optgroup label="${g}">`;
+    for (const a of groups[g]) {
+      const sel = a.name === selected ? ' selected' : '';
+      html += `<option value="${a.name}"${sel}>${a.label}</option>`;
+    }
+    html += '</optgroup>';
+  }
+  return html;
+}
+
+async function _sdRenderGrid() {
+  await _sdLoadCatalog();
+  const grid = document.getElementById('streamdeck-grid');
+  if (!grid) return;
+  const count = parseInt(document.getElementById('streamdeck_key_count')?.value || '15', 10);
+  const dim = SD_GRID[count] || SD_GRID[15];
+  grid.style.gridTemplateColumns = `repeat(${dim.cols}, minmax(0,1fr))`;
+  // Normalize _sdKeys to the cell count (pad with blank, truncate extras).
+  const total = dim.cols * dim.rows;
+  const keys = _sdKeys.slice(0, total);
+  while (keys.length < total) keys.push('blank');
+  _sdKeys = keys;
+  grid.innerHTML = '';
+  for (let i = 0; i < total; i++) {
+    const cell = document.createElement('select');
+    cell.className = 'form-select form-select-sm';
+    cell.style.minWidth = '64px';
+    cell.dataset.idx = String(i);
+    cell.innerHTML = _sdOptionsHtml(_sdKeys[i] || 'blank');
+    cell.onchange = (e) => { _sdKeys[parseInt(e.target.dataset.idx,10)] = e.target.value; };
+    grid.appendChild(cell);
+  }
+}
+
+function _sdCollectKeys() {
+  // Trim trailing blanks so we do not persist a full row of empties at the end.
+  const keys = _sdKeys.slice();
+  while (keys.length && keys[keys.length - 1] === 'blank') keys.pop();
+  return keys;
+}
+
 async function saveStreamDeckSettings() {
   const el = document.getElementById('streamdeck-save-result');
   if (el) el.innerHTML = '<span class="text-secondary">Saving...</span>';
@@ -2642,8 +2730,7 @@ async function saveStreamDeckSettings() {
   
   const rotation = parseInt(document.getElementById('streamdeck_rotation')?.value || '0', 10);
   const brightness = parseInt(document.getElementById('streamdeck_brightness')?.value || '60', 10);
-  const keysStr = document.getElementById('streamdeck_keys')?.value || '';
-  const keys = keysStr.split(',').map(s => s.trim()).filter(s => s.length > 0);
+  const keys = _sdCollectKeys();
   const weather_location = document.getElementById('streamdeck_weather_location')?.value || '';
   const weather_units = document.getElementById('streamdeck_weather_units')?.value || 'f';
 
@@ -2730,10 +2817,8 @@ async function loadHardwareStatus() {
           const brEl = document.getElementById('streamdeck_brightness');
           if (brEl) brEl.value = cfg.brightness.toString();
         }
-        if (cfg.keys !== undefined) {
-          const keysEl = document.getElementById('streamdeck_keys');
-          if (keysEl) keysEl.value = cfg.keys.join(', ');
-        }
+        _sdKeys = Array.isArray(cfg.keys) ? cfg.keys.slice() : [];
+        await _sdRenderGrid();
         if (cfg.weather_location !== undefined) {
           const wlEl = document.getElementById('streamdeck_weather_location');
           if (wlEl) wlEl.value = cfg.weather_location;
@@ -2746,6 +2831,7 @@ async function loadHardwareStatus() {
     } catch (e) {
       console.warn("Could not load streamdeck config:", e);
     }
+    if (!_sdKeys.length) { await _sdRenderGrid(); }
 
     // Keep polling while either install is in flight.
     if ((r.kiosk && r.kiosk.installing) || (r.streamdeck && r.streamdeck.installing)) {
