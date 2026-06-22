@@ -398,8 +398,6 @@ ENV
     ( cd "$INSTALL_DIR" && docker compose build service ) \
       || die "Local build failed. Check $REPO_DIR/service and Docker logs."
   fi
-  # Free port 80 before starting the container that binds it.
-  _stop_bootstrap_server
   ( cd "$INSTALL_DIR" && docker compose up -d service )
 
 }
@@ -872,7 +870,6 @@ main() {
     _step_requested "kiosk"       && configure_kiosk
     _step_requested "streamdeck"  && configure_streamdeck
     [ -z "$STEPS" ] && mark_done
-    _stop_bootstrap_server
     log "FoodAssistant Pi Remote first-boot complete."
     log "  Settings UI: http://${HOSTNAME}.local/setup"
     log "  Controls:    ${REMOTE_SERVER_URL:-<set REMOTE_SERVER_URL>}"
@@ -886,7 +883,6 @@ main() {
   _step_requested "kiosk"       && configure_kiosk
   _step_requested "streamdeck"  && configure_streamdeck
   [ -z "$STEPS" ] && mark_done
-  _stop_bootstrap_server
 
   log "FoodAssistant first-boot complete. Reach the UI at:"
   log "  http://${HOSTNAME}.local:9284/   (or http://<device-ip>:9284/)"

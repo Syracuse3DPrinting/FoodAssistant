@@ -32,7 +32,7 @@ REPO_URL="${REPO_URL:-https://github.com/Syracuse3DPrinting/FoodAssistant.git}"
 REPO_BRANCH="${REPO_BRANCH:-main}"
 REPO_DIR="${REPO_DIR:-/opt/foodassistant-src}"
 NONINTERACTIVE="${NONINTERACTIVE:-0}"
-BOOTSTRAP_PORT="${BOOTSTRAP_PORT:-80}"
+BOOTSTRAP_PORT="${BOOTSTRAP_PORT:-8080}"
 
 # ── pretty output ─────────────────────────────────────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
