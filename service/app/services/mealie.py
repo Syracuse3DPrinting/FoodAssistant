@@ -43,14 +43,30 @@ def _invalidate_recipe_cache() -> None:
 
 class MealieClient:
     def __init__(self):
-        self.base = settings.mealie_base_url.rstrip("/")
-        self.headers = {
-            "Authorization": f"Bearer {settings.mealie_api_key}",
-            "Content-Type": "application/json",
-        }
+        if settings.is_satellite() and settings.remote_server_url and settings.upstream_api_key:
+            # Satellite: reach the server's internal Mealie through the main
+            # server's authenticated proxy (see GrocyClient for the rationale).
+            self.base = settings.remote_server_url.rstrip("/") + "/api/proxy/mealie"
+            self.headers = {
+                "X-API-Key": settings.upstream_api_key,
+                "Content-Type": "application/json",
+            }
+        else:
+            self.base = settings.mealie_base_url.rstrip("/")
+            self.headers = {
+                "Authorization": f"Bearer {settings.mealie_api_key}",
+                "Content-Type": "application/json",
+            }
 
     @property
     def configured(self) -> bool:
+        # On a satellite, Mealie is reachable via the proxy; it counts as
+        # configured when the upstream link is set and the server reported a
+        # Mealie base URL during config sync (so we don't enable it when the
+        # server has no Mealie).
+        if settings.is_satellite():
+            return bool(settings.remote_server_url and settings.upstream_api_key
+                        and settings.mealie_base_url)
         return bool(settings.mealie_base_url and settings.mealie_api_key)
 
     async def _request(self, method: str, path: str, body=None, params=None):

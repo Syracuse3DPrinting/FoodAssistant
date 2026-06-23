@@ -19,11 +19,21 @@ class GrocyClient:
     them for every item."""
 
     def __init__(self):
-        self.base = settings.grocy_base_url.rstrip("/") + "/api"
-        self.headers = {
-            "GROCY-API-KEY": settings.grocy_api_key,
-            "Content-Type": "application/json",
-        }
+        if settings.is_satellite() and settings.remote_server_url and settings.upstream_api_key:
+            # A satellite has no Docker network, so it cannot reach the server's
+            # internal Grocy (http://grocy:80). Route calls through the main
+            # server's authenticated proxy, which forwards them to its Grocy.
+            self.base = settings.remote_server_url.rstrip("/") + "/api/proxy/grocy/api"
+            self.headers = {
+                "X-API-Key": settings.upstream_api_key,
+                "Content-Type": "application/json",
+            }
+        else:
+            self.base = settings.grocy_base_url.rstrip("/") + "/api"
+            self.headers = {
+                "GROCY-API-KEY": settings.grocy_api_key,
+                "Content-Type": "application/json",
+            }
         self._cache: dict[str, list[dict]] = {}
 
     async def _request(self, method: str, path: str, body: dict | None = None) -> list | dict:
