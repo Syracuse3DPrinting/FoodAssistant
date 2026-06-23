@@ -37,4 +37,5 @@ services:
       - API_KEY=${API_KEY:-}
     volumes:
       - ./data:/app/data
+      - /var/run/hostbridge.sock:/var/run/hostbridge.sock
     restart: unless-stopped
