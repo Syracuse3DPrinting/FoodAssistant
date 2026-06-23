@@ -120,7 +120,11 @@ load_config() {
   # at the server being controlled. ?kiosk=1 latches kiosk mode in the browser
   # so the attached-display scale/orientation apply (and never affect others).
   if is_remote_mode; then
-    KIOSK_URL="${KIOSK_URL:-${REMOTE_SERVER_URL%/}/ui/?kiosk=1}"
+    if [ -n "$REMOTE_API_KEY" ]; then
+      KIOSK_URL="${KIOSK_URL:-${REMOTE_SERVER_URL%/}/ui/kiosk-login?api_key=${REMOTE_API_KEY}}"
+    else
+      KIOSK_URL="${KIOSK_URL:-${REMOTE_SERVER_URL%/}/ui/?kiosk=1}"
+    fi
   else
     KIOSK_URL="${KIOSK_URL:-http://localhost:9284/ui/?kiosk=1}"
   fi

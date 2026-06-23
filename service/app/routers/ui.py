@@ -1,6 +1,6 @@
 import secrets
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy.orm import Session
 from typing import Optional
 
@@ -13,6 +13,16 @@ from ..storage_categories import all_categories, OTHER
 from ..templating import templates
 
 router = APIRouter(prefix="/ui", tags=["ui"])
+
+
+@router.get("/kiosk-login")
+def kiosk_login(request: Request, api_key: str):
+    """Headless login endpoint for Pi Remote kiosks. 
+    Accepts the API key in the URL, sets a session cookie, and redirects to the UI."""
+    if settings.api_key and secrets.compare_digest(api_key, settings.api_key):
+        request.session["authed"] = True
+        return ingress_redirect(request, "/ui/?kiosk=1")
+    return JSONResponse({"detail": "Unauthorized kiosk login"}, status_code=401)
 
 
 @router.get("/login", response_class=HTMLResponse)

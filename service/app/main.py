@@ -49,7 +49,7 @@ _SETUP_BYPASS = {
     "/health", "/docs", "/openapi.json", "/redoc",
 }
 # "/" only redirects to /ui/, so it can safely skip auth (the target enforces it)
-_PUBLIC_PATHS = _SETUP_BYPASS | {"/ui/login", "/"}
+_PUBLIC_PATHS = _SETUP_BYPASS | {"/ui/login", "/ui/kiosk-login", "/"}
 
 
 def _is_static(path: str) -> bool:
