@@ -11,7 +11,7 @@ from .database import engine, get_db, Base
 from .ingress import ingress_redirect
 from .models import db_models  # noqa: F401: registers models with Base
 from .services.defaults import seed_defaults
-from .routers import analyze, defaults, inventory, expiring, ui, setup, pending, mealie, admin, qr, tunnel, grocy, satellite
+from .routers import analyze, defaults, inventory, expiring, ui, setup, pending, mealie, admin, qr, tunnel, grocy, satellite, proxy
 
 
 @asynccontextmanager
@@ -71,8 +71,11 @@ def _is_static(path: str) -> bool:
 @app.middleware("http")
 async def redirect_if_unconfigured(request: Request, call_next):
     """Send new installs to /setup until Grocy + vision provider are configured."""
+    # The satellite proxy enforces its own X-API-Key, so it must not be caught
+    # by the setup-redirect (it has no browser session to redirect anyway).
     if (not settings.is_configured() and request.url.path not in _SETUP_BYPASS
-            and not _is_static(request.url.path)):
+            and not _is_static(request.url.path)
+            and not request.url.path.startswith("/api/proxy/")):
         return ingress_redirect(request, "/setup")
     return await call_next(request)
 
@@ -124,6 +127,7 @@ app.include_router(tunnel.router)
 app.include_router(ui.router)
 app.include_router(qr.router)
 app.include_router(satellite.router)
+app.include_router(proxy.router)
 
 
 @app.get("/")
