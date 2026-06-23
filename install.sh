@@ -116,7 +116,7 @@ say "Installing bootstrap web server on port $BOOTSTRAP_PORT…"
 # Write the unit with the correct REPO_DIR and port substituted in
 $SUDO sed \
   -e "s|/opt/foodassistant-src|$REPO_DIR|g" \
-  -e "s|BOOTSTRAP_PORT=80|BOOTSTRAP_PORT=$BOOTSTRAP_PORT|g" \
+  -e "s|BOOTSTRAP_PORT=[0-9]*|BOOTSTRAP_PORT=$BOOTSTRAP_PORT|g" \
   "$BOOTSTRAP_SVC" \
   | $SUDO tee /etc/systemd/system/foodassistant-bootstrap.service >/dev/null
 
