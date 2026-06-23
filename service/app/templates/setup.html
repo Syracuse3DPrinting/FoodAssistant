@@ -174,20 +174,20 @@
   <!-- Step 2: Security -->
   <div class="wiz-card d-none" id="wiz-step-2">
     <div class="wiz-card-title"><i class="bi bi-shield-lock text-success me-2"></i>Security</div>
-    <div class="wiz-card-sub">Set a password to protect your food inventory. Required before setup completes.</div>
+    <div class="wiz-card-sub" id="wiz-sec-sub">Set a password to protect your food inventory. Required before setup completes.</div>
 
     <div class="section-card mb-3">
       <div class="form-check form-switch mb-3">
         <input class="form-check-input" type="checkbox" role="switch" id="auth_required"
                checked onchange="toggleAuthRequired()">
-        <label class="form-check-label" for="auth_required">Require authentication to use the app</label>
+        <label class="form-check-label" for="auth_required" id="auth_required_label">Require authentication to use the app</label>
       </div>
       <div class="mb-3">
-        <label class="form-label">UI Password <span class="badge bg-danger badge-req ms-1">Required</span></label>
+        <label class="form-label">UI Password <span class="badge bg-danger badge-req ms-1" id="wiz-pw-badge">Required</span></label>
         {{ secret_input('auth_password', 'Choose a password for the web UI') }}
         <div class="form-text" id="auth-pw-hint">Required while authentication is on. Setup will not complete without it.</div>
       </div>
-      <div class="mb-3">
+      <div class="mb-3" id="wiz-apikey-row">
         <label class="form-label">API Key <span class="text-secondary small">(optional — for Home Assistant / headless clients)</span></label>
         {{ secret_input('api_key', 'Sent as X-API-Key header') }}
         <div class="form-text">Generate with: <code>openssl rand -hex 24</code></div>
@@ -2248,6 +2248,30 @@ function selectInstallMode(mode) {
     const urlField = document.getElementById('grocy_base_url');
     if (urlField && !urlField.value) urlField.value = 'http://localhost:9383';
   }
+  // Pi Remote owns no data and has no local API, so the UI password and API
+  // key do not apply: the remote server handles access control. Default auth
+  // off and hide the API key. (An optional kiosk PIN can be added later.)
+  const isRemote = mode === 'pi_remote';
+  const apikeyRow = document.getElementById('wiz-apikey-row');
+  if (apikeyRow) apikeyRow.classList.toggle('d-none', isRemote);
+  const pwBadge = document.getElementById('wiz-pw-badge');
+  if (pwBadge) pwBadge.classList.toggle('d-none', isRemote);
+  const secSub = document.getElementById('wiz-sec-sub');
+  if (secSub) secSub.textContent = isRemote
+    ? 'This device is a thin client; the server it controls handles login. A UI password here is optional.'
+    : 'Set a password to protect your food inventory. Required before setup completes.';
+  const authReq = document.getElementById('auth_required');
+  if (authReq) {
+    // Only force the default the first time we see this mode, so a user who
+    // deliberately toggles it is not overridden on a progress-bar refresh.
+    if (isRemote && authReq.dataset.remoteApplied !== '1') {
+      authReq.checked = false;
+      authReq.dataset.remoteApplied = '1';
+      if (typeof toggleAuthRequired === 'function') toggleAuthRequired();
+    } else if (!isRemote) {
+      authReq.dataset.remoteApplied = '';
+    }
+  }
   _wizUpdateProgress();
 }
 
@@ -2530,23 +2554,36 @@ async function wizSaveAll() {
 
   const payload = buildPayload();
 
-  // Enforce password requirement
-  if (payload.auth_required && !HAS_AUTH_PASSWORD
-      && (!payload.auth_password || payload.auth_password === '__CLEAR__')) {
-    resultEl.innerHTML = '<div class="alert alert-danger py-2 small"><i class="bi bi-x-circle-fill me-1"></i>' +
-      'A password is required. <a href="#" onclick="event.preventDefault();_wizShowStep(2)">Go to Security</a></div>';
-    btn.disabled = false;
-    btn.innerHTML = '<i class="bi bi-rocket-takeoff me-2"></i>Start using FoodAssistant';
-    return;
-  }
+  // Pi Remote is a thin client: it has no local Grocy/AI/Mealie and does not
+  // require a UI password (the remote server owns auth). The only thing it
+  // needs is the address of the server it controls.
+  if (_installMode === 'pi_remote') {
+    if (!payload.remote_server_url) {
+      resultEl.innerHTML = '<div class="alert alert-danger py-2 small"><i class="bi bi-x-circle-fill me-1"></i>' +
+        'Server URL is required. <a href="#" onclick="event.preventDefault();_wizShowStep(1)">Go to Welcome</a></div>';
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-rocket-takeoff me-2"></i>Start using FoodAssistant';
+      return;
+    }
+  } else {
+    // Enforce password requirement (full app only)
+    if (payload.auth_required && !HAS_AUTH_PASSWORD
+        && (!payload.auth_password || payload.auth_password === '__CLEAR__')) {
+      resultEl.innerHTML = '<div class="alert alert-danger py-2 small"><i class="bi bi-x-circle-fill me-1"></i>' +
+        'A password is required. <a href="#" onclick="event.preventDefault();_wizShowStep(2)">Go to Security</a></div>';
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-rocket-takeoff me-2"></i>Start using FoodAssistant';
+      return;
+    }
 
-  // Enforce Grocy URL
-  if (!payload.grocy_base_url) {
-    resultEl.innerHTML = '<div class="alert alert-danger py-2 small"><i class="bi bi-x-circle-fill me-1"></i>' +
-      'Grocy URL is required. <a href="#" onclick="event.preventDefault();_wizShowStep(3)">Go to Grocy</a></div>';
-    btn.disabled = false;
-    btn.innerHTML = '<i class="bi bi-rocket-takeoff me-2"></i>Start using FoodAssistant';
-    return;
+    // Enforce Grocy URL (full app only)
+    if (!payload.grocy_base_url) {
+      resultEl.innerHTML = '<div class="alert alert-danger py-2 small"><i class="bi bi-x-circle-fill me-1"></i>' +
+        'Grocy URL is required. <a href="#" onclick="event.preventDefault();_wizShowStep(4)">Go to Grocy</a></div>';
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-rocket-takeoff me-2"></i>Start using FoodAssistant';
+      return;
+    }
   }
 
   try {
@@ -2557,7 +2594,13 @@ async function wizSaveAll() {
     });
     const d = await r.json();
     if (d.ok) {
-      window.location.href = 'ui/';
+      // Pi Remote has no local UI of its own; send the browser to the server
+      // it controls. Everything else opens the local app.
+      if (_installMode === 'pi_remote' && payload.remote_server_url) {
+        window.location.href = payload.remote_server_url.replace(/\/+$/, '') + '/ui/';
+      } else {
+        window.location.href = 'ui/';
+      }
     } else {
       throw new Error(d.detail || 'Unknown error');
     }
