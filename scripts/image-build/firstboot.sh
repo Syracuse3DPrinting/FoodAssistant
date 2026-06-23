@@ -140,8 +140,10 @@ _load_mode_from_settings() {
   local mode url
   mode="$(grep -o '"deployment_mode"[[:space:]]*:[[:space:]]*"[^"]*"' "$sf" 2>/dev/null | sed 's/.*"\([^"]*\)"$/\1/' || true)"
   url="$(grep -o '"remote_server_url"[[:space:]]*:[[:space:]]*"[^"]*"' "$sf" 2>/dev/null | sed 's/.*"\([^"]*\)"$/\1/' || true)"
+  apikey="$(grep -o '"api_key"[[:space:]]*:[[:space:]]*"[^"]*"' "$sf" 2>/dev/null | sed 's/.*"\([^"]*\)"$/\1/' || true)"
   [ -n "$mode" ] && DEPLOYMENT_MODE="$mode"
   [ -n "$url" ] && REMOTE_SERVER_URL="$url"
+  [ -n "$apikey" ] && REMOTE_API_KEY="$apikey"
   return 0
 }
 
@@ -693,6 +695,10 @@ configure_streamdeck() {
   local sd_base_env=""
   if is_remote_mode && [ -n "$REMOTE_SERVER_URL" ]; then
     sd_base_env="Environment=FOODASSISTANT_BASE_URL=${REMOTE_SERVER_URL%/}"
+    if [ -n "$REMOTE_API_KEY" ]; then
+      sd_base_env="$sd_base_env
+Environment=FOODASSISTANT_API_KEY=$REMOTE_API_KEY"
+    fi
   fi
 
   # Write the systemd service unit.

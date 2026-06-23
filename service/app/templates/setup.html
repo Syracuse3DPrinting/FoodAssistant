@@ -703,6 +703,11 @@
                      value="{{ s.remote_server_url }}">
               <div class="form-text">Full URL including port (usually 9284).</div>
             </div>
+            <div class="mb-3">
+              <label class="form-label">API Key</label>
+              {{ secret_input('remote_api_key', 'Generate via openssl rand -hex 32 on main server') }}
+              <div class="form-text">Required if your main server has a password enabled.</div>
+            </div>
             <button class="btn btn-outline-info btn-sm" onclick="testRemoteSettings()">
               <i class="bi bi-plug me-1"></i>Test Connection
             </button>
@@ -1992,7 +1997,7 @@ function buildPayload() {
     display_touch:   document.getElementById('display_touch')?.checked || false,
     auth_required:   document.getElementById('auth_required')?.checked ?? true,
     auth_password:   secretVal('auth_password'),
-    api_key:         secretVal('api_key'),
+    api_key:         val('remote_api_key') || secretVal('api_key'),
     rclone_remote:   val('rclone_remote'),
     rclone_schedule_hours: num('rclone_schedule_hours', 0),
     // _installMode is defined only in the first-time wizard; on the settings
