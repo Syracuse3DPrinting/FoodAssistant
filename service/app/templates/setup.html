@@ -1707,6 +1707,7 @@ docker compose up -d</code></pre>
 const TABS = {{ tabs | tojson }};
 const HAS_AUTH_PASSWORD = {{ 'true' if has.auth_password else 'false' }};
 const IS_CONFIGURED = {{ 'true' if configured else 'false' }};
+const PI_GROCY_DEFAULT = {{ ('"http://' + pi_mdns_host + ':9383"') if pi_mdns_host else '"http://localhost:9383"' }};
 
 // Shared helpers
 function val(id) { return document.getElementById(id)?.value.trim() || ''; }
@@ -2523,7 +2524,7 @@ function selectInstallMode(mode) {
   // Pi Hosted: everything is local, so pre-fill the Grocy URL.
   if (mode === 'pi_hosted') {
     const urlField = document.getElementById('grocy_base_url');
-    if (urlField && !urlField.value) urlField.value = 'http://localhost:9383';
+    if (urlField && !urlField.value) urlField.value = PI_GROCY_DEFAULT;
   }
   // Pi Remote owns no data and has no local API, so the UI password and API
   // key do not apply: the remote server handles access control. Default auth
@@ -2721,7 +2722,7 @@ function _wizApplyInstallMode() {
   const urlField = document.getElementById('grocy_base_url');
   if (_installMode === 'pi_hosted') {
     if (urlField && !urlField.value) {
-      urlField.value = 'http://localhost:9383';
+      urlField.value = PI_GROCY_DEFAULT;
     }
     if (applianceNote) applianceNote.classList.remove('d-none');
   } else {

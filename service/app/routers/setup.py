@@ -1,3 +1,4 @@
+import socket
 import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -220,16 +221,22 @@ async def _detect_local_grocy() -> str:
     return ""
 
 
+def _pi_mdns_host() -> str:
+    """Return <hostname>.local for the current Pi, e.g. 'foodassistant.local'."""
+    return f"{socket.gethostname()}.local"
+
+
 def _grocy_url_for_browser(request: Request, detected: str) -> str:
     """Adjust a locally-detected Grocy URL for the browser making the request.
 
-    When Grocy is detected at localhost:9383 but the setup page is opened from
-    another machine, localhost resolves to the user's own computer, not the Pi.
-    In that case, substitute the hostname the browser used to reach us (same IP,
-    port 9383) so the pre-filled URL is immediately usable.
+    On a Pi, use <hostname>.local so the link survives IP address changes.
+    When accessed from a non-Pi server, substitute the request hostname so the
+    pre-filled URL is usable from the browser making the request.
     """
     if not detected:
         return detected
+    if is_raspberry_pi():
+        return f"http://{_pi_mdns_host()}:9383"
     client_host = (request.client.host if request.client else "") or ""
     if client_host in ("127.0.0.1", "::1", "localhost", ""):
         return detected
@@ -241,16 +248,14 @@ def _suggest_mealie_url(request: Request) -> str:
     """Return a suggested Mealie URL for the browser, or '' if not applicable.
 
     On a Pi appliance Mealie runs (or will run) on the same host at port 9285.
+    Prefers the mDNS hostname so the link survives DHCP IP changes.
     Returns '' when Mealie is already configured or we are not on a Pi.
     """
     if not is_raspberry_pi():
         return ""
     if settings.mealie_base_url:
         return ""
-    server_host = request.url.hostname or ""
-    if not server_host or server_host in ("127.0.0.1", "::1", "localhost"):
-        return "http://localhost:9285"
-    return f"http://{server_host}:9285"
+    return f"http://{_pi_mdns_host()}:9285"
 
 
 def available_modes() -> dict:
@@ -298,6 +303,7 @@ async def setup_page(request: Request):
         "current_mode": current_mode,
         "is_pi": is_raspberry_pi(),
         "board_model": board_model(),
+        "pi_mdns_host": _pi_mdns_host() if is_raspberry_pi() else "",
     })
 
 
