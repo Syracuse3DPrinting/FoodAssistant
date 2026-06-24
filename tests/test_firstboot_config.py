@@ -414,7 +414,9 @@ def test_ads7846_uses_measured_default_matrix(tmp_path):
     rc, out = _touch_run(tmp_path, {"TOUCH_DRIVER": "ads7846"})
     assert rc == 0, out
     assert f"matrix={ADS7846_MEASURED}" in out
-    assert "match=ADS7846*" in out
+    assert "name=ADS7846*" in out
+    assert "99-foodassistant-touch.rules" in out
+    assert "LIBINPUT_CALIBRATION_MATRIX" in out
 
 
 def test_explicit_matrix_overrides_ads7846_default(tmp_path):
@@ -441,13 +443,14 @@ def test_usb_touch_keeps_identity_default(tmp_path):
     rc, out = _touch_run(tmp_path, {"TOUCH_DRIVER": "usb"})
     assert rc == 0, out
     assert "matrix=1 0 0 0 1 0" in out
-    assert "match=* Touchscreen" in out
+    assert "name=*Touchscreen*" in out
 
 
 def test_touch_none_skips_configuration(tmp_path):
     rc, out = _touch_run(tmp_path, {"TOUCH_DRIVER": "none"})
     assert rc == 0, out
-    assert "would write /etc/libinput" not in out
+    assert "99-foodassistant-touch.rules" not in out
+    assert "LIBINPUT_CALIBRATION_MATRIX" not in out
 
 
 def test_touch_installs_tools_and_calibrate_helper(tmp_path):
