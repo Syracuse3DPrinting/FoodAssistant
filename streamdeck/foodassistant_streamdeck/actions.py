@@ -428,6 +428,7 @@ ACTION_ICONS: dict[str, str] = {
     "ha_3": "house",
     "ha_4": "house",
     "ha_5": "house",
+    "pin": "shield-lock",
 }
 
 
