@@ -397,7 +397,7 @@ function renderBead(b){
   const parent=b.parent?'<span class="bid">⤷ '+b.parent+'</span>':"";
   const deps=b.dependency_count>0?'<span class="bdg2 p-dep">↔ '+b.dependency_count+' dep</span>':"";
   const reason=b.close_reason?'<div style="margin-top:.4rem;color:var(--green);font-size:.77rem">✓ '+esc(b.close_reason)+'</div>':"";
-  return '<div class="bc" style="--bc:'+col+'" onclick="this.classList.toggle(\'exp\')">'
+  return '<div class="bc" style="--bc:'+col+'" onclick="this.classList.toggle(&quot;exp&quot;)">'
     +'<div class="bi">'+icon+'</div>'
     +'<div class="bm">'
       +'<div class="bt">'+esc(b.title)+'</div>'
