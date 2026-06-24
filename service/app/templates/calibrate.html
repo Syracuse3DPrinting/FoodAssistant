@@ -112,14 +112,19 @@
       });
       const data = await r.json();
       if (data.ok) {
-        msgEl.textContent = 'Calibration saved. Returning to the app...';
+        // The host bridge restarts the kiosk so the compositor reloads the new
+        // matrix; that relaunches this display at the app, so we usually do not
+        // get here. If the kiosk was not restarted, fall back to navigating.
+        msgEl.textContent = 'Calibration saved. Restarting the display...';
+        if (!data.kiosk_restarted) setTimeout(window.finishCalibration, 2000);
       } else {
         msgEl.textContent = 'Apply failed: ' + (data.error || 'unknown error');
+        setTimeout(window.finishCalibration, 3500);
       }
     } catch (e) {
       msgEl.textContent = 'Request failed: ' + e;
+      setTimeout(window.finishCalibration, 3500);
     }
-    setTimeout(window.finishCalibration, 2500);
   }
 
   function start() {

@@ -637,10 +637,28 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 [helper, "--apply-matrix", " ".join(parts)],
                 capture_output=True, text=True, timeout=15,
             )
-            if r.returncode == 0:
-                self._send(200, {"ok": True, "message": r.stdout.strip()})
-            else:
+            if r.returncode != 0:
                 self._send(500, {"ok": False, "error": (r.stderr or r.stdout).strip()})
+                return
+            # The compositor (cage/wlroots) holds the touch device open and only
+            # reads LIBINPUT_CALIBRATION_MATRIX when the device is added, so a
+            # udevadm trigger alone does not change the live mapping. Restart the
+            # kiosk so cage reopens the device and picks up the new matrix.
+            restarted = False
+            if _service_active("foodassistant-kiosk.service"):
+                try:
+                    subprocess.run(
+                        ["systemctl", "restart", "foodassistant-kiosk.service"],
+                        timeout=30,
+                    )
+                    restarted = True
+                except Exception:
+                    pass
+            self._send(200, {
+                "ok": True,
+                "message": r.stdout.strip(),
+                "kiosk_restarted": restarted,
+            })
         except Exception as e:
             self._send(500, {"ok": False, "error": str(e)})
 

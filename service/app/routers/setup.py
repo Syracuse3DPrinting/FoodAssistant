@@ -1064,7 +1064,8 @@ async def calibrate_touch_apply(payload: TouchMatrixPayload):
                              json={"matrix": matrix_str})
         data = r.json()
         if data.get("ok"):
-            return {"ok": True, "message": data.get("message", "")}
+            return {"ok": True, "message": data.get("message", ""),
+                    "kiosk_restarted": data.get("kiosk_restarted", False)}
         return JSONResponse({"ok": False, "error": data.get("error", f"HTTP {r.status_code}")})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)})
