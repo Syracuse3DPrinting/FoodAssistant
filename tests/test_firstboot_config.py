@@ -396,3 +396,100 @@ def test_display_rotation_step_targeted(tmp_path):
     assert rc == 0, out
     assert "Deploying stack" not in out
     assert "Targeted step run" in out
+
+
+# Touchscreen calibration (FoodAssistant-8ji): the ADS7846 SPI panel needs a
+# measured affine, not identity, or taps land off. Priority: explicit
+# TOUCH_CALIBRATION_MATRIX > ads7846 measured default (unrotated) > rotation.
+
+ADS7846_MEASURED = "0 1.3753 -0.1688 1.2635 0 -0.1166"
+
+
+def _touch_run(tmp_path, env):
+    return run_firstboot(tmp_path, "HOSTNAME=foodassistant\n",
+                         extra_env={"STEPS": "touch", **env})
+
+
+def test_ads7846_uses_measured_default_matrix(tmp_path):
+    rc, out = _touch_run(tmp_path, {"TOUCH_DRIVER": "ads7846"})
+    assert rc == 0, out
+    assert f"matrix={ADS7846_MEASURED}" in out
+    assert "match=ADS7846*" in out
+
+
+def test_explicit_matrix_overrides_ads7846_default(tmp_path):
+    rc, out = _touch_run(tmp_path, {
+        "TOUCH_DRIVER": "ads7846",
+        "TOUCH_CALIBRATION_MATRIX": "1 0 0 0 1 0",
+    })
+    assert rc == 0, out
+    assert "matrix=1 0 0 0 1 0" in out
+    assert ADS7846_MEASURED not in out
+
+
+def test_ads7846_rotated_falls_back_to_rotation_matrix(tmp_path):
+    # A rotated ADS7846 panel cannot use the unrotated measured affine; it falls
+    # back to the rotation matrix (operator should set a composed matrix).
+    rc, out = _touch_run(tmp_path, {"TOUCH_DRIVER": "ads7846",
+                                    "DISPLAY_ROTATION": "90"})
+    assert rc == 0, out
+    assert "matrix=0 -1 1 1 0 0" in out
+    assert ADS7846_MEASURED not in out
+
+
+def test_usb_touch_keeps_identity_default(tmp_path):
+    rc, out = _touch_run(tmp_path, {"TOUCH_DRIVER": "usb"})
+    assert rc == 0, out
+    assert "matrix=1 0 0 0 1 0" in out
+    assert "match=* Touchscreen" in out
+
+
+def test_touch_none_skips_configuration(tmp_path):
+    rc, out = _touch_run(tmp_path, {"TOUCH_DRIVER": "none"})
+    assert rc == 0, out
+    assert "would write /etc/libinput" not in out
+
+
+def test_touch_installs_tools_and_calibrate_helper(tmp_path):
+    rc, out = _touch_run(tmp_path, {"TOUCH_DRIVER": "ads7846"})
+    assert rc == 0, out
+    assert "libinput-tools evtest" in out
+    assert "foodassistant-touch-calibrate" in out
+
+
+def _load_calibrate_helper():
+    """Extract the embedded foodassistant-touch-calibrate Python and import it."""
+    import importlib.util
+    import re
+    src = FIRSTBOOT.read_text()
+    m = re.search(r"cat > \"\$dst\" <<'PYEOF'\n(.*?)\nPYEOF", src, re.S)
+    assert m, "calibrate helper heredoc not found in firstboot.sh"
+    code = m.group(1)
+    path = REPO / "tests" / "_touch_calibrate_extracted.py"
+    path.write_text(code)
+    spec = importlib.util.spec_from_file_location("touch_calibrate", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    path.unlink()
+    return mod
+
+
+def test_calibrate_helper_compiles_and_recovers_known_affine():
+    tc = _load_calibrate_helper()
+    # screen_x = 1.2*nx - 0.1*ny + 0.05 ; screen_y = 1.3*ny - 0.08
+    def known(nx, ny):
+        return (1.2 * nx - 0.1 * ny + 0.05, 1.3 * ny - 0.08)
+    samples = [(nx, ny, *known(nx, ny))
+               for nx, ny in [(0.1, 0.1), (0.9, 0.1), (0.1, 0.9), (0.9, 0.9)]]
+    a, b, c, d, e, f = tc.solve_affine(samples)
+    got = tuple(round(v, 4) for v in (a, b, c, d, e, f))
+    assert got == (1.2, -0.1, 0.05, 0.0, 1.3, -0.08), got
+
+
+def test_calibrate_helper_rejects_degenerate_corners():
+    import pytest
+    tc = _load_calibrate_helper()
+    # All four taps at the same point: the design matrix is singular.
+    samples = [(0.5, 0.5, 0.0, 0.0)] * 4
+    with pytest.raises(ValueError):
+        tc.solve_affine(samples)

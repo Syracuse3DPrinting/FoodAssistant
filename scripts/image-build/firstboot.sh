@@ -515,14 +515,30 @@ _pi_config_txt() {
   fi
 }
 
-# Derive a libinput calibration matrix from DISPLAY_ROTATION when the user has
-# not supplied an explicit TOUCH_CALIBRATION_MATRIX. The 6-float matrix maps
-# from touch-panel coordinates to screen coordinates, accounting for the same
-# rotation applied to the display. Values match standard libinput conventions.
+# Measured libinput calibration matrix for the ADS7846 SPI panel (Waveshare 4"
+# HDMI LCD and siblings) when driven by our dtoverlay with swapxy=1. An identity
+# transform leaves taps badly offset and axis-crossed; this affine maps raw panel
+# coordinates onto the screen. Derived from a 4-corner evtest measurement on the
+# reference panel and validated to about 1 percent. Used as the default for
+# ads7846 at the unrotated orientation; override per panel with
+# TOUCH_CALIBRATION_MATRIX, or recompute on-device with foodassistant-touch-calibrate.
+ADS7846_DEFAULT_MATRIX="0 1.3753 -0.1688 1.2635 0 -0.1166"
+
+# Derive a libinput calibration matrix. Priority: an explicit
+# TOUCH_CALIBRATION_MATRIX always wins; otherwise an ADS7846 panel at the
+# unrotated orientation uses the measured default above; otherwise the matrix
+# follows DISPLAY_ROTATION. The 6-float matrix maps touch-panel coordinates to
+# screen coordinates. For a rotated ADS7846 panel, set TOUCH_CALIBRATION_MATRIX
+# to the composed matrix (rotation times the measured affine).
 _touch_calibration_matrix() {
+  local driver="${1:-}"
   local m="${TOUCH_CALIBRATION_MATRIX:-}"
   if [ -n "$m" ]; then
     echo "$m"
+    return
+  fi
+  if [ "$driver" = "ads7846" ] && [ "${DISPLAY_ROTATION:-0}" = "0" ]; then
+    echo "$ADS7846_DEFAULT_MATRIX"
     return
   fi
   case "${DISPLAY_ROTATION:-0}" in
@@ -538,8 +554,9 @@ _touch_calibration_matrix() {
 # Works for both X11 and Wayland (cage/wlroots reads libinput, not X).
 _write_libinput_touch_quirk() {
   local match_name="$1"    # MatchName glob, e.g. "ADS7846*" or "Goodix*"
+  local driver="${2:-}"    # touch driver, so ads7846 gets its measured default
   local matrix
-  matrix="$(_touch_calibration_matrix)"
+  matrix="$(_touch_calibration_matrix "$driver")"
 
   if [ "$DRY_RUN" = "1" ]; then
     log "DRY_RUN would write /etc/libinput/local-overrides.quirks (match=$match_name matrix=$matrix)"
@@ -553,6 +570,191 @@ MatchName=${match_name}
 AttrCalibrationMatrix=${matrix}
 EOF
   log "Wrote libinput calibration quirk: MatchName=${match_name} matrix=${matrix}"
+}
+
+# Install foodassistant-touch-calibrate: an on-device helper that captures four
+# corner taps and writes a fitted AttrCalibrationMatrix. This is how an operator
+# re-tunes a panel whose taps land off, without hand-computing the affine. The
+# script is self-contained Python 3 (no extra pip deps) and parses evtest output.
+_install_touch_calibrate_helper() {
+  local dst="/usr/local/bin/foodassistant-touch-calibrate"
+  if [ "$DRY_RUN" = "1" ]; then
+    log "DRY_RUN would install $dst"
+    return 0
+  fi
+  cat > "$dst" <<'PYEOF'
+#!/usr/bin/env python3
+"""Interactive touchscreen calibration for the FoodAssistant appliance.
+
+Tap each of the four screen corners when prompted. The script reads the raw
+ABS_X/ABS_Y values via evtest, fits the 2x3 affine that libinput applies to
+normalized device coordinates, and writes /etc/libinput/local-overrides.quirks.
+Re-run after a panel swap or if taps land off. Requires evtest (installed by the
+provisioner). Run with sudo so it can write the quirk file.
+
+Usage: foodassistant-touch-calibrate [/dev/input/eventN]
+"""
+import os
+import re
+import subprocess
+import sys
+
+QUIRK = "/etc/libinput/local-overrides.quirks"
+CORNERS = [
+    ("TOP-LEFT", 0.0, 0.0),
+    ("TOP-RIGHT", 1.0, 0.0),
+    ("BOTTOM-LEFT", 0.0, 1.0),
+    ("BOTTOM-RIGHT", 1.0, 1.0),
+]
+
+
+def find_device():
+    """Return the first event device that looks like a touchscreen."""
+    try:
+        blocks = open("/proc/bus/input/devices").read().split("\n\n")
+    except OSError:
+        return None
+    for b in blocks:
+        if re.search(r"touch", b, re.I):
+            m = re.search(r"Handlers=.*?(event\d+)", b)
+            if m:
+                return "/dev/input/" + m.group(1)
+    return None
+
+
+def read_minmax(device):
+    """Read ABS_X / ABS_Y min and max from the evtest startup banner.
+
+    evtest prints each axis capability (with Min/Max) before the "Testing"
+    line, so capture stdout until that point and parse the ranges.
+    """
+    ranges = {}
+    proc = subprocess.Popen(["evtest", device], stdout=subprocess.PIPE,
+                            text=True)
+    code = None
+    try:
+        for line in proc.stdout:
+            cm = re.search(r"\(ABS_(X|Y)\)", line)
+            if cm:
+                code = cm.group(1)
+            mm = re.search(r"(Min|Max)\s+(-?\d+)", line)
+            if mm and code:
+                ranges.setdefault(code, {})[mm.group(1)] = int(mm.group(2))
+            if "Testing" in line:
+                break
+    finally:
+        proc.terminate()
+    return ranges
+
+
+def capture_tap(device):
+    """Block until one tap completes; return (raw_x, raw_y)."""
+    proc = subprocess.Popen(["evtest", device], stdout=subprocess.PIPE,
+                            text=True)
+    x = y = None
+    try:
+        for line in proc.stdout:
+            mx = re.search(r"\(ABS_X\), value (-?\d+)", line)
+            my = re.search(r"\(ABS_Y\), value (-?\d+)", line)
+            mr = re.search(r"\(BTN_TOUCH\), value 0", line)
+            if mx:
+                x = int(mx.group(1))
+            elif my:
+                y = int(my.group(1))
+            elif mr and x is not None and y is not None:
+                return x, y
+    finally:
+        proc.terminate()
+    return None
+
+
+def solve_affine(samples):
+    """Least-squares fit of a 2x3 affine from normalized device pts to targets.
+
+    samples: list of (nx, ny, tx, ty). Returns six floats a b c d e f where
+    screen_x = a*nx + b*ny + c and screen_y = d*nx + e*ny + f.
+    """
+    # Normal equations for [a b c] and [d e f] share the same 3x3 design matrix.
+    sxx = sxy = sx = syy = sy = n = 0.0
+    bx0 = bx1 = bx2 = by0 = by1 = by2 = 0.0
+    for nx, ny, tx, ty in samples:
+        sxx += nx * nx
+        sxy += nx * ny
+        sx += nx
+        syy += ny * ny
+        sy += ny
+        n += 1
+        bx0 += nx * tx; bx1 += ny * tx; bx2 += tx
+        by0 += nx * ty; by1 += ny * ty; by2 += ty
+    A = [[sxx, sxy, sx], [sxy, syy, sy], [sx, sy, n]]
+    return _solve3(A, [bx0, bx1, bx2]) + _solve3(A, [by0, by1, by2])
+
+
+def _solve3(A, b):
+    """Solve a 3x3 linear system by Gaussian elimination."""
+    M = [row[:] + [b[i]] for i, row in enumerate(A)]
+    for i in range(3):
+        p = max(range(i, 3), key=lambda r: abs(M[r][i]))
+        M[i], M[p] = M[p], M[i]
+        if abs(M[i][i]) < 1e-12:
+            raise ValueError("degenerate corners; tap distinct corners")
+        for r in range(3):
+            if r != i:
+                f = M[r][i] / M[i][i]
+                for c in range(i, 4):
+                    M[r][c] -= f * M[i][c]
+    return [M[i][3] / M[i][i] for i in range(3)]
+
+
+def main():
+    device = sys.argv[1] if len(sys.argv) > 1 else find_device()
+    if not device or not os.path.exists(device):
+        print("No touch device found. Pass one explicitly: "
+              "foodassistant-touch-calibrate /dev/input/eventN", file=sys.stderr)
+        return 2
+    print("Calibrating %s" % device)
+    ranges = read_minmax(device)
+    try:
+        xmin, xmax = ranges["X"]["Min"], ranges["X"]["Max"]
+        ymin, ymax = ranges["Y"]["Min"], ranges["Y"]["Max"]
+    except KeyError:
+        print("Could not read ABS ranges from evtest.", file=sys.stderr)
+        return 2
+    samples = []
+    for name, tx, ty in CORNERS:
+        input("Tap and release the %s corner, then press Enter to continue..."
+              % name)
+        pt = capture_tap(device)
+        if not pt:
+            print("No tap captured; aborting.", file=sys.stderr)
+            return 2
+        rx, ry = pt
+        nx = (rx - xmin) / (xmax - xmin) if xmax != xmin else 0.0
+        ny = (ry - ymin) / (ymax - ymin) if ymax != ymin else 0.0
+        samples.append((nx, ny, tx, ty))
+        print("  %s raw=(%d,%d) normalized=(%.3f,%.3f)" % (name, rx, ry, nx, ny))
+    coeffs = solve_affine(samples)
+    matrix = " ".join("%.4f" % c for c in coeffs)
+    print("Fitted AttrCalibrationMatrix: %s" % matrix)
+    try:
+        os.makedirs("/etc/libinput", exist_ok=True)
+        with open(QUIRK, "w") as f:
+            f.write("[FoodAssistant touchscreen calibration]\n")
+            f.write("MatchName=*\n")
+            f.write("AttrCalibrationMatrix=%s\n" % matrix)
+    except OSError as e:
+        print("Could not write %s (run with sudo): %s" % (QUIRK, e),
+              file=sys.stderr)
+        return 1
+    print("Wrote %s. Restart the kiosk (or reboot) to apply." % QUIRK)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+PYEOF
+  chmod +x "$dst"
+  log "Installed touch calibration helper: $dst"
 }
 
 configure_touch() {
@@ -581,6 +783,17 @@ configure_touch() {
   fi
 
   log "Configuring touch driver: $driver"
+
+  # Tools for confirming and re-tuning the calibration on-device:
+  #   libinput-tools -> `libinput quirks list <dev>` and `libinput list-devices`
+  #   evtest         -> raw corner-tap capture used by foodassistant-touch-calibrate
+  # Best-effort: a missing package must not abort provisioning.
+  if [ "$DRY_RUN" = "1" ]; then
+    log "DRY_RUN would install touch verification tools: libinput-tools evtest"
+  else
+    apt_install libinput-tools evtest || warn "touch tools (libinput-tools/evtest) install failed; on-device calibration check unavailable"
+  fi
+  _install_touch_calibrate_helper
 
   if [ "$driver" = "ads7846" ]; then
     # ADS7846 is a SPI resistive touch controller used on Waveshare HDMI
@@ -615,7 +828,7 @@ configure_touch() {
         log "Enabled SPI (dtparam=spi=on) in $cfg"
       fi
     fi
-    _write_libinput_touch_quirk "ADS7846*"
+    _write_libinput_touch_quirk "ADS7846*" "ads7846"
   fi
 
   if [ "$driver" = "usb" ]; then
