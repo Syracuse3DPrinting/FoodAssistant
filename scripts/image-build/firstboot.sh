@@ -1131,6 +1131,19 @@ EOF
   log "seed_app_settings: wrote $settings_file (deployment_mode=$mode, has_streamdeck=$sd_val)"
 }
 
+# Returns success when the containerised Pi Remote stack (docker-compose.remote.yml)
+# is already running and publishing host port 80. In that case the venv service
+# must not also bind port 80, so the caller skips it. See FoodAssistant-dhr: the
+# compose path and the venv path are mutually exclusive, never run both.
+remote_docker_stack_active() {
+  command -v docker >/dev/null 2>&1 || return 1
+  docker compose version >/dev/null 2>&1 || return 1
+  # The compose service container name is fixed in docker-compose.remote.yml.
+  local state
+  state="$(docker inspect -f '{{.State.Running}}' foodassistant-service 2>/dev/null)" || return 1
+  [ "$state" = "true" ]
+}
+
 # Step: deploy the FoodAssistant UI service in a Python venv for Pi Remote.
 # No Docker needed: just uvicorn + the app, bound directly on port 80.
 # The user can then browse to http://<hostname>.local/ to set the remote URL.
@@ -1141,6 +1154,19 @@ deploy_remote_service() {
     svc_src="$REPO_DIR/service"
   elif [ -d "$ASSET_DIR/service" ]; then
     svc_src="$ASSET_DIR/service"
+  fi
+
+  # Guard against the port-80 conflict (FoodAssistant-dhr): if the operator has
+  # already brought up the containerised stack (docker-compose.remote.yml, which
+  # publishes host port 80), do not also install a venv service on the same port.
+  # The two paths are alternatives, not additions. Disable any prior venv unit so
+  # a re-provision does not leave both fighting for the port, then bail out.
+  if remote_docker_stack_active; then
+    warn "Containerised Pi Remote stack is running on port 80; skipping the venv service to avoid a port conflict (see docker-compose.remote.yml)."
+    if [ "$DRY_RUN" != "1" ]; then
+      systemctl disable --now foodassistant-remote.service 2>/dev/null || true
+    fi
+    return 0
   fi
 
   log "Installing FoodAssistant remote UI service (Python venv, port 80)"

@@ -7,10 +7,18 @@
 # The service binds on port 80 so the local settings page is reachable at
 # http://<hostname>.local without specifying a port.
 #
-# NOTE: this file is an alternative to running the service in a Python venv
-# directly. For most Pi Remotes, firstboot.sh installs and runs the service
-# via venv (no Docker needed). This compose file is provided for operators who
-# prefer the containerised path or need image-based updates.
+# NOTE: this file is an ALTERNATIVE to running the service in a Python venv
+# directly, never an addition. For most Pi Remotes, firstboot.sh installs and
+# runs the service via venv (no Docker needed). This compose file is provided
+# for operators who prefer the containerised path or need image-based updates.
+#
+# Both paths bind host port 80, so they cannot run at the same time. Before you
+# bring this stack up on a device that firstboot already provisioned, stop and
+# disable the venv unit so it does not fight for the port:
+#   sudo systemctl disable --now foodassistant-remote.service
+#   docker compose -f docker-compose.remote.yml up -d
+# firstboot.sh also guards the reverse case: if this container is already
+# running on port 80, it skips installing the venv service (FoodAssistant-dhr).
 services:
   service:
     image: ghcr.io/syracuse3dprinting/foodassistant:${FOODASSISTANT_TAG:-latest}
