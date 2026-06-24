@@ -1,11 +1,10 @@
 name = "foodassistant-dashboard"
-pages_build_output_dir = "."
+main = "worker.js"
 compatibility_date = "2024-01-01"
 
-# Environment variables (non-secret)
 [vars]
 GITHUB_OWNER = "Syracuse3DPrinting"
 GITHUB_REPO  = "FoodAssistant"
 
-# Set GITHUB_TOKEN as a secret in the Cloudflare Pages dashboard:
-#   Settings → Environment variables → Add variable (encrypted) → GITHUB_TOKEN
+# Add GITHUB_TOKEN as an encrypted secret in Cloudflare dashboard:
+#   Worker Settings → Variables and Secrets → Add → GITHUB_TOKEN
