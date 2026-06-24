@@ -774,9 +774,18 @@ async def install_logs(name: str):
 
 @router.get("/hardware/status")
 async def hardware_status():
-    """Display / Stream Deck presence and service state, via the Pi host bridge."""
+    """Display / Stream Deck presence and service state, via the Pi host bridge.
+
+    Off a Pi there is no host bridge to probe, so return a clean "nothing
+    attached" shape (rather than an error) so the setup UI's attached-hardware
+    panel degrades gracefully instead of showing a failure.
+    """
     if not is_raspberry_pi():
-        return {"ok": False, "error": "Not available on this platform."}
+        return {
+            "ok": True,
+            "display": {"present": False, "connectors": []},
+            "streamdeck": {"present": False, "model": ""},
+        }
     try:
         async with httpx.AsyncClient(timeout=6.0) as c:
             r = (await c.get(f"{_HOST_BRIDGE}/hardware/status")).json()

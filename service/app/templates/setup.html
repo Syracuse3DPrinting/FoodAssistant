@@ -740,7 +740,7 @@
           <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-display" type="button" onclick="loadDisplayStatus(); loadHardwareStatus()">
             <i class="bi bi-display me-2"></i>Display
           </button>
-          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-streamdeck" type="button" onclick="loadHardwareStatus()">
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-streamdeck" type="button" onclick="loadHardwareStatus(); loadHardwareDetect()">
             <i class="bi bi-grid-3x3-gap me-2"></i>Stream Deck
           </button>
           <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-network" type="button" onclick="loadNetworkStatus()">
@@ -1577,6 +1577,24 @@ docker compose up -d</code></pre>
         <!-- Stream Deck (Pi appliance only) -->
         <div class="tab-pane fade" id="pane-streamdeck">
           <p class="pane-intro">Configure the Elgato Stream Deck attached to this appliance.</p>
+
+          <div class="section-card mb-3">
+            <div class="section-title"><i class="bi bi-hdd-stack text-info"></i> Attached hardware</div>
+            <div class="form-text mb-2">Live detection from the appliance host. Plug hardware in, then use Refresh.</div>
+            <div class="d-flex flex-column gap-2 mb-2" style="max-width:480px">
+              <div class="d-flex align-items-center justify-content-between">
+                <span><i class="bi bi-display me-1"></i>Display</span>
+                <span id="hwdetect-display"><span class="badge bg-secondary">Checking...</span></span>
+              </div>
+              <div class="d-flex align-items-center justify-content-between">
+                <span><i class="bi bi-grid-3x3-gap me-1"></i>Stream Deck</span>
+                <span id="hwdetect-streamdeck"><span class="badge bg-secondary">Checking...</span></span>
+              </div>
+            </div>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="loadHardwareDetect()">
+              <i class="bi bi-arrow-repeat me-1"></i>Refresh
+            </button>
+          </div>
 
           <div class="section-card mb-3">
             <div class="section-title"><i class="bi bi-grid-3x3-gap text-info"></i> Stream Deck Device</div>
@@ -3817,7 +3835,43 @@ async function disableAp() {
   }
 }
 
+// Read-only attached-hardware panel: fetch live display + Stream Deck presence
+// from the host bridge (via the app proxy) and fill the badges. Safe off a Pi:
+// the proxy returns a clean "nothing attached" shape there.
+async function loadHardwareDetect() {
+  const dEl = document.getElementById('hwdetect-display');
+  const sEl = document.getElementById('hwdetect-streamdeck');
+  if (!dEl && !sEl) return;
+  let r;
+  try {
+    r = await fetch('setup/hardware/status').then(x => x.json());
+  } catch (e) {
+    r = null;
+  }
+  const display = (r && r.display) || {present: false, connectors: []};
+  const sd = (r && r.streamdeck) || {present: false, model: ''};
+  if (dEl) {
+    if (display.present) {
+      const names = (display.connectors || []).join(', ');
+      dEl.innerHTML = '<span class="badge bg-success">Detected' +
+        (names ? ' (' + names + ')' : '') + '</span>';
+    } else {
+      dEl.innerHTML = '<span class="badge bg-secondary">Not detected</span>';
+    }
+  }
+  if (sEl) {
+    if (sd.present) {
+      const model = sd.model || '';
+      sEl.innerHTML = '<span class="badge bg-success">Detected' +
+        (model ? ' (' + model + ')' : '') + '</span>';
+    } else {
+      sEl.innerHTML = '<span class="badge bg-secondary">Not detected</span>';
+    }
+  }
+}
+
 document.addEventListener('DOMContentLoaded', checkApStatus);
+document.addEventListener('DOMContentLoaded', loadHardwareDetect);
 </script>
 </body>
 </html>

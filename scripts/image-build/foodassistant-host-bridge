@@ -168,6 +168,72 @@ def _display_present():
     return os.path.exists("/dev/dri/card0")
 
 
+# Stream Deck / display detection from sysfs
+# ------------------------------------------
+# These read sysfs directly (no lsusb, no extra packages) so the appliance can
+# report attached hardware on a minimal image. They take the sysfs root as an
+# argument so they are testable against a faked layout under tmp_path.
+
+# Elgato (Stream Deck maker) USB vendor id.
+_STREAMDECK_VENDOR = "0fd9"
+
+
+def _read_sysfs(path):
+    """Return the stripped contents of a sysfs file, or "" on any error."""
+    try:
+        with open(path) as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+    except Exception:
+        return ""
+
+
+def _drm_connected(root="/sys/class/drm"):
+    """Return the list of connected DRM connector names under root.
+
+    Scans <root>/*/status; a connector counts as connected when its status
+    file reads "connected" (the kernel also emits "disconnected", which must
+    not match). A missing root yields an empty list rather than raising.
+    """
+    import glob
+    names = []
+    for status_path in sorted(glob.glob(os.path.join(root, "*", "status"))):
+        if _read_sysfs(status_path) == "connected":
+            names.append(os.path.basename(os.path.dirname(status_path)))
+    return names
+
+
+def _streamdeck_info(usb_root="/sys/bus/usb/devices"):
+    """Return (present, model) for an attached Stream Deck under usb_root.
+
+    Scans <usb_root>/*/idVendor for the Elgato vendor id; on a match reads the
+    sibling product file for the model string. Returns (False, "") when none is
+    found or the tree is absent.
+    """
+    import glob
+    for vendor_path in sorted(glob.glob(os.path.join(usb_root, "*", "idVendor"))):
+        if _read_sysfs(vendor_path).lower() == _STREAMDECK_VENDOR:
+            product = _read_sysfs(os.path.join(os.path.dirname(vendor_path), "product"))
+            return True, product
+    return False, ""
+
+
+def _hardware_status():
+    """Display + Stream Deck presence read straight from sysfs.
+
+    Returned as the body of GET /hardware/status. Always succeeds: a missing
+    sysfs tree degrades to present=false rather than raising.
+    """
+    connectors = _drm_connected()
+    sd_present, sd_model = _streamdeck_info()
+    return {
+        "ok": True,
+        "display": {"present": bool(connectors), "connectors": connectors},
+        "streamdeck": {"present": sd_present, "model": sd_model},
+    }
+
+
 def _streamdeck_present():
     try:
         out = subprocess.run(["lsusb"], capture_output=True, text=True, timeout=5).stdout
@@ -736,15 +802,24 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "name": name, "running": False, "lines": [], "error": str(e)})
 
     def _hardware_status(self):
+        # Live attached-hardware detection (display connectors + Stream Deck
+        # model) read straight from sysfs, merged with the kiosk/streamdeck
+        # service-install state the setup UI already polls for. The detection
+        # block lives under "display" and the deck "model"/sysfs presence is
+        # folded into the existing "streamdeck" object.
+        hw = _hardware_status()
+        sd_present, sd_model = hw["streamdeck"]["present"], hw["streamdeck"]["model"]
         self._send(200, {
             "ok": True,
+            "display": hw["display"],
             "kiosk": {
                 "present": _display_present(),
                 "active": _service_active("foodassistant-kiosk.service"),
                 "installing": _installing("kiosk"),
             },
             "streamdeck": {
-                "present": _streamdeck_present(),
+                "present": _streamdeck_present() or sd_present,
+                "model": sd_model,
                 "active": _service_active("foodassistant-streamdeck.service"),
                 "installing": _installing("streamdeck"),
                 "key_count": _streamdeck_keycount(),
