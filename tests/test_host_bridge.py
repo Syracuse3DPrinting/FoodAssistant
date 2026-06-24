@@ -236,3 +236,85 @@ def test_ap_status_active_when_flag_present(monkeypatch):
         bridge.Path, "exists", lambda self: True
     )
     assert bridge.Path(bridge._AP_FLAG).exists() is True
+
+
+# Attached-hardware detection from sysfs (FoodAssistant-92e.3)
+
+
+def _make_drm(root, connectors):
+    """Create <root>/<name>/status files. connectors maps name -> status."""
+    for name, status in connectors.items():
+        d = root / name
+        d.mkdir(parents=True)
+        (d / "status").write_text(status + "\n")
+
+
+def test_drm_connected_returns_connected_names(tmp_path):
+    root = tmp_path / "drm"
+    _make_drm(root, {
+        "card1-HDMI-A-1": "connected",
+        "card1-HDMI-A-2": "disconnected",
+        "card1-DP-1": "connected",
+    })
+    assert bridge._drm_connected(str(root)) == ["card1-DP-1", "card1-HDMI-A-1"]
+
+
+def test_drm_connected_empty_when_all_disconnected(tmp_path):
+    root = tmp_path / "drm"
+    _make_drm(root, {"card1-HDMI-A-1": "disconnected"})
+    assert bridge._drm_connected(str(root)) == []
+
+
+def test_drm_connected_missing_root_returns_empty(tmp_path):
+    assert bridge._drm_connected(str(tmp_path / "nope")) == []
+
+
+def _make_usb_device(root, name, vendor, product=None):
+    d = root / name
+    d.mkdir(parents=True)
+    (d / "idVendor").write_text(vendor + "\n")
+    if product is not None:
+        (d / "product").write_text(product + "\n")
+
+
+def test_streamdeck_info_present_with_product(tmp_path):
+    root = tmp_path / "usb"
+    _make_usb_device(root, "1-1", "1d6b")  # a hub, not Elgato
+    _make_usb_device(root, "1-2", "0fd9", "Stream Deck MK.2")
+    assert bridge._streamdeck_info(str(root)) == (True, "Stream Deck MK.2")
+
+
+def test_streamdeck_info_present_without_product(tmp_path):
+    root = tmp_path / "usb"
+    _make_usb_device(root, "1-2", "0FD9")  # vendor match is case-insensitive
+    assert bridge._streamdeck_info(str(root)) == (True, "")
+
+
+def test_streamdeck_info_absent(tmp_path):
+    root = tmp_path / "usb"
+    _make_usb_device(root, "1-1", "1d6b")
+    assert bridge._streamdeck_info(str(root)) == (False, "")
+
+
+def test_streamdeck_info_missing_root_returns_absent(tmp_path):
+    assert bridge._streamdeck_info(str(tmp_path / "nope")) == (False, "")
+
+
+def test_hardware_status_shape(monkeypatch):
+    monkeypatch.setattr(bridge, "_drm_connected", lambda *a, **k: ["card1-HDMI-A-1"])
+    monkeypatch.setattr(bridge, "_streamdeck_info", lambda *a, **k: (True, "Stream Deck XL"))
+    assert bridge._hardware_status() == {
+        "ok": True,
+        "display": {"present": True, "connectors": ["card1-HDMI-A-1"]},
+        "streamdeck": {"present": True, "model": "Stream Deck XL"},
+    }
+
+
+def test_hardware_status_nothing_attached(monkeypatch):
+    monkeypatch.setattr(bridge, "_drm_connected", lambda *a, **k: [])
+    monkeypatch.setattr(bridge, "_streamdeck_info", lambda *a, **k: (False, ""))
+    assert bridge._hardware_status() == {
+        "ok": True,
+        "display": {"present": False, "connectors": []},
+        "streamdeck": {"present": False, "model": ""},
+    }
