@@ -1637,6 +1637,15 @@ docker compose up -d</code></pre>
                        value="{{ s.streamdeck_idle_timeout }}">
                 <div class="form-text">Sets all keys to black after inactivity. Any key press restores the display.</div>
               </div>
+
+              <div class="mb-3">
+                <label class="form-label">Custom keys</label>
+                <div class="form-text mb-2">Override individual keys beyond the default layout. The slot number is the grid position (top-left is 0, counting left to right, top to bottom). These are applied on top of the layout above.</div>
+                <div id="streamdeck-overrides" class="d-flex flex-column gap-2 mb-2"></div>
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="_sdAddOverrideRow()">
+                  <i class="bi bi-plus-lg me-1"></i>Add custom key
+                </button>
+              </div>
             </div>
             <div id="streamdeck-status-row" class="mb-2"><span class="text-secondary small">Checking...</span></div>
             <button class="btn btn-outline-info btn-sm d-none mb-2" id="btn-install-streamdeck" onclick="installStreamDeck(this)">
@@ -3261,6 +3270,118 @@ function _sdCollectKeys() {
   return keys;
 }
 
+// Advanced per-key override rows. Each row is a small inline editor whose
+// type-specific fields show or hide as the type dropdown changes.
+const _SD_OVERRIDE_TYPES = [
+  {value: 'ha_action', label: 'Home Assistant action'},
+  {value: 'timer', label: 'Countdown timer'},
+  {value: 'weather', label: 'Weather tile'},
+];
+
+function _sdOverrideRow(o) {
+  o = o || {};
+  const row = document.createElement('div');
+  row.className = 'border rounded p-2 sd-override-row';
+  const typeOpts = _SD_OVERRIDE_TYPES.map(t =>
+    `<option value="${t.value}"${o.type === t.value ? ' selected' : ''}>${escapeHtml(t.label)}</option>`
+  ).join('');
+  row.innerHTML = `
+    <div class="row g-2 align-items-end">
+      <div class="col-auto" style="max-width:110px">
+        <label class="form-label small mb-1">Slot</label>
+        <input type="number" min="0" class="form-control form-control-sm sd-ov-slot" value="${o.slot != null ? o.slot : 0}">
+      </div>
+      <div class="col-auto">
+        <label class="form-label small mb-1">Type</label>
+        <select class="form-select form-select-sm sd-ov-type">${typeOpts}</select>
+      </div>
+      <div class="col">
+        <label class="form-label small mb-1">Label</label>
+        <input type="text" class="form-control form-control-sm sd-ov-label" placeholder="Optional" value="${escapeHtml(o.label || '')}">
+      </div>
+      <div class="col-auto">
+        <button type="button" class="btn btn-outline-danger btn-sm" title="Remove" onclick="this.closest('.sd-override-row').remove()">
+          <i class="bi bi-trash"></i>
+        </button>
+      </div>
+    </div>
+    <div class="row g-2 mt-1 sd-ov-fields-ha_action">
+      <div class="col-md-6">
+        <label class="form-label small mb-1">Entity ID</label>
+        <input type="text" class="form-control form-control-sm sd-ov-entity" placeholder="light.kitchen" value="${escapeHtml(o.entity_id || '')}">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label small mb-1">Service (optional)</label>
+        <input type="text" class="form-control form-control-sm sd-ov-service" placeholder="script.goodnight" value="${escapeHtml(o.service || '')}">
+      </div>
+    </div>
+    <div class="row g-2 mt-1 sd-ov-fields-timer">
+      <div class="col-auto" style="max-width:160px">
+        <label class="form-label small mb-1">Minutes</label>
+        <input type="number" min="0" class="form-control form-control-sm sd-ov-minutes" value="${o.minutes != null ? o.minutes : 5}">
+      </div>
+    </div>
+    <div class="row g-2 mt-1 sd-ov-fields-weather">
+      <div class="col-md-6">
+        <label class="form-label small mb-1">Location</label>
+        <input type="text" class="form-control form-control-sm sd-ov-location" placeholder="City, zip, or lat,lon (empty = auto)" value="${escapeHtml(o.location || '')}">
+      </div>
+    </div>`;
+  const typeSel = row.querySelector('.sd-ov-type');
+  const sync = () => {
+    const t = typeSel.value;
+    for (const tt of _SD_OVERRIDE_TYPES) {
+      const block = row.querySelector('.sd-ov-fields-' + tt.value);
+      if (block) block.classList.toggle('d-none', tt.value !== t);
+    }
+  };
+  typeSel.addEventListener('change', sync);
+  sync();
+  return row;
+}
+
+function _sdAddOverrideRow(o) {
+  const wrap = document.getElementById('streamdeck-overrides');
+  if (wrap) wrap.appendChild(_sdOverrideRow(o));
+}
+
+function _sdRenderOverrides(list) {
+  const wrap = document.getElementById('streamdeck-overrides');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  for (const o of (Array.isArray(list) ? list : [])) _sdAddOverrideRow(o);
+}
+
+function _sdCollectOverrides() {
+  const wrap = document.getElementById('streamdeck-overrides');
+  if (!wrap) return [];
+  const out = [];
+  for (const row of wrap.querySelectorAll('.sd-override-row')) {
+    const type = row.querySelector('.sd-ov-type')?.value || '';
+    const slot = parseInt(row.querySelector('.sd-ov-slot')?.value || '0', 10);
+    if (!Number.isFinite(slot) || slot < 0) continue;
+    const label = row.querySelector('.sd-ov-label')?.value.trim() || '';
+    const entry = {slot, type};
+    if (label) entry.label = label;
+    if (type === 'ha_action') {
+      const entity_id = row.querySelector('.sd-ov-entity')?.value.trim() || '';
+      const service = row.querySelector('.sd-ov-service')?.value.trim() || '';
+      if (!entity_id && !service) continue;
+      if (entity_id) entry.entity_id = entity_id;
+      if (service) entry.service = service;
+    } else if (type === 'timer') {
+      entry.minutes = parseInt(row.querySelector('.sd-ov-minutes')?.value || '0', 10) || 0;
+    } else if (type === 'weather') {
+      const location = row.querySelector('.sd-ov-location')?.value.trim() || '';
+      if (location) entry.location = location;
+    } else {
+      continue;
+    }
+    out.push(entry);
+  }
+  return out;
+}
+
 async function saveStreamDeckSettings() {
   const el = document.getElementById('streamdeck-save-result');
   if (el) el.innerHTML = '<span class="text-secondary">Saving...</span>';
@@ -3272,11 +3393,13 @@ async function saveStreamDeckSettings() {
   const keys = _sdCollectKeys();
   const weather_location = document.getElementById('streamdeck_weather_location')?.value || '';
   const weather_units = document.getElementById('streamdeck_weather_units')?.value || 'f';
+  const key_overrides = _sdCollectOverrides();
 
   try {
     await fetch('setup/save', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({has_streamdeck, streamdeck_key_count, streamdeck_idle_timeout}),
+      body: JSON.stringify({has_streamdeck, streamdeck_key_count, streamdeck_idle_timeout,
+                            streamdeck_key_overrides: key_overrides}),
     });
 
     if (has_streamdeck) {
@@ -3288,7 +3411,8 @@ async function saveStreamDeckSettings() {
             brightness,
             keys: keys.length > 0 ? keys : undefined,
             weather_location,
-            weather_units
+            weather_units,
+            key_overrides
           }
         }),
       });
@@ -3372,6 +3496,7 @@ async function loadHardwareStatus() {
           const wuEl = document.getElementById('streamdeck_weather_units');
           if (wuEl) wuEl.value = cfg.weather_units;
         }
+        _sdRenderOverrides(cfg.key_overrides);
       }
     } catch (e) {
       console.warn("Could not load streamdeck config:", e);

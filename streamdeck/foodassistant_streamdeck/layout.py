@@ -164,6 +164,35 @@ def _to_slot(name: str) -> Optional[ActionSpec]:
     return ACTIONS.get(name)
 
 
+def apply_overrides(
+    pages: list[list[Optional[ActionSpec]]],
+    overrides: dict[int, ActionSpec],
+    key_count: int,
+) -> list[list[Optional[ActionSpec]]]:
+    """Stamp per-slot override specs onto already-built pages, in place.
+
+    ``overrides`` maps an absolute grid slot (0-based, counting across pages as
+    they are walked) to the ActionSpec it should display. A slot index is
+    page-local for a single-page deck and continues onto later pages for a
+    paginated layout, skipping the trailing page-cycle key that ``build_pages``
+    reserves. Out-of-range slots are ignored. Returns the same ``pages`` list.
+    """
+    if not overrides:
+        return pages
+    multi = len(pages) > 1
+    # Per-page capacity for user slots: the last key is the page-cycle on a
+    # multi-page layout, so it is never overridable.
+    usable = key_count - 1 if multi else key_count
+    for slot, spec in overrides.items():
+        if slot < 0:
+            continue
+        page_idx, pos = divmod(slot, usable)
+        if page_idx >= len(pages) or pos >= len(pages[page_idx]):
+            continue
+        pages[page_idx][pos] = spec
+    return pages
+
+
 def build_pages(
     action_names: list[str], key_count: int
 ) -> list[list[Optional[ActionSpec]]]:

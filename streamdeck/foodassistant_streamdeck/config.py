@@ -64,6 +64,12 @@ class Config:
     # Idle timeout in minutes. 0 = disabled. After this many minutes without
     # a key press the deck is blanked; any key press wakes it.
     idle_timeout_minutes: int = 0
+    # Advanced per-key overrides configured in the web setup page. Each entry is
+    # a dict with "slot" (grid index), "type" (ha_action | timer | weather |
+    # default) and type-specific fields. Overrides are applied on top of the
+    # default "keys" layout, replacing the action at the given slot. See
+    # actions.overrides_to_specs.
+    key_overrides: list = field(default_factory=list)
 
     def validated(self) -> "Config":
         """Drop unknown action names and clamp numbers into sane ranges."""
@@ -129,6 +135,10 @@ def _apply(cfg: Config, data: dict) -> None:
     raw_slots = data.get("ha_slots")
     if isinstance(raw_slots, list):
         cfg.ha_slots = [s for s in raw_slots if isinstance(s, dict)]
+
+    raw_overrides = data.get("key_overrides")
+    if isinstance(raw_overrides, list):
+        cfg.key_overrides = [o for o in raw_overrides if isinstance(o, dict)]
 
     # Keys may be given as a plain list of action names, or as an array of
     # tables each with an "action" field, to match the documented example.
