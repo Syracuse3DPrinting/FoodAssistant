@@ -1,4 +1,4 @@
-﻿/**
+/**
  * FoodAssistant – Change & Bead Dashboard
  * Cloudflare Worker
  *
@@ -87,11 +87,13 @@ const CATS = [
 
 function renderPage(beads, commits, changelog, branch) {
 
-  const beadsJson     = JSON.stringify(beads);
-  const commitsJson   = JSON.stringify(commits);
-  const changelogJson = JSON.stringify(changelog);
-  const catsJson      = JSON.stringify(CATS);
-  const branchesJson  = JSON.stringify(BRANCHES);
+  // Escape </script> so injected JSON can't break the script tag
+  const safe = s => JSON.stringify(s).replace(/<\/script>/gi, '<\/script>');
+  const beadsJson     = safe(beads);
+  const commitsJson   = safe(commits);
+  const changelogJson = safe(changelog);
+  const catsJson      = safe(CATS);
+  const branchesJson  = safe(BRANCHES);
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -454,11 +456,13 @@ function renderCommits(){
 }
 
 /* ── Boot ─────────────────────────────────────── */
-renderStats();
-filt();
-renderCL();
-renderCommits();
-document.getElementById("ts").textContent="Branch: "+BRANCH+" · "+new Date().toLocaleTimeString();
+document.addEventListener("DOMContentLoaded", function() {
+  renderStats();
+  filt();
+  renderCL();
+  renderCommits();
+  document.getElementById("ts").textContent="Branch: "+BRANCH+" \u00b7 "+new Date().toLocaleTimeString();
+});
 </script>
 </body>
 </html>`;
