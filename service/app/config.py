@@ -90,7 +90,7 @@ _SAVEABLE = [
     "staple_items", "cook_ai_context", "perishable_days", "expiring_soon_days", "suggest_per_tier",
     "nav_order", "nav_hidden", "custom_storage_categories", "ui_theme", "ui_scale", "display_rotation",
     "has_streamdeck", "streamdeck_key_count", "display_touch",
-    "display_idle_timeout", "streamdeck_idle_timeout",
+    "display_idle_timeout", "streamdeck_idle_timeout", "streamdeck_key_overrides",
     "deployment_mode", "remote_server_url", "upstream_api_key", "kiosk_pin", "kiosk_readonly_when_locked",
     "satellite_sync_minutes", "device_id",
     "secret_key", "auth_password", "totp_secret", "api_key", "auth_required",
@@ -272,6 +272,13 @@ class Settings(BaseSettings):
     # a key press.
     display_idle_timeout: int = 0
     streamdeck_idle_timeout: int = 0
+
+    # Advanced Stream Deck per-key overrides set in the setup page. A JSON list
+    # where each entry is a dict with "slot" (grid index), "type" (ha_action |
+    # timer | weather | default) and type-specific fields (entity_id/service,
+    # minutes, location, label, icon). Mirrored into the controller's config.toml
+    # as "key_overrides" so the deck applies them on top of the default layout.
+    streamdeck_key_overrides: list = []
 
     # Deployment mode chosen in the wizard (one of DEPLOYMENT_MODES). Empty
     # until the user picks one. "pi_remote" is a SATELLITE: it runs the full

@@ -81,6 +81,17 @@ class TimerState:
         self._minutes += 1
         self._deadline = time.monotonic() + self._minutes * 60
 
+    def set_minutes(self, minutes: int) -> None:
+        """Start (or restart) the countdown at a fixed number of minutes.
+
+        Used by timer-override keys that carry a preset duration: one short
+        press loads the whole preset rather than adding a single minute.
+        """
+        minutes = max(0, int(minutes))
+        self.alerting = False
+        self._minutes = minutes
+        self._deadline = time.monotonic() + minutes * 60 if minutes else 0.0
+
     def long_press(self) -> None:
         """Reset the timer to idle immediately."""
         self.alerting = False
@@ -372,6 +383,8 @@ class ActionSpec:
     ha_entity_id: str = ""   # for kind=="ha_entity": HA entity to show/toggle
     ha_service: str = ""     # for kind=="ha_entity": HA service to call on press
     keypad_key: str = ""     # for kind=="keypad": digit or clear/enter/cancel
+    timer_minutes: int = 0   # for kind=="timer" overrides: preset minutes (0=cycle)
+    weather_location: str = ""  # for kind=="weather" overrides: per-key location
     description: str = ""
     icon: str = ""           # Bootstrap Icons glyph name (without the "bi-"
                              # prefix) drawn above the label; see ACTION_ICONS.
@@ -638,6 +651,111 @@ def catalog() -> list[dict]:
 def resolve(name: str) -> Optional[ActionSpec]:
     """Look up an action by name, or None if it is not known."""
     return ACTIONS.get(name)
+
+
+# Override key types exposed in the setup UI, mapped to the ActionSpec kind the
+# controller already knows how to render and dispatch. "default" is a sentinel
+# that leaves the slot's stock action in place (used to clear an override).
+OVERRIDE_TYPES: tuple[str, ...] = ("ha_action", "timer", "weather", "default")
+
+_OVERRIDE_DEFAULT_COLORS = {
+    "ha_action": _HA_STATE_COLOR_OFF,
+    "timer": "#0d9488",
+    "weather": "#1e40af",
+}
+
+_OVERRIDE_DEFAULT_ICONS = {
+    "ha_action": "house",
+    "timer": "stopwatch",
+    "weather": "cloud-sun",
+}
+
+
+def override_to_spec(slot: int, override: dict) -> Optional[ActionSpec]:
+    """Build an ActionSpec from a single key-override entry, or None.
+
+    ``override`` is one user-configured slot from ``streamdeck_key_overrides``:
+    a dict with ``type`` (one of OVERRIDE_TYPES) and type-specific fields. The
+    returned spec carries a stable, slot-unique ``name`` so per-key timer and
+    HA state can be keyed off it without colliding with the static ACTIONS.
+    A ``default`` type, an unknown type, or a missing required field returns
+    None so the caller keeps the slot's stock action.
+    """
+    if not isinstance(override, dict):
+        return None
+    otype = override.get("type", "")
+    if otype not in OVERRIDE_TYPES or otype == "default":
+        return None
+
+    name = f"override_{int(slot)}"
+    label = str(override.get("label", "")).strip()
+    icon = str(override.get("icon", "")).strip() or _OVERRIDE_DEFAULT_ICONS.get(otype, "")
+    color = _OVERRIDE_DEFAULT_COLORS.get(otype, "#374151")
+
+    if otype == "ha_action":
+        # Either a bare entity_id (toggled via homeassistant.toggle) or an
+        # explicit service such as "script.goodnight". A service without a
+        # target entity is still valid (scripts and scenes take no entity_id).
+        entity_id = str(override.get("entity_id", "")).strip()
+        service = str(override.get("service", "")).strip()
+        if not entity_id and not service:
+            return None
+        if not service:
+            service = "homeassistant.toggle"
+        if not entity_id and "." in service:
+            # A bare service like "script.goodnight" implies its own entity.
+            entity_id = service
+        if not label:
+            label = (entity_id or service).split(".", 1)[-1].replace("_", " ").title()
+        return ActionSpec(
+            name=name, label=label, color=color, kind="ha_entity",
+            ha_entity_id=entity_id, ha_service=service, icon=icon,
+        )
+
+    if otype == "timer":
+        try:
+            minutes = max(0, int(override.get("minutes", 0)))
+        except (TypeError, ValueError):
+            minutes = 0
+        return ActionSpec(
+            name=name, label=label or "Timer", color=color, kind="timer",
+            timer_minutes=minutes, icon=icon,
+        )
+
+    if otype == "weather":
+        location = str(override.get("location", override.get("source", ""))).strip()
+        return ActionSpec(
+            name=name, label=label or "Weather", color=color, kind="weather",
+            weather_location=location, icon=icon,
+        )
+
+    return None
+
+
+def overrides_to_specs(overrides: list, key_count: int) -> dict:
+    """Parse a list of slot overrides into a ``{slot_index: ActionSpec}`` map.
+
+    Each override is a dict with a ``slot`` index and type-specific fields (see
+    ``override_to_spec``). Entries whose slot is outside ``[0, key_count)`` or
+    whose type cannot be built are skipped, so a malformed entry never displaces
+    a valid one. When two overrides target the same slot the last one wins.
+    """
+    out: dict[int, ActionSpec] = {}
+    if not isinstance(overrides, list) or key_count < 1:
+        return out
+    for entry in overrides:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            slot = int(entry.get("slot"))
+        except (TypeError, ValueError):
+            continue
+        if not (0 <= slot < key_count):
+            continue
+        spec = override_to_spec(slot, entry)
+        if spec is not None:
+            out[slot] = spec
+    return out
 
 
 async def poll_status(client: Any, base_url: str, soon_days: int = 7) -> dict[str, int]:

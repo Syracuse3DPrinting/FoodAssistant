@@ -45,6 +45,13 @@ class Controller:
         self.pages: list[list[Optional[ActionSpec]]] = layout.build_pages(
             config.keys, self.key_count
         )
+        # Advanced per-key overrides from the web setup page. Parsed into
+        # ActionSpec entries and stamped onto the default layout, replacing the
+        # stock action at each configured slot.
+        self.key_overrides: dict[int, ActionSpec] = actions.overrides_to_specs(
+            getattr(config, "key_overrides", []) or [], self.key_count
+        )
+        layout.apply_overrides(self.pages, self.key_overrides, self.key_count)
         self.page = 0
         # On-deck PIN keypad. ``keypad_mode`` swaps the visible page for the
         # numeric pad; ``pin_buffer`` accumulates the entered code and
@@ -83,6 +90,20 @@ class Controller:
                 kind="ha_entity", ha_entity_id=entity_id, ha_service=svc,
             )
             self.ha_entities[slot_name] = HaEntityState(entity_id, color_on, color_off)
+
+        # Register state for override keys. Weather overrides may each carry
+        # their own location, so they get a dedicated WeatherState keyed by the
+        # spec name rather than sharing the single global widget. HA action
+        # overrides get an HaEntityState so the key reflects live entity state.
+        self.override_weather: dict[str, WeatherState] = {}
+        for spec in self.key_overrides.values():
+            if spec.kind == "weather":
+                self.override_weather[spec.name] = WeatherState(
+                    location=spec.weather_location or config.weather_location,
+                    units=config.weather_units,
+                )
+            elif spec.kind == "ha_entity" and spec.ha_entity_id:
+                self.ha_entities[spec.name] = HaEntityState(spec.ha_entity_id)
 
         try:
             self._bright_idx = BRIGHTNESS_STEPS.index(
@@ -157,8 +178,9 @@ class Controller:
                     alert = t.alert_active() if t else False
                     count = None
                 elif spec.kind == "weather":
-                    label = self.weather.label(spec.label)
-                    color = self.weather.color(spec.color)
+                    w = self.override_weather.get(spec.name, self.weather)
+                    label = w.label(spec.label)
+                    color = w.color(spec.color)
                     alert = False
                     count = None
                 elif spec.kind == "forecast":
@@ -323,13 +345,27 @@ class Controller:
     def _timer_press(self, name: str, long_press: bool = False) -> None:
         if name not in self.timers:
             self.timers[name] = TimerState()
+        timer = self.timers[name]
+        # A timer-override key with a preset duration loads its whole preset on
+        # a fresh short press (when idle and not alerting), so one tap starts an
+        # N-minute countdown rather than counting up a minute at a time.
+        preset = self._override_timer_minutes(name)
         if long_press:
-            self.timers[name].long_press()
+            timer.long_press()
+        elif preset > 0 and not timer.is_running() and not timer.alert_active():
+            timer.set_minutes(preset)
         else:
-            self.timers[name].short_press()
+            timer.short_press()
         # Reset the blink phase so a fresh alert starts on its bright frame.
         self._blink_phase = 0
         self._draw_page()
+
+    def _override_timer_minutes(self, name: str) -> int:
+        """Preset minutes for a timer-override key, or 0 for a stock timer."""
+        for spec in self.key_overrides.values():
+            if spec.name == name and spec.kind == "timer":
+                return spec.timer_minutes
+        return 0
 
     async def _handle(self, spec: ActionSpec, long_press: bool = False) -> None:
         ctx = ActionContext(
@@ -394,9 +430,14 @@ class Controller:
             spec is not None and spec.kind in ("weather", "forecast")
             for page in self.pages for spec in page
         )
-        if not has_weather_key:
+        if not has_weather_key and not self.override_weather:
             return
-        await self.weather.refresh()
+        if has_weather_key:
+            await self.weather.refresh()
+        # Override weather keys each fetch their own (possibly different)
+        # location, so refresh them alongside the shared widget.
+        for w in self.override_weather.values():
+            await w.refresh()
         self._draw_page()
 
     async def _refresh_ha_entities(self) -> None:
@@ -501,8 +542,11 @@ class Controller:
                     await self._poll_once()
                     self._draw_page()
                 weather_secs = self.config.weather_poll_minutes * 60
-                if (weather_secs > 0
-                        and self.weather.age_seconds() >= weather_secs):
+                weather_due = self.weather.age_seconds() >= weather_secs or any(
+                    w.age_seconds() >= weather_secs
+                    for w in self.override_weather.values()
+                )
+                if weather_secs > 0 and weather_due:
                     await self._refresh_weather()
                 ha_secs = self.config.ha_poll_seconds
                 if (ha_secs > 0 and self.ha_entities

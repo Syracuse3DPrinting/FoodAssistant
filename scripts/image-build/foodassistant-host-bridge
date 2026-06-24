@@ -560,18 +560,38 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         try:
             body = self._body()
             cfg = body.get("config", {})
+
+            def _scalar(v):
+                if isinstance(v, bool):
+                    return "true" if v else "false"
+                if isinstance(v, int):
+                    return str(v)
+                if isinstance(v, float):
+                    return repr(v)
+                # Strings (and anything else) are emitted as escaped strings.
+                s = str(v).replace("\\", "\\\\").replace('"', '\\"')
+                return f'"{s}"'
+
+            # Scalars and string/number lists are written as inline keys; a list
+            # of dicts (e.g. key_overrides) is written as an array of tables so
+            # the controller's TOML loader reads it back as configured slots.
             lines = []
+            table_blocks = []
             for k, v in cfg.items():
-                if isinstance(v, str):
-                    lines.append(f'{k} = "{v}"')
-                elif isinstance(v, bool):
-                    lines.append(f'{k} = {"true" if v else "false"}')
-                elif isinstance(v, int):
-                    lines.append(f'{k} = {v}')
+                if isinstance(v, list) and any(isinstance(x, dict) for x in v):
+                    for entry in v:
+                        if not isinstance(entry, dict):
+                            continue
+                        table_blocks.append(f"[[{k}]]")
+                        for ek, ev in entry.items():
+                            table_blocks.append(f"{ek} = {_scalar(ev)}")
+                        table_blocks.append("")
                 elif isinstance(v, list):
-                    items = ", ".join(f'"{x}"' for x in v)
-                    lines.append(f'{k} = [{items}]')
-            toml_str = "\n".join(lines) + "\n"
+                    items = ", ".join(_scalar(x) for x in v)
+                    lines.append(f"{k} = [{items}]")
+                elif isinstance(v, (bool, int, float, str)):
+                    lines.append(f"{k} = {_scalar(v)}")
+            toml_str = "\n".join(lines + [""] + table_blocks).rstrip("\n") + "\n"
             
             path = "/opt/foodassistant/config.toml"
             os.makedirs(os.path.dirname(path), exist_ok=True)
