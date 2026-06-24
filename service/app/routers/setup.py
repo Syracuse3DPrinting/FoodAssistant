@@ -13,6 +13,7 @@ from ..config import (
     settings, APP_VERSION, THEMES, _DEFAULT_THEME,
     UI_SCALES, _DEFAULT_UI_SCALE,
     DISPLAY_ROTATIONS, _DEFAULT_DISPLAY_ROTATION,
+    DISPLAY_TYPES, _DEFAULT_DISPLAY_TYPE,
     DEPLOYMENT_MODES, _DEFAULT_DEPLOYMENT_MODE,
     browser_host, device_hostname,
 )
@@ -118,6 +119,7 @@ class SetupPayload(BaseModel):
     ui_theme: str = _DEFAULT_THEME
     ui_scale: str = _DEFAULT_UI_SCALE
     display_rotation: int = _DEFAULT_DISPLAY_ROTATION
+    display_type: str = _DEFAULT_DISPLAY_TYPE
     deployment_mode: str = ""
     remote_server_url: str = ""
     upstream_api_key: str = ""
@@ -324,6 +326,7 @@ async def setup_page(request: Request):
         "themes": THEMES,
         "ui_scales": UI_SCALES,
         "display_rotations": DISPLAY_ROTATIONS,
+        "display_types": DISPLAY_TYPES,
         "suggested_grocy_url": suggested_grocy_url,
         "grocy_browser_link": grocy_browser_link,
         "suggested_mealie_url": _suggest_mealie_url(request),
@@ -393,6 +396,10 @@ async def save_setup(payload: SetupPayload):
         data.pop("ai_extra_keys", None)   # absent = keep stored extras
     if data.get("display_rotation") not in DISPLAY_ROTATIONS:
         data["display_rotation"] = _DEFAULT_DISPLAY_ROTATION
+    # Drop an unknown display type rather than persisting a broken value; an
+    # absent value leaves the stored choice untouched.
+    if "display_type" in data and data["display_type"] not in DISPLAY_TYPES:
+        data.pop("display_type", None)
     # Drop an unknown deployment mode rather than persisting a broken value;
     # an empty/absent mode leaves the existing choice untouched.
     if data.get("deployment_mode") and data["deployment_mode"] not in DEPLOYMENT_MODES:

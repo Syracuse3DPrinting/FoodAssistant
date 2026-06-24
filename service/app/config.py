@@ -46,6 +46,21 @@ _DEFAULT_UI_SCALE = "normal"
 DISPLAY_ROTATIONS = (0, 90, 180, 270)
 _DEFAULT_DISPLAY_ROTATION = 0
 
+# Type of hardware display attached to the appliance. The first-boot
+# provisioner reads this from settings.json to decide which (if any) panel
+# specific boot overlay and touch udev rules to install:
+#   generic         - a plain HDMI display (or USB HID touch monitor); no panel
+#                     specific overlay is applied. This is the default and
+#                     covers most setups.
+#   waveshare_hdmi  - a Waveshare HDMI touchscreen Pi HAT. These need a panel
+#                     dtoverlay in config.txt plus a touch udev rule so the
+#                     controller is recognised as an input device.
+DISPLAY_TYPES = {
+    "generic":        {"label": "Generic HDMI display"},
+    "waveshare_hdmi": {"label": "Waveshare HDMI touchscreen"},
+}
+_DEFAULT_DISPLAY_TYPE = "generic"
+
 # Deployment modes chosen on the first wizard step. They steer the rest of
 # setup and (on a Pi) what the first-boot provisioner installs:
 #   server     - FoodAssistant on a general server; connect to separately
@@ -90,6 +105,7 @@ _SAVEABLE = [
     "recipe_source", "themealdb_api_key", "spoonacular_api_key",
     "staple_items", "cook_ai_context", "perishable_days", "expiring_soon_days", "suggest_per_tier",
     "nav_order", "nav_hidden", "custom_storage_categories", "ui_theme", "ui_scale", "display_rotation",
+    "display_type",
     "has_streamdeck", "streamdeck_key_count", "display_touch",
     "display_idle_timeout", "streamdeck_idle_timeout", "streamdeck_key_overrides",
     "deployment_mode", "remote_server_url", "upstream_api_key", "kiosk_pin", "kiosk_readonly_when_locked",
@@ -357,6 +373,11 @@ class Settings(BaseSettings):
     # Rotation (degrees) of the attached hardware display. One of
     # DISPLAY_ROTATIONS; applied to the kiosk display only.
     display_rotation: int = _DEFAULT_DISPLAY_ROTATION
+
+    # Type of the attached hardware display. One of DISPLAY_TYPES. The first-boot
+    # provisioner reads this to install panel specific boot overlays and touch
+    # udev rules (e.g. a Waveshare HDMI touchscreen HAT). "generic" applies none.
+    display_type: str = _DEFAULT_DISPLAY_TYPE
 
     # Hardware declared in the wizard (Pi modes only). has_streamdeck enables
     # the controller setup hints; streamdeck_key_count is 6, 15, or 32.

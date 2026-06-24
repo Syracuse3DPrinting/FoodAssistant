@@ -303,6 +303,15 @@
             <div class="form-text">Rotate if the display is mounted sideways or upside-down.</div>
           </div>
         </div>
+        <div class="mb-2">
+          <label class="form-label">Display type</label>
+          <select class="form-select form-select-sm" id="display_type_wiz" onchange="syncDisplayType()">
+            {% for key, dt in display_types.items() %}
+            <option value="{{ key }}" {{ 'selected' if (s.display_type or 'generic') == key else '' }}>{{ dt.label }}</option>
+            {% endfor %}
+          </select>
+          <div class="form-text">Pick "Waveshare HDMI touchscreen" for a Waveshare HDMI touch HAT so its touch overlay and input rules are installed at next provision.</div>
+        </div>
         <div class="form-check form-switch">
           <input class="form-check-input" type="checkbox" role="switch" id="display_touch"
                  {{ 'checked' if s.display_touch else '' }}>
@@ -1562,6 +1571,15 @@ docker compose up -d</code></pre>
                 <div class="form-text">Larger for a small panel; smaller for a wide monitor.</div>
               </div>
             </div>
+            <div class="mb-3">
+              <label class="form-label" for="display_type">Display type</label>
+              <select class="form-select form-select-sm" style="max-width:320px" id="display_type">
+                {% for key, dt in display_types.items() %}
+                <option value="{{ key }}" {{ 'selected' if (s.display_type or 'generic') == key else '' }}>{{ dt.label }}</option>
+                {% endfor %}
+              </select>
+              <div class="form-text">Choose "Waveshare HDMI touchscreen" for a Waveshare HDMI touch HAT. Its touch overlay and input rules apply after the next reboot / re-provision.</div>
+            </div>
             <div class="form-check form-switch mb-2">
               <input class="form-check-input" type="checkbox" role="switch" id="display_touch"
                      {{ 'checked' if s.display_touch else '' }}>
@@ -2395,6 +2413,7 @@ function buildPayload() {
     ui_theme:        document.getElementById('ui_theme')?.value || 'dark',
     ui_scale:        document.getElementById('ui_scale_wiz')?.value || document.getElementById('ui_scale')?.value || 'normal',
     display_rotation: parseInt(document.getElementById('display_rotation_wiz')?.value ?? document.getElementById('display_rotation')?.value ?? '0', 10),
+    display_type:    document.getElementById('display_type_wiz')?.value || document.getElementById('display_type')?.value || 'generic',
     has_streamdeck:  document.getElementById('has_streamdeck')?.checked || false,
     streamdeck_key_count: parseInt(document.getElementById('streamdeck_key_count')?.value || '0', 10),
     streamdeck_idle_timeout: parseInt(document.getElementById('streamdeck_idle_timeout')?.value || '0', 10),
@@ -2891,6 +2910,17 @@ function syncRotation() {
   if (settingsEl && wizVal) settingsEl.value = wizVal;
 }
 
+function syncDisplayType() {
+  const wizVal = document.getElementById('display_type_wiz')?.value;
+  const settingsEl = document.getElementById('display_type');
+  if (settingsEl && wizVal) settingsEl.value = wizVal;
+  // A Waveshare HDMI HAT is a touch panel, so tick the touch flag to match.
+  if (wizVal === 'waveshare_hdmi') {
+    const touch = document.getElementById('display_touch');
+    if (touch) touch.checked = true;
+  }
+}
+
 function wizUpdateAiKeyVisibility() {
   const p = document.getElementById('vision_provider')?.value;
   const noneNote = document.getElementById('wiz-ai-none-note');
@@ -3145,6 +3175,7 @@ async function saveDisplaySettings() {
     document.getElementById('kms_rotation')?.value
     ?? document.getElementById('display_rotation')?.value ?? '0', 10);
   const display_touch = document.getElementById('display_touch')?.checked || false;
+  const display_type = document.getElementById('display_type')?.value || 'generic';
   const display_idle_timeout = parseInt(document.getElementById('display_idle_timeout')?.value || '0', 10);
   try {
     await fetch('setup/scale', {
@@ -3153,7 +3184,7 @@ async function saveDisplaySettings() {
     });
     await fetch('setup/save', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({display_touch, display_idle_timeout}),
+      body: JSON.stringify({display_touch, display_type, display_idle_timeout}),
     });
     fetch('setup/kiosk/restart', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'}).catch(() => {});
     if (el) el.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Display settings saved.</span>';
