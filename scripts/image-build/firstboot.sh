@@ -97,11 +97,35 @@ load_config() {
   # Imager), so nothing here needs editing for a turnkey flash-and-boot.
   HOSTNAME="${HOSTNAME:-foodassistant}"
   TZ="${TZ:-$(os_timezone)}"
-  ENABLE_MEALIE="${ENABLE_MEALIE:-false}"
+  # Mealie default depends on the deployment mode, which is not resolved until
+  # _load_mode_from_settings below. Leave it unset here and decide afterwards.
+  ENABLE_MEALIE="${ENABLE_MEALIE:-}"
   ENABLE_OLLAMA="${ENABLE_OLLAMA:-false}"
   ENABLE_KIOSK="${ENABLE_KIOSK:-auto}"
   ENABLE_STREAMDECK="${ENABLE_STREAMDECK:-auto}"
+  # Hide the mouse cursor in the kiosk:
+  #   auto  - hide only when no pointer (mouse/touchpad) device is attached at
+  #           provision time. A touch-only or Stream-Deck-only appliance then
+  #           shows no stray cursor; plug in a mouse and the cursor returns.
+  #   true  - always hide the cursor (even with a mouse attached).
+  #   false - never hide; leave the normal cursor.
+  # Applied by configure_kiosk via a transparent XCursor theme (see below).
+  HIDE_CURSOR="${HIDE_CURSOR:-auto}"
   DISPLAY_ROTATION="${DISPLAY_ROTATION:-0}"
+  # Touch driver for the kiosk display:
+  #   auto     - try to detect (checks for SPI/ADS7846 and existing HID touch)
+  #   ads7846  - SPI resistive (Waveshare HDMI displays, many small Pi screens)
+  #   usb      - USB HID touch (larger HDMI touch monitors, connects via USB)
+  #   none     - no touchscreen; skip all touch config
+  # When ads7846 is active, dtoverlay=ads7846 is added to /boot/firmware/config.txt.
+  # TOUCH_CALIBRATION_MATRIX can override the libinput coordinate transform:
+  #   "1 0 0 0 1 0"    - identity (no transform, default)
+  #   "0 1 0 -1 0 1"   - 90 degrees CW
+  #   "-1 0 1 0 -1 1"  - 180 degrees
+  #   "0 -1 1 1 0 0"   - 270 degrees CW
+  # Leave empty to auto-derive from DISPLAY_ROTATION.
+  TOUCH_DRIVER="${TOUCH_DRIVER:-auto}"
+  TOUCH_CALIBRATION_MATRIX="${TOUCH_CALIBRATION_MATRIX:-}"
   FOODASSISTANT_TAG="${FOODASSISTANT_TAG:-latest}"
   INSTALL_DIR="${INSTALL_DIR:-/opt/foodassistant}"
 
@@ -116,16 +140,32 @@ load_config() {
   REMOTE_SERVER_URL="${REMOTE_SERVER_URL:-}"
   _load_mode_from_settings
 
+  # Resolve the Mealie default now that the mode is known. A pi_hosted appliance
+  # is a full kitchen hub, so recipes and meal planning ship on by default; pull
+  # the image during provisioning instead of making the user wait post-setup. A
+  # satellite (pi_remote) runs no local backend, so it stays off there.
+  if [ -z "$ENABLE_MEALIE" ]; then
+    if is_remote_mode; then
+      ENABLE_MEALIE="false"
+    else
+      ENABLE_MEALIE="true"
+    fi
+  fi
+
   # The kiosk URL defaults to this device, except in remote mode where it points
   # at the server being controlled. ?kiosk=1 latches kiosk mode in the browser
   # so the attached-display scale/orientation apply (and never affect others).
   if is_remote_mode; then
-    KIOSK_URL="${KIOSK_URL:-${REMOTE_SERVER_URL%/}/ui/?kiosk=1}"
+    # A satellite runs the full app locally on port 80 (it pulls its backend
+    # config from the main server). The kiosk shows the LOCAL UI; if the device
+    # is not configured yet, the app's setup-redirect sends /ui to /setup, so a
+    # fresh box shows "configure me" without any special-casing here.
+    KIOSK_URL="${KIOSK_URL:-http://localhost/ui/?kiosk=1}"
   else
     KIOSK_URL="${KIOSK_URL:-http://localhost:9284/ui/?kiosk=1}"
   fi
 
-  log "Config: HOSTNAME=$HOSTNAME TZ=$TZ MODE=${DEPLOYMENT_MODE:-<default>} MEALIE=$ENABLE_MEALIE OLLAMA=$ENABLE_OLLAMA KIOSK=$ENABLE_KIOSK STREAMDECK=$ENABLE_STREAMDECK TAG=$FOODASSISTANT_TAG DIR=$INSTALL_DIR"
+  log "Config: HOSTNAME=$HOSTNAME TZ=$TZ MODE=${DEPLOYMENT_MODE:-<default>} MEALIE=$ENABLE_MEALIE OLLAMA=$ENABLE_OLLAMA KIOSK=$ENABLE_KIOSK STREAMDECK=$ENABLE_STREAMDECK HIDE_CURSOR=$HIDE_CURSOR TAG=$FOODASSISTANT_TAG DIR=$INSTALL_DIR"
 }
 
 # True when this device is a thin remote control surface (no local stack).
@@ -138,10 +178,11 @@ _load_mode_from_settings() {
   local sf="${SETTINGS_JSON:-$INSTALL_DIR/data/settings.json}"
   [ -r "$sf" ] || return 0
   local mode url
-  mode="$(grep -o '"deployment_mode"[[:space:]]*:[[:space:]]*"[^"]*"' "$sf" 2>/dev/null | sed 's/.*"\([^"]*\)"$/\1/')"
-  url="$(grep -o '"remote_server_url"[[:space:]]*:[[:space:]]*"[^"]*"' "$sf" 2>/dev/null | sed 's/.*"\([^"]*\)"$/\1/')"
+  mode="$(grep -o '"deployment_mode"[[:space:]]*:[[:space:]]*"[^"]*"' "$sf" 2>/dev/null | sed 's/.*"\([^"]*\)"$/\1/' || true)"
+  url="$(grep -o '"remote_server_url"[[:space:]]*:[[:space:]]*"[^"]*"' "$sf" 2>/dev/null | sed 's/.*"\([^"]*\)"$/\1/' || true)"
   [ -n "$mode" ] && DEPLOYMENT_MODE="$mode"
   [ -n "$url" ] && REMOTE_SERVER_URL="$url"
+  return 0
 }
 
 # Timezone the OS is already set to (Raspberry Pi Imager writes this), so the
@@ -248,7 +289,11 @@ configure_timezone() {
 }
 
 # Step: mDNS (avahi)
-# Makes the box reachable at <hostname>.local on the LAN.
+# Makes the box reachable at <hostname>.local on the LAN. avahi-daemon publishes
+# the host's name over multicast DNS, which resolves on Linux (nss-mdns),
+# macOS/iOS (Bonjour, built in), and Windows when Apple Bonjour is installed
+# (shipped with iTunes; otherwise users browse by IP). Enabling the daemon makes
+# it publish <hostname>.local automatically from the system hostname.
 configure_mdns() {
   if dpkg -s avahi-daemon >/dev/null 2>&1; then
     log "avahi-daemon already installed"
@@ -256,7 +301,11 @@ configure_mdns() {
     log "Installing avahi-daemon for mDNS"
     apt_install avahi-daemon
   fi
+  # Enable so it publishes <hostname>.local now and on every boot. avahi reads
+  # the system hostname, so configure_hostname must have run first (it does).
   run systemctl enable --now avahi-daemon || warn "avahi-daemon enable failed"
+  log "mDNS configured: ${HOSTNAME}.local should resolve on Linux, macOS, and iOS"
+  log "  (Windows clients need Apple Bonjour installed, else browse by IP)"
 }
 
 # Step: Docker + Compose v2
@@ -394,7 +443,7 @@ install_accel_rotation() {
     return 0
   fi
 
-  pip3 install --quiet smbus2 2>/dev/null || warn "smbus2 install failed; accelerometer rotation may not work"
+  pip3 install --quiet --break-system-packages smbus2 2>/dev/null || warn "smbus2 install failed; accelerometer rotation may not work"
   cp "$helper" /usr/local/bin/foodassistant-accel-rotation
   chmod +x /usr/local/bin/foodassistant-accel-rotation
   log "Installed /usr/local/bin/foodassistant-accel-rotation"
@@ -408,33 +457,19 @@ install_accel_rotation() {
 # this automatically. Only runs when DISPLAY_ROTATION != 0.
 configure_display_rotation() {
   local rot="${DISPLAY_ROTATION:-0}"
+  local transform="normal"
   case "$rot" in
-    0|"") log "Display rotation is 0 (default); nothing to do"; return 0 ;;
-    90|180|270) ;;
+    0|"") transform="normal" ;;
+    90|180|270) transform="$rot" ;;
     *) warn "DISPLAY_ROTATION=$rot is not valid (use 0, 90, 180, or 270); skipping"; return 0 ;;
   esac
-
-  local cmdline=""
-  for path in /boot/firmware/cmdline.txt /boot/cmdline.txt; do
-    [ -f "$path" ] && cmdline="$path" && break
-  done
-
-  if [ -z "$cmdline" ]; then
-    warn "cmdline.txt not found; skipping KMS rotation (non-Pi or boot partition not mounted)"
-    return 0
-  fi
-
   if [ "$DRY_RUN" = "1" ]; then
-    log "DRY_RUN: would add video=HDMI-A-1:rotate=${rot} to $cmdline"
+    log "DRY_RUN: would set WLR_OUTPUT_TRANSFORM=$transform in /etc/foodassistant/kiosk-env"
     return 0
   fi
-
-  local line
-  line="$(tr -d '\n' < "$cmdline")"
-  # Remove any existing video=HDMI-A-1:rotate=... parameter first (idempotent).
-  line="$(printf '%s' "$line" | sed 's/ video=HDMI-A-1:rotate=[0-9]*//')"
-  printf '%s video=HDMI-A-1:rotate=%s\n' "$line" "$rot" > "$cmdline"
-  log "KMS rotation set to ${rot} degrees in $cmdline (takes effect after reboot)"
+  mkdir -p /etc/foodassistant
+  echo "WLR_OUTPUT_TRANSFORM=$transform" > /etc/foodassistant/kiosk-env
+  log "Kiosk rotation set to ${rot} degrees (compositor transform $transform; applies when the kiosk starts)"
 }
 
 # Step: kiosk (opt-in, display-gated)
@@ -470,6 +505,201 @@ has_streamdeck() {
   return 1
 }
 
+# Return the Pi OS boot config path: /boot/firmware/config.txt on Bookworm+,
+# /boot/config.txt on older releases. Returns empty string if neither exists.
+_pi_config_txt() {
+  if [ -f /boot/firmware/config.txt ]; then
+    echo /boot/firmware/config.txt
+  elif [ -f /boot/config.txt ]; then
+    echo /boot/config.txt
+  fi
+}
+
+# Derive a libinput calibration matrix from DISPLAY_ROTATION when the user has
+# not supplied an explicit TOUCH_CALIBRATION_MATRIX. The 6-float matrix maps
+# from touch-panel coordinates to screen coordinates, accounting for the same
+# rotation applied to the display. Values match standard libinput conventions.
+_touch_calibration_matrix() {
+  local m="${TOUCH_CALIBRATION_MATRIX:-}"
+  if [ -n "$m" ]; then
+    echo "$m"
+    return
+  fi
+  case "${DISPLAY_ROTATION:-0}" in
+    90)  echo "0 -1 1 1 0 0" ;;
+    180) echo "-1 0 1 0 -1 1" ;;
+    270) echo "0 1 0 -1 0 1" ;;
+    *)   echo "1 0 0 0 1 0" ;;
+  esac
+}
+
+# Write a libinput quirks file so the touch panel's axes are mapped correctly
+# without needing to run xinput_calibrator or touchscreen_calibrator.
+# Works for both X11 and Wayland (cage/wlroots reads libinput, not X).
+_write_libinput_touch_quirk() {
+  local match_name="$1"    # MatchName glob, e.g. "ADS7846*" or "Goodix*"
+  local matrix
+  matrix="$(_touch_calibration_matrix)"
+
+  if [ "$DRY_RUN" = "1" ]; then
+    log "DRY_RUN would write /etc/libinput/local-overrides.quirks (match=$match_name matrix=$matrix)"
+    return 0
+  fi
+
+  mkdir -p /etc/libinput
+  cat > /etc/libinput/local-overrides.quirks <<EOF
+[FoodAssistant touchscreen calibration]
+MatchName=${match_name}
+AttrCalibrationMatrix=${matrix}
+EOF
+  log "Wrote libinput calibration quirk: MatchName=${match_name} matrix=${matrix}"
+}
+
+configure_touch() {
+  local driver="${TOUCH_DRIVER:-auto}"
+
+  # Explicit opt-out
+  if [ "$driver" = "none" ]; then
+    log "Touch driver set to none; skipping touch configuration"
+    return 0
+  fi
+
+  # Auto-detect: check for SPI bus (ADS7846 candidate) or existing HID touch
+  if [ "$driver" = "auto" ]; then
+    if ls /dev/spidev* >/dev/null 2>&1 || \
+       grep -qr 'ads7846\|ADS7846' /sys/bus/spi/devices/ 2>/dev/null; then
+      log "Auto-detected SPI bus; assuming ADS7846 touch controller"
+      driver="ads7846"
+    elif find /dev/input -name 'event*' 2>/dev/null | \
+         xargs -I{} grep -lqE 'touchscreen|Touch' /sys/class/input/*/device/name 2>/dev/null; then
+      log "Auto-detected HID touch input device; driver=usb"
+      driver="usb"
+    else
+      log "No touch device auto-detected (TOUCH_DRIVER=auto). Set TOUCH_DRIVER=ads7846 or usb in config.env if a touchscreen is attached, then re-run with STEPS=touch."
+      return 0
+    fi
+  fi
+
+  log "Configuring touch driver: $driver"
+
+  if [ "$driver" = "ads7846" ]; then
+    # ADS7846 is a SPI resistive touch controller used on Waveshare HDMI
+    # panels and many small Pi HAT displays. It needs a device tree overlay
+    # in config.txt. The defaults below work for Waveshare 3.5"-4" HDMI LCD;
+    # adjust cs/penirq/speed in config.env for other layouts.
+    local cfg
+    cfg="$(_pi_config_txt)"
+    if [ -z "$cfg" ]; then
+      warn "No Pi boot config.txt found; cannot write dtoverlay for ADS7846"
+    else
+      # penirq_pull=2 sets a pull-up on the PENIRQ GPIO. PENIRQ is active-low
+      # (driven low on touch), so without the pull-up the line floats and the
+      # controller registers no touches. Waveshare's own config includes it.
+      local overlay_line="dtoverlay=ads7846,cs=1,penirq=25,penirq_pull=2,speed=50000,keep_vcc,swapxy=1,pmax=255,xohms=150,xmin=200,xmax=3900,ymin=200,ymax=3900"
+      if grep -q 'dtoverlay=ads7846' "$cfg" 2>/dev/null; then
+        log "ads7846 dtoverlay already present in $cfg; leaving untouched"
+      elif [ "$DRY_RUN" = "1" ]; then
+        log "DRY_RUN would append to $cfg: $overlay_line"
+      else
+        printf '\n# FoodAssistant: ADS7846 SPI touch\n%s\n' "$overlay_line" >> "$cfg"
+        log "Appended ads7846 dtoverlay to $cfg (takes effect after reboot)"
+      fi
+    fi
+    # SPI must also be enabled for the overlay to work. Add dtparam=spi=on if
+    # missing (idempotent: do nothing if already present or if no config found).
+    if [ -n "$cfg" ] && ! grep -q 'dtparam=spi=on' "$cfg" 2>/dev/null; then
+      if [ "$DRY_RUN" = "1" ]; then
+        log "DRY_RUN would append dtparam=spi=on to $cfg"
+      else
+        printf 'dtparam=spi=on\n' >> "$cfg"
+        log "Enabled SPI (dtparam=spi=on) in $cfg"
+      fi
+    fi
+    _write_libinput_touch_quirk "ADS7846*"
+  fi
+
+  if [ "$driver" = "usb" ]; then
+    # USB HID touch panels enumerate as generic input devices and need no kernel
+    # overlay, but the coordinate axes are sometimes mirrored or rotated. Write
+    # a calibration quirk with a broad match so most panels are covered. The
+    # matrix defaults to identity; set TOUCH_CALIBRATION_MATRIX in config.env
+    # if the touch is mis-mapped.
+    _write_libinput_touch_quirk "* Touchscreen"
+  fi
+}
+
+# Returns 0 when a pointer device (mouse, trackball, touchpad) is attached now.
+# Touchscreens are NOT pointers for our purposes: a touch panel reports absolute
+# touch events, not a moving cursor, so a touch-only box has no pointer here.
+# FORCE_POINTER overrides for tests (1 = pretend a mouse is present, "" = none).
+has_pointer_device() {
+  [ -n "${FORCE_POINTER:-}" ] && return 0   # test hook
+  # by-path symlinks libinput/udev create for relative pointing devices.
+  local p
+  for p in /dev/input/by-path/*event-mouse* /dev/input/by-id/*event-mouse*; do
+    [ -e "$p" ] && return 0
+  done
+  # Fall back to the device names the kernel exposes; match Mouse/Touchpad but
+  # deliberately not Touchscreen.
+  if ls /sys/class/input/*/device/name >/dev/null 2>&1; then
+    grep -qiE 'mouse|touchpad|trackball|trackpad' /sys/class/input/*/device/name 2>/dev/null && return 0
+  fi
+  return 1
+}
+
+# Decide whether to hide the cursor, resolving HIDE_CURSOR=auto against the
+# attached hardware. Echoes "true" or "false". auto hides only when no pointer
+# device is present at provision time.
+_resolve_hide_cursor() {
+  case "${HIDE_CURSOR:-auto}" in
+    auto|AUTO|Auto)
+      if has_pointer_device; then echo "false"; else echo "true"; fi
+      ;;
+    *)
+      if is_true "$HIDE_CURSOR"; then echo "true"; else echo "false"; fi
+      ;;
+  esac
+}
+
+# Ship a fully-transparent XCursor theme so wlroots/cage renders an invisible
+# pointer. cage has no native hide-cursor flag on the Pi OS versions we target
+# (see cage-kiosk/cage issues #235, #299, #422), and there is no Chromium or
+# WLR_* flag that hides it. The portable, well-known kiosk fix is to point the
+# cursor theme at a transparent cursor via XCURSOR_PATH/XCURSOR_THEME, which the
+# unit's Environment lines do.
+#
+# We write the Xcursor binary directly with printf rather than depend on
+# xcursorgen (not always installable). The bytes below are a valid single-image
+# Xcursor: "Xcur" magic, a 16-byte file header, one TOC entry pointing at one
+# 1x1 image chunk whose only pixel is ARGB 0x00000000 (fully transparent).
+# `file` reports this as "X11 cursor". Format ref: x.org Xcursor(3).
+# Echoes the theme name on success; returns non-zero (and the caller falls back
+# to the normal cursor) if the files cannot be written.
+_install_blank_cursor_theme() {
+  local theme="foodassistant-hidden"
+  local base="/usr/share/icons/$theme"
+  local cdir="$base/cursors"
+  mkdir -p "$cdir" || return 1
+  # The single transparent cursor file.
+  if ! printf '\130\143\165\162\020\000\000\000\000\000\001\000\001\000\000\000\002\000\375\377\001\000\000\000\034\000\000\000\044\000\000\000\002\000\375\377\001\000\000\000\001\000\000\000\001\000\000\000\001\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000' > "$cdir/left_ptr"; then
+    return 1
+  fi
+  # Point the common cursor names at the one transparent cursor so whatever
+  # name an app asks for resolves to the invisible pointer. Symlinks keep it
+  # to a single real file; libxcursor follows them.
+  local name
+  for name in default left_ptr_watch watch text xterm hand1 hand2 pointer \
+              top_left_arrow arrow crosshair fleur grabbing; do
+    ln -sf left_ptr "$cdir/$name" 2>/dev/null || true
+  done
+  cat > "$base/index.theme" <<'THEME'
+[Icon Theme]
+Name=FoodAssistant Hidden Cursor
+Comment=Fully transparent cursor for touch/Stream Deck kiosks
+THEME
+  echo "$theme"
+}
+
 configure_kiosk() {
   if ! flag_enabled "$ENABLE_KIOSK" has_display; then
     log "Kiosk not enabled (ENABLE_KIOSK=$ENABLE_KIOSK); skipping"
@@ -480,12 +710,39 @@ configure_kiosk() {
     return 0
   fi
   log "Installing Chromium kiosk via cage (Wayland) for $KIOSK_URL"
-  # cage = minimal single-app Wayland compositor; chromium = browser.
-  apt_install cage chromium || apt_install cage chromium-browser \
-    || warn "kiosk package install failed"
 
-  local chromium_bin="chromium"
-  command -v chromium-browser >/dev/null 2>&1 && chromium_bin="chromium-browser"
+  # Decide whether to hide the cursor (HIDE_CURSOR=auto/true/false). Resolved
+  # early so the choice is visible (and testable) even in DRY_RUN. auto hides
+  # only when no pointer device is attached at provision time.
+  local hide_cursor
+  hide_cursor="$(_resolve_hide_cursor)"
+  if [ "$hide_cursor" = "true" ]; then
+    log "Cursor will be hidden (HIDE_CURSOR=$HIDE_CURSOR; no pointer device or forced)"
+  else
+    log "Cursor will be shown (HIDE_CURSOR=$HIDE_CURSOR)"
+  fi
+
+  # cage = minimal single-app Wayland compositor; chromium = browser. Install
+  # them on separate apt lines and try both browser package names. Bundling
+  # them in one "apt-get install cage chromium" meant a single unmatched name
+  # (the browser is "chromium" on Bookworm, "chromium-browser" on older Pi OS)
+  # aborted the whole line and left cage uninstalled too, so the unit crash
+  # looped on status=203/EXEC.
+  apt_install cage || warn "cage install failed"
+  apt_install chromium || apt_install chromium-browser \
+    || warn "chromium install failed"
+
+  # Bake absolute binary paths into the unit. cage execs the browser via PATH,
+  # but a systemd service runs with a minimal environment, so we resolve full
+  # paths here and skip cleanly if either binary is missing rather than leave a
+  # unit that fails to exec on every restart.
+  local cage_bin chromium_bin
+  cage_bin="$(command -v cage || true)"
+  chromium_bin="$(command -v chromium || command -v chromium-browser || true)"
+  if [ -z "$cage_bin" ] || [ -z "$chromium_bin" ]; then
+    warn "kiosk binaries missing (cage=${cage_bin:-none} chromium=${chromium_bin:-none}); skipping kiosk service"
+    return 0
+  fi
 
   # cage needs a real logind seat session, which a bare root service does not
   # get (it fails with "XDG_RUNTIME_DIR is not set" / libseat tty errors). We
@@ -507,6 +764,23 @@ configure_kiosk() {
   loginctl enable-linger "$kuser" || warn "enable-linger failed"
   systemctl disable getty@tty1.service 2>/dev/null || true
 
+  # When hiding, install the transparent cursor theme and prepare the extra
+  # Environment lines for the unit. If theme install fails we leave the cursor
+  # visible rather than risk a broken unit.
+  local cursor_env=""
+  if [ "$hide_cursor" = "true" ]; then
+    local theme
+    theme="$(_install_blank_cursor_theme || true)"
+    if [ -n "$theme" ]; then
+      cursor_env="Environment=XCURSOR_PATH=/usr/share/icons
+Environment=XCURSOR_THEME=$theme
+Environment=XCURSOR_SIZE=24"
+      log "Installed transparent cursor theme '$theme' for the kiosk"
+    else
+      warn "Could not install transparent cursor theme; cursor will remain visible"
+    fi
+  fi
+
   cat > /etc/systemd/system/foodassistant-kiosk.service <<EOF
 [Unit]
 Description=FoodAssistant Chromium kiosk
@@ -515,6 +789,7 @@ Wants=network-online.target
 Conflicts=getty@tty1.service
 
 [Service]
+EnvironmentFile=-/etc/foodassistant/kiosk-env
 Type=simple
 User=$kuser
 PAMName=login
@@ -527,7 +802,8 @@ StandardError=journal
 UtmpIdentifier=tty1
 UtmpMode=user
 Environment=XDG_RUNTIME_DIR=/run/user/$kuid
-ExecStart=/usr/bin/cage -- $chromium_bin --kiosk --noerrdialogs \\
+${cursor_env:+$cursor_env
+}ExecStart=$cage_bin -- $chromium_bin --kiosk --noerrdialogs \\
   --disable-infobars --no-first-run --ozone-platform=wayland \\
   --remote-debugging-port=9222 --disable-restore-session-state $KIOSK_URL
 Restart=always
@@ -575,6 +851,9 @@ configure_streamdeck() {
   fi
 
   # Ensure venv exists (reuse if already created, e.g. on re-run).
+  log "Installing python3-venv and Stream Deck USB dependencies"
+  apt_install python3-venv libhidapi-libusb0 libudev-dev || warn "streamdeck dependencies install failed"
+
   if [ -d "$venv_dir" ]; then
     log "venv at $venv_dir already exists; reusing"
   else
@@ -595,14 +874,29 @@ configure_streamdeck() {
   # Copy the streamdeck package from the resolved source.
   if [ -n "$sd_src" ] && [ -d "$sd_src" ]; then
     log "Copying foodassistant_streamdeck package from $sd_src to $sd_dst"
-    run mkdir -p "$sd_dst"
     if [ "$DRY_RUN" != "1" ]; then
-      cp -a "$sd_src"/. "$sd_dst"/
+      # Replace any prior copy outright. Copying into an existing target dir
+      # nests the package one level too deep (sd_dst/foodassistant_streamdeck),
+      # which leaves __main__.py unreachable and breaks `python -m`.
+      rm -rf "$sd_dst"
+      cp -a "$sd_src" "$sd_dst"
       # Manual installs landed with mode 700 and broke the service.
       chmod -R a+rX "$sd_dst"
     fi
   else
     warn "foodassistant_streamdeck source not found (looked in boot payload and $REPO_DIR/streamdeck); skipping package copy"
+  fi
+
+  # Run the controller as the interactive user (the account Imager created),
+  # not a fixed name, and add them to plugdev so they can open the USB device.
+  local sd_user
+  sd_user="$(primary_user)"
+  [ -n "$sd_user" ] || { warn "No interactive (uid 1000) user found; skipping Stream Deck service"; return 0; }
+
+  # Give the interactive user ownership of the streamdeck directory and venv
+  # so they can write local logs and state files.
+  if [ "$DRY_RUN" != "1" ]; then
+    chown -R "$sd_user" "$sd_dst" "$venv_dir" 2>/dev/null || true
   fi
 
   # Install udev rule so the service user can open the USB device.
@@ -613,13 +907,11 @@ configure_streamdeck() {
     printf 'SUBSYSTEM=="usb", ATTR{idVendor}=="0fd9", GROUP="plugdev", MODE="0660"\n' \
       > /etc/udev/rules.d/99-streamdeck.rules
     udevadm control --reload-rules || warn "udevadm reload failed"
+    # Apply the rule to a Stream Deck that was already plugged in at install
+    # time; without this the existing device node keeps root-only perms and
+    # the controller cannot open it until the next replug or reboot.
+    udevadm trigger --attr-match=idVendor=0fd9 || warn "udevadm trigger failed"
   fi
-
-  # Run the controller as the interactive user (the account Imager created),
-  # not a fixed name, and add them to plugdev so they can open the USB device.
-  local sd_user
-  sd_user="$(primary_user)"
-  [ -n "$sd_user" ] || { warn "No interactive (uid 1000) user found; skipping Stream Deck service"; return 0; }
 
   if getent group plugdev >/dev/null 2>&1; then
     run usermod -aG plugdev "$sd_user" || warn "Could not add $sd_user to plugdev"
@@ -627,16 +919,17 @@ configure_streamdeck() {
     warn "plugdev group not found; skipping usermod"
   fi
 
-  # In remote mode the controller talks to the remote server, not localhost;
-  # the controller reads FOODASSISTANT_BASE_URL from its environment.
+  # A satellite runs the full app locally on port 80, so its Stream Deck drives
+  # the LOCAL app (which talks to the shared Grocy/Mealie it pulled). Point the
+  # controller at localhost:80; the controller reads FOODASSISTANT_BASE_URL.
   local sd_base_env=""
-  if is_remote_mode && [ -n "$REMOTE_SERVER_URL" ]; then
-    sd_base_env="Environment=FOODASSISTANT_BASE_URL=${REMOTE_SERVER_URL%/}"
+  if is_remote_mode; then
+    sd_base_env="Environment=FOODASSISTANT_BASE_URL=http://localhost:80"
   fi
 
   # Write the systemd service unit.
   if [ "$DRY_RUN" = "1" ]; then
-    log "DRY_RUN would write /etc/systemd/system/foodassistant-streamdeck.service for user $sd_user${sd_base_env:+ (base ${REMOTE_SERVER_URL%/})}"
+    log "DRY_RUN would write /etc/systemd/system/foodassistant-streamdeck.service for user $sd_user${sd_base_env:+ (base http://localhost:80)}"
     return 0
   fi
   cat > /etc/systemd/system/foodassistant-streamdeck.service <<EOF
@@ -647,6 +940,7 @@ Wants=network-online.target
 
 [Service]
 ExecStart=/opt/foodassistant/venv/bin/python -m foodassistant_streamdeck
+Environment=FOODASSISTANT_STREAMDECK_CONFIG=/opt/foodassistant/config.toml
 WorkingDirectory=/opt/foodassistant
 Restart=always
 RestartSec=5
@@ -687,7 +981,6 @@ install_rotation_helper() {
 # reaches it on 127.0.0.1:9299 because docker-compose.appliance.yml uses
 # network_mode: host.
 install_host_bridge() {
-  is_remote_mode && return 0   # thin remote has no local app container
 
   local bridge_src="" svc_src=""
   for candidate in "$ASSET_DIR/foodassistant-host-bridge" \
@@ -721,6 +1014,84 @@ install_host_bridge() {
   else
     warn "foodassistant-host-bridge.service not found; bridge installed but not started"
   fi
+}
+
+# Step: Wi-Fi fallback AP mode
+# Installs hostapd and dnsmasq, then registers a watchdog service that
+# activates a fallback hotspot (SSID: FoodAssistant) when wlan0 is not
+# associated within 30 seconds of boot. The AP is NOT started immediately;
+# it only activates on failure, so a device that connects normally is
+# unaffected.
+configure_wifi_ap_fallback() {
+  log "Configuring Wi-Fi fallback AP mode"
+  if [ "$DRY_RUN" = "1" ]; then
+    log "DRY_RUN would install hostapd dnsmasq and write watchdog service"
+    return 0
+  fi
+
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -q hostapd dnsmasq \
+    || warn "hostapd/dnsmasq install failed; AP fallback unavailable"
+
+  # hostapd configuration: WPA2 personal on wlan0, channel 6.
+  mkdir -p /etc/hostapd
+  cat > /etc/hostapd/hostapd.conf <<'EOF'
+interface=wlan0
+driver=nl80211
+ssid=FoodAssistant
+hw_mode=g
+channel=6
+wmm_enabled=0
+macaddr_acl=0
+auth_algs=1
+ignore_broadcast_ssid=0
+wpa=2
+wpa_passphrase=foodassist
+wpa_key_mgmt=WPA-PSK
+wpa_pairwise=TKIP
+rsn_pairwise=CCMP
+EOF
+
+  # dnsmasq DHCP range on the AP subnet. All DNS queries redirect to the
+  # gateway (captive portal NXD hint via dhcp-option=6).
+  mkdir -p /etc/dnsmasq.d
+  cat > /etc/dnsmasq.d/foodassistant-ap.conf <<'EOF'
+interface=wlan0
+dhcp-range=192.168.99.2,192.168.99.20,12h
+dhcp-option=3,192.168.99.1
+dhcp-option=6,192.168.99.1
+address=/#/192.168.99.1
+EOF
+
+  # Watchdog service: after network-online.target, check wlan0 association.
+  # If not connected after 30 s, bring up the AP interface and start the
+  # hotspot daemons. A flag file signals to the web UI that AP mode is active.
+  cat > /etc/systemd/system/foodassistant-ap-watchdog.service <<'EOF'
+[Unit]
+Description=FoodAssistant Wi-Fi fallback AP watchdog
+After=network-online.target
+Wants=network-online.target
+RemainAfterExit=yes
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash -c '\
+  sleep 30; \
+  if ! iw dev wlan0 link 2>/dev/null | grep -q "Connected"; then \
+    ip addr add 192.168.99.1/24 dev wlan0 2>/dev/null || true; \
+    systemctl start hostapd; \
+    systemctl start dnsmasq; \
+    touch /run/foodassistant-ap-active; \
+  fi'
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable foodassistant-ap-watchdog.service \
+    || warn "ap-watchdog service enable failed"
+  log "Wi-Fi fallback AP watchdog installed (activates only when wlan0 fails to connect)"
 }
 
 # Step: mark done
@@ -758,6 +1129,232 @@ seed_app_settings() {
 EOF
   chmod 600 "$settings_file"
   log "seed_app_settings: wrote $settings_file (deployment_mode=$mode, has_streamdeck=$sd_val)"
+}
+
+# Step: deploy the FoodAssistant UI service in a Python venv for Pi Remote.
+# No Docker needed: just uvicorn + the app, bound directly on port 80.
+# The user can then browse to http://<hostname>.local/ to set the remote URL.
+deploy_remote_service() {
+  local venv_dir="/opt/foodassistant/venv"
+  local svc_src=""
+  if [ -d "$REPO_DIR/service" ]; then
+    svc_src="$REPO_DIR/service"
+  elif [ -d "$ASSET_DIR/service" ]; then
+    svc_src="$ASSET_DIR/service"
+  fi
+
+  log "Installing FoodAssistant remote UI service (Python venv, port 80)"
+  apt_install python3-venv python3-pip || die "python3-venv install failed"
+
+  if [ -d "$venv_dir" ]; then
+    log "Reusing existing venv at $venv_dir"
+  else
+    if [ "$DRY_RUN" = "1" ]; then
+      log "DRY_RUN would create venv at $venv_dir"
+    else
+      python3 -m venv "$venv_dir"
+    fi
+  fi
+
+  if [ -n "$svc_src" ] && [ -f "$svc_src/requirements.txt" ]; then
+    log "Installing service requirements into venv"
+    if [ "$DRY_RUN" != "1" ]; then
+      # Retry the install: a single transient network or mirror hiccup here
+      # used to leave uvicorn uninstalled, and the unit then crash looped
+      # forever on status=203/EXEC (no such executable). Try a few times with
+      # backoff before giving up.
+      local _try
+      for _try in 1 2 3; do
+        if "$venv_dir/bin/pip" install --quiet -r "$svc_src/requirements.txt"; then
+          break
+        fi
+        warn "pip install attempt $_try failed; retrying"
+        sleep $((_try * 5))
+      done
+      # Verify the entry point actually landed. If it did not, the service can
+      # never start, so say so loudly rather than hand systemd a doomed unit.
+      if [ ! -x "$venv_dir/bin/uvicorn" ]; then
+        warn "uvicorn missing from venv after pip install; the remote UI service will not start. Re-run with network access: $venv_dir/bin/pip install -r $svc_src/requirements.txt"
+      fi
+    fi
+  else
+    warn "service/requirements.txt not found; pip install skipped"
+  fi
+
+  # Copy service source into place (separate from venv so updates don't
+  # require reinstalling packages).
+  local app_dir="/opt/foodassistant/service"
+  if [ -n "$svc_src" ]; then
+    log "Copying service app from $svc_src to $app_dir"
+    if [ "$DRY_RUN" != "1" ]; then
+      run mkdir -p "$app_dir"
+      cp -a "$svc_src/." "$app_dir/"
+    fi
+  fi
+
+  # Write the .env file that the service reads on startup. Always (re)write it:
+  # it is derived state, and REMOTE_SERVER_URL is carried in from settings.json
+  # by _load_mode_from_settings, so a re-provision keeps the user's URL while
+  # still picking up corrections like DATA_DIR. A stale env file here was what
+  # left data_dir at the Docker default (/app/data) and crashed the service.
+  local env_file="/opt/foodassistant/remote.env"
+  log "Writing $env_file"
+  if [ "$DRY_RUN" = "1" ]; then
+    log "DRY_RUN would write $env_file (DEPLOYMENT_MODE=pi_remote, REMOTE_SERVER_URL, TZ, DATA_DIR)"
+  else
+    cat > "$env_file" <<EOF
+DEPLOYMENT_MODE=pi_remote
+TZ=${TZ:-America/New_York}
+AUTH_REQUIRED=false
+FOODASSISTANT_FORCE_MODEL=Raspberry Pi
+DATA_DIR=$INSTALL_DIR/data
+EOF
+    # Only pin REMOTE_SERVER_URL when we actually have one. An empty env var
+    # still counts as "set" to pydantic and would shadow the value saved to
+    # settings.json by the web wizard, bouncing the device back to setup on
+    # every reboot. When blank here, settings.json is the single source.
+    if [ -n "${REMOTE_SERVER_URL:-}" ]; then
+      echo "REMOTE_SERVER_URL=${REMOTE_SERVER_URL}" >> "$env_file"
+    fi
+    chmod 600 "$env_file"
+  fi
+
+  seed_app_settings
+
+  # Systemd service: run uvicorn directly on port 80 (CAP_NET_BIND_SERVICE
+  # lets an unprivileged binary bind ports below 1024 when set on the binary,
+  # but systemd AmbientCapabilities is the most portable approach here).
+  local sd_user
+  sd_user="$(primary_user)"
+  local exec_uvicorn="$venv_dir/bin/uvicorn"
+
+  # The service runs as the primary (non-root) user, so it must be able to read
+  # the app and read/write the data dir (settings.json is saved from the wizard).
+  # firstboot created these as root, so hand them to the service user.
+  if [ "$DRY_RUN" != "1" ] && [ -n "$sd_user" ]; then
+    run mkdir -p "$INSTALL_DIR/data"
+    run chown -R "$sd_user":"$sd_user" "$INSTALL_DIR" 2>/dev/null \
+      || chown -R "$sd_user" "$INSTALL_DIR" 2>/dev/null \
+      || warn "could not chown $INSTALL_DIR to $sd_user; service may not be able to save settings"
+  fi
+
+  if [ "$DRY_RUN" = "1" ]; then
+    log "DRY_RUN would write /etc/systemd/system/foodassistant-remote.service"
+  else
+    cat > /etc/systemd/system/foodassistant-remote.service <<EOF
+[Unit]
+Description=FoodAssistant Pi Remote UI
+Documentation=https://github.com/Syracuse3DPrinting/FoodAssistant
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=${sd_user:-foodassistant}
+WorkingDirectory=$app_dir
+EnvironmentFile=$env_file
+ExecStart=$exec_uvicorn app.main:app --host 0.0.0.0 --port 80
+Restart=on-failure
+RestartSec=5
+# Allow binding port 80 without running as root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable foodassistant-remote.service || warn "remote service enable failed"
+    systemctl start  foodassistant-remote.service || warn "remote service start failed (will retry on boot)"
+  fi
+  log "FoodAssistant remote UI service installed; reachable at http://${HOSTNAME}.local/"
+}
+
+# Step: port-80 redirect for Pi Hosted.
+# Routes incoming TCP port 80 to port 9284 so users can browse to
+# http://<hostname>.local/ without specifying a port. Uses iptables NAT
+# (no nginx needed). Persistence across reboots is handled two ways so it is
+# robust even if iptables-persistent is unavailable: (1) a tiny systemd unit
+# that re-applies the rule on every boot (the source of truth), and (2) a
+# best-effort iptables-persistent save when that package is present.
+#
+# Pi-only: this is invoked solely on the pi_hosted path so we never hijack
+# port 80 on a generic Linux server that may run its own web server.
+configure_port80() {
+  # The systemd unit re-applies an idempotent rule on each boot. We keep the
+  # add commands in one place so the live run and the boot-time run match.
+  local oneshot=/etc/systemd/system/foodassistant-port80.service
+
+  if [ "$DRY_RUN" = "1" ]; then
+    log "DRY_RUN would add iptables PREROUTING 80->9284 (idempotent -C/-A)"
+    log "DRY_RUN would install $oneshot to re-apply the redirect on every boot"
+    log "DRY_RUN would persist via iptables-persistent/netfilter-persistent if available"
+    log "DRY_RUN would enable foodassistant-port80.service (port 80 redirect persistence)"
+    return 0
+  fi
+
+  # Check if iptables-persistent is available; install quietly if not. This is
+  # best-effort: the systemd unit below is what actually guarantees the rule
+  # survives a reboot, so we do not fail if the package is missing.
+  if ! dpkg -l iptables-persistent &>/dev/null; then
+    # Pre-answer the "save current rules?" prompt to avoid interactive install.
+    echo "iptables-persistent iptables-persistent/autosave_v4 boolean true" \
+      | debconf-set-selections 2>/dev/null || true
+    echo "iptables-persistent iptables-persistent/autosave_v6 boolean false" \
+      | debconf-set-selections 2>/dev/null || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      iptables-persistent 2>/dev/null || true
+  fi
+
+  # Idempotent: only add the rule if it is not already there.
+  if ! iptables -t nat -C PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 9284 2>/dev/null; then
+    iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 9284
+    log "Added iptables PREROUTING rule: port 80 -> 9284"
+  fi
+  # Same for the device browsing to its own port 80, but scoped to the loopback
+  # interface. Locally generated packets to our own address (127.0.0.1 or the
+  # host's own LAN IP) route through lo, while traffic to other hosts exits a
+  # physical NIC. Without "-o lo" this rule hijacked ALL outbound port-80
+  # traffic, including apt to the Debian mirrors, which then hit the local app
+  # and got a 401. Remove any old unscoped rule before adding the scoped one.
+  iptables -t nat -D OUTPUT -p tcp --dport 80 -j REDIRECT --to-port 9284 2>/dev/null || true
+  if ! iptables -t nat -C OUTPUT -o lo -p tcp --dport 80 -j REDIRECT --to-port 9284 2>/dev/null; then
+    iptables -t nat -A OUTPUT -o lo -p tcp --dport 80 -j REDIRECT --to-port 9284
+  fi
+
+  # Install a oneshot systemd unit that re-applies the rule on boot. iptables
+  # NAT rules live in the kernel and are wiped on reboot; relying on
+  # iptables-persistent alone is fragile (the package or its rules.v4 file may
+  # be missing). This unit is the durable source of truth: the same idempotent
+  # -C/-A guard means it is a no-op if the rule already exists.
+  cat > "$oneshot" <<'EOF'
+[Unit]
+Description=FoodAssistant port 80 -> 9284 redirect (pi_hosted)
+After=network-pre.target
+Wants=network-pre.target
+Before=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Idempotent: only add each rule if it is not already present.
+ExecStart=/bin/sh -c 'iptables -t nat -C PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 9284 2>/dev/null || iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 9284'
+ExecStart=/bin/sh -c 'iptables -t nat -D OUTPUT -p tcp --dport 80 -j REDIRECT --to-port 9284 2>/dev/null; iptables -t nat -C OUTPUT -o lo -p tcp --dport 80 -j REDIRECT --to-port 9284 2>/dev/null || iptables -t nat -A OUTPUT -o lo -p tcp --dport 80 -j REDIRECT --to-port 9284'
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload 2>/dev/null || true
+  systemctl enable foodassistant-port80.service 2>/dev/null \
+    || warn "could not enable foodassistant-port80.service; port 80 may not redirect after reboot"
+
+  # Best-effort secondary persistence via iptables-persistent when present.
+  if command -v netfilter-persistent >/dev/null 2>&1; then
+    netfilter-persistent save 2>/dev/null || warn "netfilter-persistent save failed"
+  elif [ -d /etc/iptables ]; then
+    iptables-save > /etc/iptables/rules.v4 2>/dev/null || warn "iptables-save failed"
+  fi
+  log "Port 80 -> 9284 redirect configured (pi_hosted); persistence via foodassistant-port80.service"
 }
 
 # Returns 0 when step $1 should run: always when STEPS is empty (run all),
@@ -811,33 +1408,39 @@ main() {
   _step_requested "mdns"        && configure_mdns
 
   if is_remote_mode; then
-    # Thin client: no Docker, no Grocy/Mealie, no local FoodAssistant service.
-    # Just a kiosk and/or Stream Deck pointed at the remote server. This is what
-    # keeps a Pi Remote viable on low-spec hardware (Pi 3).
-    if [ -z "$REMOTE_SERVER_URL" ]; then
-      warn "Pi Remote mode selected but REMOTE_SERVER_URL is empty; the kiosk/Stream Deck will have no server to talk to. Set REMOTE_SERVER_URL in config.env."
-    fi
-    log "Pi Remote mode: skipping Docker and the local stack; controlling ${REMOTE_SERVER_URL:-<unset>}"
-    _step_requested "rotation"    && configure_display_rotation
-    _step_requested "kiosk"       && configure_kiosk
-    _step_requested "streamdeck"  && configure_streamdeck
+    # Satellite: no local Docker/Grocy/Mealie stack. The full FoodAssistant app
+    # runs in a Python venv on port 80 and pulls its backend config (Grocy,
+    # Mealie, AI keys, expiry defaults) from a main server. The user browses to
+    # http://<hostname>.local/ to enter that server's URL + API key. No SSH.
+    log "Satellite mode: skipping Docker stack; will pull config from ${REMOTE_SERVER_URL:-<set in web UI>}"
+    _step_requested "remote_service"   && deploy_remote_service
+    _step_requested "hostbridge"       && install_host_bridge
+    _step_requested "wifi_ap_fallback" && configure_wifi_ap_fallback
+    _step_requested "rotation"         && configure_display_rotation
+    _step_requested "touch"          && configure_touch
+    _step_requested "kiosk"          && configure_kiosk
+    _step_requested "streamdeck"     && configure_streamdeck
     [ -z "$STEPS" ] && mark_done
-    log "FoodAssistant Pi Remote first-boot complete."
-    log "  This device controls: ${REMOTE_SERVER_URL:-<set REMOTE_SERVER_URL>}"
+    local _svc_url="http://${HOSTNAME}.local/"
+    log "FoodAssistant satellite first-boot complete."
+    log "  Open ${_svc_url} in a browser on your LAN to set the main server URL + API key."
     return 0
   fi
 
-  _step_requested "docker"      && install_docker
-  _step_requested "stack"       && deploy_stack
-  _step_requested "hostbridge"  && install_host_bridge
-  _step_requested "rotation"    && configure_display_rotation
+  _step_requested "docker"           && install_docker
+  _step_requested "stack"            && deploy_stack
+  _step_requested "port80"           && configure_port80
+  _step_requested "hostbridge"       && install_host_bridge
+  _step_requested "wifi_ap_fallback" && configure_wifi_ap_fallback
+  _step_requested "rotation"         && configure_display_rotation
+  _step_requested "touch"       && configure_touch
   _step_requested "kiosk"       && configure_kiosk
   _step_requested "streamdeck"  && configure_streamdeck
   [ -z "$STEPS" ] && mark_done
 
   log "FoodAssistant first-boot complete. Reach the UI at:"
-  log "  http://${HOSTNAME}.local:9284/   (or http://<device-ip>:9284/)"
-  log "First-time setup wizard: http://${HOSTNAME}.local:9284/setup"
+  log "  http://${HOSTNAME}.local/   (or http://<device-ip>/)"
+  log "First-time setup wizard: http://${HOSTNAME}.local/setup"
 }
 
 main "$@"

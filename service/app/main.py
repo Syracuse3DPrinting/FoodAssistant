@@ -1,3 +1,4 @@
+import asyncio
 import secrets
 
 from fastapi import FastAPI, Request
@@ -11,7 +12,7 @@ from .database import engine, get_db, Base
 from .ingress import ingress_redirect
 from .models import db_models  # noqa: F401: registers models with Base
 from .services.defaults import seed_defaults
-from .routers import analyze, defaults, inventory, expiring, ui, setup, pending, mealie, admin, qr, tunnel, grocy
+from .routers import analyze, defaults, inventory, expiring, ui, setup, pending, mealie, admin, qr, tunnel, grocy, satellite, proxy, devices
 
 
 @asynccontextmanager
@@ -22,7 +23,41 @@ async def lifespan(app: FastAPI):
         seed_defaults(db)
     finally:
         db.close()
+    # A satellite mirrors its main server: pull backend config + defaults on
+    # boot. Best-effort so an unreachable server never blocks startup.
+    if settings.is_satellite():
+        try:
+            from .services.satellite import sync_from_upstream
+            sync_from_upstream()
+        except Exception:
+            pass
+        # Keep mirroring while the server-side config drifts.
+        app.state.sync_task = asyncio.create_task(_periodic_satellite_sync())
     yield
+    task = getattr(app.state, "sync_task", None)
+    if task is not None:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+async def _periodic_satellite_sync():
+    """Re-pull backend config from the main server every
+    settings.satellite_sync_minutes (0 disables). Best-effort and cancellable."""
+    from fastapi.concurrency import run_in_threadpool
+    from .services.satellite import sync_from_upstream
+    while True:
+        minutes = settings.satellite_sync_minutes
+        if not minutes or minutes <= 0:
+            await asyncio.sleep(300)   # re-check the toggle later
+            continue
+        await asyncio.sleep(minutes * 60)
+        try:
+            await run_in_threadpool(sync_from_upstream)
+        except Exception:
+            pass
 
 
 app = FastAPI(
@@ -46,6 +81,10 @@ _SETUP_BYPASS = {
     "/setup/test/grocy", "/setup/test/vision", "/setup/test/remote",
     "/setup/test/provider", "/setup/test/mealie", "/setup/test/recipes",
     "/setup/totp/generate", "/setup/totp/verify", "/setup/totp/disable",
+    "/setup/satellite/sync",
+    # Satellites pull config here; the handler enforces its own X-API-Key, so
+    # it is safe to skip the setup-redirect/auth wrappers.
+    "/api/config/satellite",
     "/health", "/docs", "/openapi.json", "/redoc",
 }
 # "/" only redirects to /ui/, so it can safely skip auth (the target enforces it)
@@ -59,8 +98,11 @@ def _is_static(path: str) -> bool:
 @app.middleware("http")
 async def redirect_if_unconfigured(request: Request, call_next):
     """Send new installs to /setup until Grocy + vision provider are configured."""
+    # The satellite proxy enforces its own X-API-Key, so it must not be caught
+    # by the setup-redirect (it has no browser session to redirect anyway).
     if (not settings.is_configured() and request.url.path not in _SETUP_BYPASS
-            and not _is_static(request.url.path)):
+            and not _is_static(request.url.path)
+            and not request.url.path.startswith("/api/proxy/")):
         return ingress_redirect(request, "/setup")
     return await call_next(request)
 
@@ -92,6 +134,33 @@ async def require_auth(request: Request, call_next):
     return JSONResponse({"detail": "Unauthorized"}, status_code=401)
 
 
+@app.middleware("http")
+async def require_pin(request: Request, call_next):
+    """Optional numeric PIN gate for the kiosk UI on a satellite. It only guards
+    the browser UI (/ui and the root redirect), leaving /setup reachable so the
+    PIN can be changed or cleared without SSH. The unlock screen lives at
+    /ui/pin and stores a session flag once the code matches.
+
+    When kiosk_readonly_when_locked is True, unauthenticated GET requests are
+    allowed through (read-only browsing), while write methods (POST/PUT/PATCH/
+    DELETE) from unauthenticated users are rejected with 403."""
+    if not settings.pin_lock_active():
+        return await call_next(request)
+    path = request.url.path
+    if not (path == "/" or path.startswith("/ui")):
+        return await call_next(request)
+    if path in ("/ui/pin", "/ui/pin/verify", "/ui/login") or _is_static(path):
+        return await call_next(request)
+    if request.session.get("pin_ok"):
+        return await call_next(request)
+    if settings.kiosk_readonly_when_locked:
+        if request.method == "GET":
+            request.state.pin_readonly = True
+            return await call_next(request)
+        return JSONResponse({"detail": "Locked"}, status_code=403)
+    return ingress_redirect(request, "/ui/pin")
+
+
 # SessionMiddleware runs after middlewares above so request.session is available
 app.add_middleware(SessionMiddleware, secret_key=settings.secret_key, max_age=60 * 60 * 24 * 30)
 
@@ -111,6 +180,9 @@ app.include_router(expiring.router)
 app.include_router(tunnel.router)
 app.include_router(ui.router)
 app.include_router(qr.router)
+app.include_router(satellite.router)
+app.include_router(proxy.router)
+app.include_router(devices.router)
 
 
 @app.get("/")
@@ -118,10 +190,17 @@ async def root():
     return RedirectResponse("/ui/", status_code=303)
 
 
+# Stable fingerprint so a LAN scan can tell a FoodAssistant instance apart from
+# any other service answering on the same port. Public (no auth) on purpose: it
+# reveals only the app name, version and deployment mode, never config or keys.
+_FINGERPRINT = {"app": "foodassistant", "version": APP_VERSION}
+
+
 @app.get("/health")
 async def health():
     if not settings.is_configured():
-        return {"status": "unconfigured", "setup": "/setup"}
+        return {**_FINGERPRINT, "status": "unconfigured", "setup": "/setup",
+                "mode": settings.deployment_mode}
     from .dependencies import get_vision_provider
     from .services.grocy import GrocyClient
     provider = get_vision_provider()
@@ -131,7 +210,9 @@ async def health():
     else:
         vision_status = "not configured"
     return {
+        **_FINGERPRINT,
         "status": "ok",
+        "mode": settings.deployment_mode,
         "vision_provider": vision_status,
         "grocy": "ok" if await grocy.health_check() else "error",
     }

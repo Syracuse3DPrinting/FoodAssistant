@@ -27,14 +27,14 @@ ALLOWED_ROTATIONS: tuple[int, ...] = (0, 90, 180, 270)
 
 @dataclass
 class Config:
-    base_url: str = "http://localhost:9284"
+    base_url: str = "http://127.0.0.1:9284"
     api_key: str = ""
     brightness: int = 60
     poll_seconds: int = 30
     soon_days: int = 7
     # Optional Chrome DevTools endpoint of a local kiosk browser, e.g.
     # "http://localhost:9222". When set, nav keys steer that browser.
-    kiosk_cdp_url: str = ""
+    kiosk_cdp_url: str = "http://127.0.0.1:9222"
     # Clockwise rotation of the rendered key faces, in degrees. Only the four
     # values in ALLOWED_ROTATIONS are accepted; anything else falls back to 0.
     rotation: int = 0
@@ -61,10 +61,19 @@ class Config:
     ha_slots: list = field(default_factory=list)
     # How often to refresh HA entity states (seconds). 0 = only on press.
     ha_poll_seconds: int = 30
+    # Idle timeout in minutes. 0 = disabled. After this many minutes without
+    # a key press the deck is blanked; any key press wakes it.
+    idle_timeout_minutes: int = 0
+    # Advanced per-key overrides configured in the web setup page. Each entry is
+    # a dict with "slot" (grid index), "type" (ha_action | timer | weather |
+    # default) and type-specific fields. Overrides are applied on top of the
+    # default "keys" layout, replacing the action at the given slot. See
+    # actions.overrides_to_specs.
+    key_overrides: list = field(default_factory=list)
 
     def validated(self) -> "Config":
         """Drop unknown action names and clamp numbers into sane ranges."""
-        self.keys = [k for k in self.keys if k in ACTIONS] or list(DEFAULT_ORDER)
+        self.keys = [k for k in self.keys if k in ACTIONS or k == "blank"] or list(DEFAULT_ORDER)
         self.brightness = _clamp(self.brightness, 5, 100)
         self.poll_seconds = max(5, int(self.poll_seconds))
         self.soon_days = _clamp(self.soon_days, 0, 365)
@@ -73,6 +82,7 @@ class Config:
             self.rotation = 0
         self.ha_base_url = self.ha_base_url.rstrip("/")
         self.ha_poll_seconds = max(0, int(self.ha_poll_seconds))
+        self.idle_timeout_minutes = max(0, int(self.idle_timeout_minutes))
         return self
 
 
@@ -118,13 +128,17 @@ def _apply(cfg: Config, data: dict) -> None:
         if isinstance(data.get(name), str):
             setattr(cfg, name, data[name])
     for name in ("brightness", "poll_seconds", "soon_days", "rotation",
-                 "weather_poll_minutes", "ha_poll_seconds"):
+                 "weather_poll_minutes", "ha_poll_seconds", "idle_timeout_minutes"):
         if isinstance(data.get(name), int):
             setattr(cfg, name, data[name])
 
     raw_slots = data.get("ha_slots")
     if isinstance(raw_slots, list):
         cfg.ha_slots = [s for s in raw_slots if isinstance(s, dict)]
+
+    raw_overrides = data.get("key_overrides")
+    if isinstance(raw_overrides, list):
+        cfg.key_overrides = [o for o in raw_overrides if isinstance(o, dict)]
 
     # Keys may be given as a plain list of action names, or as an array of
     # tables each with an "action" field, to match the documented example.

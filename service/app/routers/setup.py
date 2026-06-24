@@ -1,6 +1,8 @@
+import socket
 import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from ..config import (
@@ -23,9 +25,48 @@ _SECRET_FIELDS = [
     "gemini_api_key", "openai_api_key", "anthropic_api_key",
     "grocy_api_key", "mealie_api_key",
     "themealdb_api_key", "spoonacular_api_key",
-    "auth_password", "api_key",
+    "auth_password", "api_key", "upstream_api_key", "kiosk_pin",
 ]
 _CLEAR = "__CLEAR__"
+
+
+# Extra-key rows that were left untouched in the UI come back as this sentinel
+# instead of the real (masked) value, so saved keys are never echoed to the
+# browser. "__KEEP__:2" means "keep the stored extra key at index 2".
+_KEEP_PREFIX = "__KEEP__:"
+
+
+def _merge_extra_keys(submitted) -> dict | None:
+    """Resolve the submitted extra-key map against what is already stored.
+
+    Returns a clean {provider: [keys]} dict, or None when nothing was sent
+    (so the caller leaves the stored extras untouched). Placeholders of the
+    form "__KEEP__:<index>" are replaced with the matching stored key; blanks
+    and duplicates are dropped.
+    """
+    if not isinstance(submitted, dict):
+        return None
+    stored = settings.ai_extra_keys if isinstance(settings.ai_extra_keys, dict) else {}
+    result: dict = {}
+    for provider, rows in submitted.items():
+        if not isinstance(rows, list):
+            continue
+        prev = [k for k in stored.get(provider, []) if isinstance(k, str)]
+        clean: list[str] = []
+        for row in rows:
+            if not isinstance(row, str):
+                continue
+            val = row.strip()
+            if val.startswith(_KEEP_PREFIX):
+                try:
+                    val = prev[int(val[len(_KEEP_PREFIX):])]
+                except (ValueError, IndexError):
+                    continue
+            if val and val not in clean:
+                clean.append(val)
+        if clean:
+            result[provider] = clean
+    return result
 
 
 def _safe_error(e: Exception | str, *secrets: str) -> str:
@@ -47,6 +88,9 @@ class SetupPayload(BaseModel):
     openai_model: str = "gpt-4o-mini"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-opus-4-8"
+    # Extra API keys per provider, e.g. {"gemini": ["key2", "key3"]}. When
+    # absent the stored extras are left untouched (see save handler).
+    ai_extra_keys: dict[str, list[str]] | None = None
     barcode_enrichment: str = "llm"
     enrich_provider: str = ""
     enrich_model: str = ""
@@ -70,6 +114,8 @@ class SetupPayload(BaseModel):
     display_rotation: int = _DEFAULT_DISPLAY_ROTATION
     deployment_mode: str = ""
     remote_server_url: str = ""
+    upstream_api_key: str = ""
+    kiosk_pin: str = ""
     barcode_llm_fallback: bool = False
     barcode_autocheck_shopping: bool = False
     cook_ai_context: str = ""
@@ -113,6 +159,36 @@ async def test_remote(payload: TestRemotePayload):
         return {"ok": False, "error": str(e)}
 
 
+class SatelliteSyncPayload(BaseModel):
+    remote_server_url: str = ""
+    upstream_api_key: str = ""
+
+
+@router.post("/satellite/sync")
+async def satellite_sync(payload: SatelliteSyncPayload):
+    """Save the upstream link, then pull backend config + defaults from it.
+
+    Used by the satellite setup flow: enter the main server URL + API key, then
+    sync. On success the satellite has Grocy/Mealie/AI config and is usable.
+    """
+    data = {"deployment_mode": "pi_remote"}
+    if payload.remote_server_url:
+        data["remote_server_url"] = payload.remote_server_url.rstrip("/")
+    if payload.upstream_api_key and payload.upstream_api_key != _CLEAR:
+        data["upstream_api_key"] = payload.upstream_api_key
+    settings.save(data)
+
+    from ..services.satellite import sync_from_upstream
+    result = await run_in_threadpool(sync_from_upstream)
+    if result.get("ok"):
+        return {
+            "ok": True,
+            "message": f"Synced {len(result['applied'])} settings and "
+                       f"{result['defaults']} expiry defaults from the server.",
+        }
+    return {"ok": False, "error": result.get("error", "Sync failed.")}
+
+
 class TestProviderPayload(BaseModel):
     provider: str
     api_key: str = ""
@@ -145,16 +221,22 @@ async def _detect_local_grocy() -> str:
     return ""
 
 
+def _pi_mdns_host() -> str:
+    """Return <hostname>.local for the current Pi, e.g. 'foodassistant.local'."""
+    return f"{socket.gethostname()}.local"
+
+
 def _grocy_url_for_browser(request: Request, detected: str) -> str:
     """Adjust a locally-detected Grocy URL for the browser making the request.
 
-    When Grocy is detected at localhost:9383 but the setup page is opened from
-    another machine, localhost resolves to the user's own computer, not the Pi.
-    In that case, substitute the hostname the browser used to reach us (same IP,
-    port 9383) so the pre-filled URL is immediately usable.
+    On a Pi, use <hostname>.local so the link survives IP address changes.
+    When accessed from a non-Pi server, substitute the request hostname so the
+    pre-filled URL is usable from the browser making the request.
     """
     if not detected:
         return detected
+    if is_raspberry_pi():
+        return f"http://{_pi_mdns_host()}:9383"
     client_host = (request.client.host if request.client else "") or ""
     if client_host in ("127.0.0.1", "::1", "localhost", ""):
         return detected
@@ -166,16 +248,14 @@ def _suggest_mealie_url(request: Request) -> str:
     """Return a suggested Mealie URL for the browser, or '' if not applicable.
 
     On a Pi appliance Mealie runs (or will run) on the same host at port 9285.
+    Prefers the mDNS hostname so the link survives DHCP IP changes.
     Returns '' when Mealie is already configured or we are not on a Pi.
     """
     if not is_raspberry_pi():
         return ""
     if settings.mealie_base_url:
         return ""
-    server_host = request.url.hostname or ""
-    if not server_host or server_host in ("127.0.0.1", "::1", "localhost"):
-        return "http://localhost:9285"
-    return f"http://{server_host}:9285"
+    return f"http://{_pi_mdns_host()}:9285"
 
 
 def available_modes() -> dict:
@@ -206,6 +286,11 @@ async def setup_page(request: Request):
         "configured": settings.is_configured(),
         # booleans only: never the stored secrets themselves
         "has": {f: bool(getattr(settings, f, "")) for f in _SECRET_FIELDS},
+        # count of stored extra keys per provider (values never sent to the page)
+        "extra_key_counts": {
+            p: len([k for k in (settings.ai_extra_keys.get(p, []) if isinstance(settings.ai_extra_keys, dict) else []) if k])
+            for p in ("gemini", "openai", "anthropic")
+        },
         "tabs": all_tabs(),
         "version": APP_VERSION,
         "custom_categories": custom_categories(),
@@ -218,6 +303,7 @@ async def setup_page(request: Request):
         "current_mode": current_mode,
         "is_pi": is_raspberry_pi(),
         "board_model": board_model(),
+        "pi_mdns_host": _pi_mdns_host() if is_raspberry_pi() else "",
     })
 
 
@@ -268,12 +354,15 @@ async def save_scale(payload: ScalePayload):
 
 @router.post("/save")
 async def save_setup(payload: SetupPayload):
-    data = payload.model_dump()
+    data = payload.model_dump(exclude_unset=True)
     for f in _SECRET_FIELDS:
         if data.get(f) == "":
             data.pop(f, None)        # blank = keep existing value
         elif data.get(f) == _CLEAR:
             data[f] = ""             # explicit clear
+    data["ai_extra_keys"] = _merge_extra_keys(data.get("ai_extra_keys"))
+    if data["ai_extra_keys"] is None:
+        data.pop("ai_extra_keys", None)   # absent = keep stored extras
     if data.get("display_rotation") not in DISPLAY_ROTATIONS:
         data["display_rotation"] = _DEFAULT_DISPLAY_ROTATION
     # Drop an unknown deployment mode rather than persisting a broken value;
@@ -507,8 +596,23 @@ async def network_status():
         return {
             "ok": True,
             "ssid": wifi.get("ssid", ""),
+            "wifi_state": wifi.get("state", ""),
+            "wifi_detail": wifi.get("detail", ""),
             "hostname": hn.get("hostname", ""),
         }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@router.get("/network/scan")
+async def network_scan():
+    """List visible Wi-Fi networks, via the Pi host bridge."""
+    if not is_raspberry_pi():
+        return {"ok": False, "error": "Not available on this platform."}
+    try:
+        async with httpx.AsyncClient(timeout=25.0) as c:
+            r = (await c.get(f"{_HOST_BRIDGE}/wifi/scan")).json()
+        return r
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -583,6 +687,7 @@ async def set_display_rotation(payload: KmsRotationPayload):
         async with httpx.AsyncClient(timeout=20.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/display/rotation",
                              json={"degrees": payload.degrees, "reboot": payload.reboot})
+        settings.save({"display_rotation": payload.degrees})
         return r.json()
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)})
@@ -601,24 +706,86 @@ async def streamdeck_restart():
         return JSONResponse({"ok": False, "error": str(e)})
 
 
-@router.post("/mealie/start")
-async def mealie_start():
-    """Start the Mealie container on a Pi appliance via the host bridge."""
+@router.post("/kiosk/restart")
+async def kiosk_restart():
+    """Restart the kiosk browser so display scale/rotation changes apply."""
     if not is_raspberry_pi():
         return JSONResponse({"ok": False, "error": "Not available on this platform."})
     try:
-        async with httpx.AsyncClient(timeout=130.0) as c:
+        async with httpx.AsyncClient(timeout=35.0) as c:
+            r = await c.post(f"{_HOST_BRIDGE}/kiosk/restart")
+        return r.json()
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+
+
+@router.post("/mealie/start")
+async def mealie_start():
+    """Kick off the Mealie container start on a Pi appliance via the host bridge.
+
+    The bridge runs the image pull/up in the background and returns at once, so
+    a short timeout is enough; the web UI polls /mealie/status for progress.
+    """
+    if not is_raspberry_pi():
+        return JSONResponse({"ok": False, "error": "Not available on this platform."})
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/mealie/start")
         return r.json()
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)})
 
 
-@router.get("/hardware/status")
-async def hardware_status():
-    """Display / Stream Deck presence and service state, via the Pi host bridge."""
+@router.get("/mealie/status")
+async def mealie_status():
+    """Mealie start progress (not-installed / starting / running), via the bridge."""
     if not is_raspberry_pi():
         return {"ok": False, "error": "Not available on this platform."}
+    try:
+        async with httpx.AsyncClient(timeout=12.0) as c:
+            r = (await c.get(f"{_HOST_BRIDGE}/mealie/status")).json()
+        return r
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+_LOG_NAMES = {"mealie", "kiosk", "streamdeck"}
+
+
+@router.get("/logs/{name}")
+async def install_logs(name: str):
+    """Tail of an install/start log (mealie / kiosk / streamdeck), via the bridge.
+
+    Mirrors the /mealie/status proxy: the setup UI polls this while a start or
+    install is in flight to show live output. Returns {ok, name, running,
+    lines}. Unknown names and bridge errors are reported, never raised.
+    """
+    if not is_raspberry_pi():
+        return {"ok": False, "error": "Not available on this platform."}
+    if name not in _LOG_NAMES:
+        return {"ok": False, "error": "unknown log name"}
+    try:
+        async with httpx.AsyncClient(timeout=6.0) as c:
+            r = (await c.get(f"{_HOST_BRIDGE}/logs/{name}")).json()
+        return r
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@router.get("/hardware/status")
+async def hardware_status():
+    """Display / Stream Deck presence and service state, via the Pi host bridge.
+
+    Off a Pi there is no host bridge to probe, so return a clean "nothing
+    attached" shape (rather than an error) so the setup UI's attached-hardware
+    panel degrades gracefully instead of showing a failure.
+    """
+    if not is_raspberry_pi():
+        return {
+            "ok": True,
+            "display": {"present": False, "connectors": []},
+            "streamdeck": {"present": False, "model": ""},
+        }
     try:
         async with httpx.AsyncClient(timeout=6.0) as c:
             r = (await c.get(f"{_HOST_BRIDGE}/hardware/status")).json()
@@ -640,6 +807,46 @@ async def kiosk_install():
         return JSONResponse({"ok": False, "error": str(e)})
 
 
+@router.get("/streamdeck/config")
+async def streamdeck_config_get():
+    """Proxy GET config from host bridge."""
+    if _HOST_BRIDGE:
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as c:
+                r = await c.get(f"{_HOST_BRIDGE}/streamdeck/config")
+                return JSONResponse(status_code=r.status_code, content=r.json())
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
+    return JSONResponse(status_code=500, content={"ok": False, "error": "bridge unavailable"})
+
+
+@router.post("/streamdeck/config")
+async def streamdeck_config_set(request: Request):
+    """Proxy POST config to host bridge."""
+    if _HOST_BRIDGE:
+        try:
+            payload = await request.json()
+            async with httpx.AsyncClient(timeout=3.0) as c:
+                r = await c.post(f"{_HOST_BRIDGE}/streamdeck/config", json=payload)
+                return JSONResponse(status_code=r.status_code, content=r.json())
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
+    return JSONResponse(status_code=500, content={"ok": False, "error": "bridge unavailable"})
+
+
+@router.get("/streamdeck/actions")
+async def streamdeck_actions():
+    """List assignable Stream Deck actions for the grid editor (Pi only)."""
+    if not is_raspberry_pi():
+        return {"ok": False, "error": "Not available on this platform."}
+    try:
+        async with httpx.AsyncClient(timeout=12.0) as c:
+            r = (await c.get(f"{_HOST_BRIDGE}/streamdeck/actions")).json()
+        return r
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 @router.post("/streamdeck/install")
 async def streamdeck_install():
     """Provision the Stream Deck service for a deck attached after first install."""
@@ -648,6 +855,32 @@ async def streamdeck_install():
     try:
         async with httpx.AsyncClient(timeout=15.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/streamdeck/install")
+        return r.json()
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+
+
+@router.get("/ap/status")
+async def ap_status():
+    """Whether the fallback Wi-Fi AP is active (Pi appliance only)."""
+    if not is_raspberry_pi():
+        return {"ok": True, "active": False}
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as c:
+            r = (await c.get(f"{_HOST_BRIDGE}/ap/status")).json()
+        return r
+    except Exception:
+        return {"ok": True, "active": False}
+
+
+@router.post("/ap/disable")
+async def ap_disable():
+    """Stop the fallback hotspot after the user has configured Wi-Fi."""
+    if not is_raspberry_pi():
+        return JSONResponse({"ok": False, "error": "Not available on this platform."})
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as c:
+            r = await c.post(f"{_HOST_BRIDGE}/ap/disable")
         return r.json()
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)})

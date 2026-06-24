@@ -1,4 +1,5 @@
 import json
+import socket
 import secrets as _secrets
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -80,6 +81,7 @@ _SAVEABLE = [
     "ollama_base_url", "ollama_model",
     "openai_api_key", "openai_model",
     "anthropic_api_key", "anthropic_model",
+    "ai_extra_keys",
     "scanner_type",
     "barcode_enrichment", "barcode_llm_fallback", "barcode_autocheck_shopping", "enrich_provider", "enrich_model",
     "grocy_base_url", "grocy_api_key", "grocy_public_url",
@@ -88,22 +90,59 @@ _SAVEABLE = [
     "staple_items", "cook_ai_context", "perishable_days", "expiring_soon_days", "suggest_per_tier",
     "nav_order", "nav_hidden", "custom_storage_categories", "ui_theme", "ui_scale", "display_rotation",
     "has_streamdeck", "streamdeck_key_count", "display_touch",
-    "deployment_mode", "remote_server_url",
+    "display_idle_timeout", "streamdeck_idle_timeout", "streamdeck_key_overrides",
+    "deployment_mode", "remote_server_url", "upstream_api_key", "kiosk_pin", "kiosk_readonly_when_locked",
+    "satellite_sync_minutes", "device_id",
     "secret_key", "auth_password", "totp_secret", "api_key", "auth_required",
     "rclone_remote", "rclone_schedule_hours",
     "tunnel_mode", "tunnel_token", "tunnel_url",
 ]
 
+# Settings a satellite (pi_remote) pulls from its main server and mirrors
+# locally so it can talk to Grocy/Mealie/AI directly. These are READ-ONLY on a
+# satellite: edit them on the server. Device-local concerns (auth, UI theme,
+# hardware, tunnel, the upstream link itself) are deliberately excluded.
+SATELLITE_PULL_FIELDS = [
+    "vision_provider", "gemini_api_key", "gemini_model",
+    "ollama_base_url", "ollama_model",
+    "openai_api_key", "openai_model",
+    "anthropic_api_key", "anthropic_model",
+    "barcode_enrichment", "barcode_llm_fallback", "barcode_autocheck_shopping",
+    "enrich_provider", "enrich_model",
+    "grocy_base_url", "grocy_api_key", "grocy_public_url",
+    "mealie_base_url", "mealie_api_key", "mealie_public_url",
+    "recipe_source", "themealdb_api_key", "spoonacular_api_key",
+    "staple_items", "cook_ai_context",
+    "perishable_days", "expiring_soon_days", "suggest_per_tier",
+    "custom_storage_categories", "ui_theme",
+]
+
 # Settings that hold credentials. These are redacted from backups unless the
 # user explicitly opts in, and never rendered back into the setup page.
 SECRET_SETTING_KEYS = [
-    "gemini_api_key", "openai_api_key", "anthropic_api_key",
+    "gemini_api_key", "openai_api_key", "anthropic_api_key", "ai_extra_keys",
     "grocy_api_key", "mealie_api_key",
     "themealdb_api_key", "spoonacular_api_key",
-    "auth_password", "totp_secret", "api_key", "secret_key",
+    "auth_password", "totp_secret", "api_key", "secret_key", "kiosk_pin",
 ]
 
 _DEFAULT_GROCY_URL = "http://grocy:80"
+
+_LOCALHOST_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+
+
+def _mdns_rewrite(url: str, port: int) -> str:
+    """If url points to localhost, rewrite it to use the mDNS hostname.
+
+    This makes browser-facing links work from other devices on the LAN without
+    requiring a static IP, since <hostname>.local is stable across DHCP changes.
+    """
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    if parsed.hostname in _LOCALHOST_HOSTS:
+        mdns = f"{socket.gethostname()}.local"
+        return f"http://{mdns}:{port}"
+    return url
 
 
 class Settings(BaseSettings):
@@ -122,6 +161,13 @@ class Settings(BaseSettings):
 
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-opus-4-8"
+
+    # Additional API keys per cloud provider, beyond the primary key stored in
+    # <provider>_api_key above. Maps provider name -> ordered list of extra
+    # keys, e.g. {"gemini": ["AIza...second", "AIza...third"]}. The primary key
+    # is always tried first; the extras give the app spare keys to fall back to
+    # when one is rate-limited or revoked. Set in the setup wizard.
+    ai_extra_keys: dict = {}
 
     # How barcodes are scanned: "usb" = USB/BT HID keyboard-wedge, "camera" =
     # Pi camera / scan engine, "" = not set (user picks on Add Food page).
@@ -150,8 +196,15 @@ class Settings(BaseSettings):
     grocy_public_url: str = ""
 
     def grocy_link_url(self) -> str:
-        """URL for browser-facing Grocy links (public address if set, else base)."""
-        return (self.grocy_public_url or self.grocy_base_url).rstrip("/")
+        """URL for browser-facing Grocy links (public address if set, else base).
+
+        When no public URL is set and the base URL is localhost, rewrites to the
+        mDNS hostname so links work from other devices on the LAN.
+        """
+        url = (self.grocy_public_url or self.grocy_base_url).rstrip("/")
+        if not self.grocy_public_url:
+            url = _mdns_rewrite(url, 9383)
+        return url
 
     # Mealie recipe manager (optional): enables the Recipes, Meal Plan and
     # Shopping List pages. base_url is for API calls (LAN/docker address);
@@ -164,8 +217,15 @@ class Settings(BaseSettings):
         return bool(self.mealie_base_url and self.mealie_api_key)
 
     def mealie_link_url(self) -> str:
-        """URL for browser-facing links (public address if set, else base)."""
-        return (self.mealie_public_url or self.mealie_base_url).rstrip("/")
+        """URL for browser-facing links (public address if set, else base).
+
+        When no public URL is set and the base URL is localhost, rewrites to the
+        mDNS hostname so links work from other devices on the LAN.
+        """
+        url = (self.mealie_public_url or self.mealie_base_url).rstrip("/")
+        if not self.mealie_public_url:
+            url = _mdns_rewrite(url, 9285)
+        return url
 
     # External recipe suggestions: themealdb | spoonacular | off.
     # TheMealDB's public test key "1" is free; a premium (supporter) key or
@@ -206,17 +266,90 @@ class Settings(BaseSettings):
     streamdeck_key_count: int = 0
     display_touch: bool = False
 
+    # Idle timeouts (minutes). 0 = disabled. display_idle_timeout puts the
+    # kiosk display to sleep after N minutes without user interaction.
+    # streamdeck_idle_timeout blanks the Stream Deck after N minutes without
+    # a key press.
+    display_idle_timeout: int = 0
+    streamdeck_idle_timeout: int = 0
+
+    # Advanced Stream Deck per-key overrides set in the setup page. A JSON list
+    # where each entry is a dict with "slot" (grid index), "type" (ha_action |
+    # timer | weather | default) and type-specific fields (entity_id/service,
+    # minutes, location, label, icon). Mirrored into the controller's config.toml
+    # as "key_overrides" so the deck applies them on top of the default layout.
+    streamdeck_key_overrides: list = []
+
     # Deployment mode chosen in the wizard (one of DEPLOYMENT_MODES). Empty
-    # until the user picks one. In "pi_remote" mode this device is only a
-    # control surface for a remote server (remote_server_url), so the local
-    # Grocy/Mealie requirements in is_configured() do not apply.
+    # until the user picks one. "pi_remote" is a SATELLITE: it runs the full
+    # app but installs no local Grocy/Mealie stack. It pulls all backend config
+    # (Grocy/Mealie/AI keys and the expiry defaults) from a main server and then
+    # talks to those backends directly. See SATELLITE_PULL_FIELDS.
     deployment_mode: str = ""
-    # For pi_remote: the base URL of the FoodAssistant server this device
-    # controls (e.g. http://192.168.1.50:9284). Unused in the other modes.
+    # Satellite only: base URL of the main FoodAssistant server to pull config
+    # from (e.g. http://192.168.1.50:9284), plus the API key used to authenticate
+    # that pull. Unused in the other modes.
     remote_server_url: str = ""
+    upstream_api_key: str = ""
+    # Satellite only: an optional numeric PIN that gates the kiosk UI. A
+    # satellite turns the UI password off by default (the main server owns
+    # access control), so this is a lightweight, touchscreen-friendly lock for
+    # the local screen. Empty means no PIN gate.
+    kiosk_pin: str = ""
+    # When True and the kiosk is PIN-locked, allow unauthenticated users to
+    # browse read-only (GET requests pass through without a PIN). POST/PUT/
+    # PATCH/DELETE from unauthenticated users are rejected with 403.
+    kiosk_readonly_when_locked: bool = False
+
+    def pin_lock_active(self) -> bool:
+        """True when the numeric kiosk PIN should gate the UI (satellite only)."""
+        return self.is_satellite() and bool(self.kiosk_pin)
+
+    # Satellite only: how often to re-pull backend config from the main server,
+    # in minutes. 0 disables the periodic refresh (boot + manual sync only).
+    satellite_sync_minutes: int = 15
+
+    # Stable per-device identifier. Auto-generated on first run and persisted so
+    # a satellite presents the same identity across reboots and IP changes, and
+    # so the main server can track it as one device in its remotes list.
+    device_id: str = ""
 
     def is_remote_mode(self) -> bool:
         return self.deployment_mode == "pi_remote"
+
+    # Clearer name for the same thing: pi_remote == a satellite of a main server.
+    def is_satellite(self) -> bool:
+        return self.deployment_mode == "pi_remote"
+
+    def manages_local_stack(self) -> bool:
+        """True when this device runs/controls its own Grocy/Mealie Docker
+        stack (server, pi_hosted). A satellite points at a remote stack."""
+        return not self.is_satellite()
+
+    def features(self) -> "dict[str, bool]":
+        """Which capability groups are active for this deployment_mode.
+
+        Templates and routers use these flags to show or hide sections.
+        The method does NOT import at module level (hardware detection reads
+        /proc/device-tree, which is unavailable in tests and CI).
+        """
+        from .hardware import is_raspberry_pi  # deferred to avoid import-time side-effects
+        is_pi = is_raspberry_pi()
+        satellite = self.is_satellite()
+        return {
+            # manages_stack: this device runs local Grocy/Mealie Docker, so it
+            # shows the "start/stop local stack" controls. A satellite does not.
+            "manages_stack": not satellite,
+            # satellite: pulls backend config from a main server; backend config
+            # panes are shown read-only and the upstream link pane is shown.
+            "satellite": satellite,
+            # peripherals: kiosk display + Stream Deck panes (Pi only)
+            "peripherals": is_pi,
+            # streamdeck: Stream Deck pane visible (Pi + has a deck declared)
+            "streamdeck": is_pi and bool(self.has_streamdeck),
+            # ai: vision/LLM provider config (always available)
+            "ai": True,
+        }
 
     # User-defined storage categories beyond the four built-ins. Each is a
     # dict {key,label,icon,color,bg,location,match}. See storage_categories.py.
@@ -242,12 +375,30 @@ class Settings(BaseSettings):
     tunnel_url: str = ""
 
     def provider_key(self, provider: str) -> str:
-        """API key for a cloud provider name; '' for local/unknown providers."""
+        """Primary API key for a cloud provider; '' for local/unknown providers."""
         return {
             "gemini": self.gemini_api_key,
             "openai": self.openai_api_key,
             "anthropic": self.anthropic_api_key,
         }.get(provider, "ollama-no-key-needed" if provider == "ollama" else "")
+
+    def provider_keys(self, provider: str) -> list[str]:
+        """Ordered list of usable API keys for a provider: the primary key
+        first, then any extras from ai_extra_keys. Blanks and duplicates are
+        dropped. Returns [] for providers with no key (e.g. an unset cloud
+        provider); ollama returns its sentinel so callers can treat it like
+        any other provider.
+        """
+        keys: list[str] = []
+        for k in [self.provider_key(provider), *self._extra_keys(provider)]:
+            k = (k or "").strip()
+            if k and k not in keys:
+                keys.append(k)
+        return keys
+
+    def _extra_keys(self, provider: str) -> list[str]:
+        raw = self.ai_extra_keys.get(provider, []) if isinstance(self.ai_extra_keys, dict) else []
+        return [k for k in raw if isinstance(k, str)]
 
     def ai_configured(self) -> bool:
         """True when a vision provider key is present and usable."""
@@ -255,11 +406,11 @@ class Settings(BaseSettings):
 
     def is_configured(self) -> bool:
         """True when the minimum required settings have been supplied."""
-        # Pi Remote is a thin control surface: it has no local Grocy, so the
-        # only requirement is a reachable remote server URL (plus the usual
-        # password gate). The local-stack checks below do not apply.
-        if self.is_remote_mode():
-            if not self.remote_server_url:
+        # A satellite pulls its backend config from a main server, so the only
+        # things it must be given are that server's URL and an API key to
+        # authenticate the pull. Grocy/Mealie/AI then arrive via that sync.
+        if self.is_satellite():
+            if not self.remote_server_url or not self.upstream_api_key:
                 return False
             if self.auth_required and not self.auth_password:
                 return False
@@ -306,8 +457,16 @@ if _sf.exists():
     try:
         _saved = json.loads(_sf.read_text())
         for _k, _v in _saved.items():
-            if _k in _SAVEABLE and _v and not getattr(settings, _k, ""):
+            if _k in _SAVEABLE and _k not in settings.model_fields_set:
                 object.__setattr__(settings, _k, _v)
+        # Self-heal the satellite link fields. The systemd unit may pass these as
+        # env vars, and an EMPTY env value (e.g. REMOTE_SERVER_URL= when the URL
+        # was entered later in the web wizard) counts as "set" and would shadow
+        # the saved value, bouncing the device back to setup on every reboot. A
+        # non-empty env var still wins; we only fill a blank live value here.
+        for _k in ("remote_server_url", "upstream_api_key"):
+            if not getattr(settings, _k, "") and _saved.get(_k):
+                object.__setattr__(settings, _k, _saved[_k])
     except Exception:
         pass
 
@@ -319,5 +478,15 @@ if not settings.secret_key:
     object.__setattr__(settings, "secret_key", _secrets.token_hex(32))
     try:
         settings.save({"secret_key": settings.secret_key})
+    except OSError:
+        pass
+
+# Auto-generate a stable device id on first run (used by satellite heartbeat and
+# the server's remotes list). Short hex is plenty: it only needs to be unique
+# among a household's devices, not unguessable.
+if not settings.device_id:
+    object.__setattr__(settings, "device_id", _secrets.token_hex(8))
+    try:
+        settings.save({"device_id": settings.device_id})
     except OSError:
         pass

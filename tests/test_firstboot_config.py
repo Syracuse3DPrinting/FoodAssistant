@@ -40,10 +40,19 @@ def run_firstboot(tmp_path: Path, config: str, extra_env: dict | None = None):
     return proc.returncode, proc.stdout + proc.stderr
 
 
-def test_defaults_only_grocy(tmp_path):
+def test_default_enables_mealie(tmp_path):
+    # A pi_hosted appliance is a full kitchen hub, so a default (non-remote)
+    # install now ships Mealie on and pulls its image during provisioning.
     rc, out = run_firstboot(tmp_path, "HOSTNAME=foodassistant\n")
     assert rc == 0, out
-    # No optional profiles requested -> compose runs with <none>.
+    assert "--profile with-mealie" in out
+    assert "with-ollama" not in out
+
+
+def test_mealie_disabled_runs_grocy_only(tmp_path):
+    # Explicit opt-out drops back to Grocy only (<none> optional profiles).
+    rc, out = run_firstboot(tmp_path, "ENABLE_MEALIE=false\n")
+    assert rc == 0, out
     assert "Compose profiles: <none>" in out
     assert "with-mealie" not in out
     assert "with-ollama" not in out
@@ -66,7 +75,7 @@ def test_both_optional_backends(tmp_path):
 def test_custom_hostname_in_output(tmp_path):
     rc, out = run_firstboot(tmp_path, "HOSTNAME=mypantry\n")
     assert rc == 0, out
-    assert "http://mypantry.local:9284/" in out
+    assert "http://mypantry.local/" in out
     assert "set hostname" in out.lower()
 
 
@@ -111,19 +120,70 @@ def test_kiosk_enabled_with_display(tmp_path):
     assert "Installing Chromium kiosk" in out
 
 
+def test_hide_cursor_auto_no_pointer_hides(tmp_path):
+    # HIDE_CURSOR=auto with no pointer device attached -> hide the cursor.
+    rc, out = run_firstboot(
+        tmp_path,
+        "ENABLE_KIOSK=true\n",
+        extra_env={"FORCE_DISPLAY": "1", "FORCE_POINTER": ""},
+    )
+    assert rc == 0, out
+    assert "HIDE_CURSOR=auto" in out
+    assert "Cursor will be hidden" in out
+
+
+def test_hide_cursor_auto_with_pointer_shows(tmp_path):
+    # HIDE_CURSOR=auto with a pointer device present -> keep the cursor visible.
+    rc, out = run_firstboot(
+        tmp_path,
+        "ENABLE_KIOSK=true\n",
+        extra_env={"FORCE_DISPLAY": "1", "FORCE_POINTER": "1"},
+    )
+    assert rc == 0, out
+    assert "Cursor will be shown" in out
+    assert "Cursor will be hidden" not in out
+
+
+def test_hide_cursor_false_never_hides(tmp_path):
+    # HIDE_CURSOR=false keeps the cursor even with no pointer device.
+    rc, out = run_firstboot(
+        tmp_path,
+        "ENABLE_KIOSK=true\nHIDE_CURSOR=false\n",
+        extra_env={"FORCE_DISPLAY": "1", "FORCE_POINTER": ""},
+    )
+    assert rc == 0, out
+    assert "HIDE_CURSOR=false" in out
+    assert "Cursor will be shown" in out
+
+
+def test_hide_cursor_true_hides_even_with_pointer(tmp_path):
+    # HIDE_CURSOR=true forces hiding even when a mouse is attached.
+    rc, out = run_firstboot(
+        tmp_path,
+        "ENABLE_KIOSK=true\nHIDE_CURSOR=true\n",
+        extra_env={"FORCE_DISPLAY": "1", "FORCE_POINTER": "1"},
+    )
+    assert rc == 0, out
+    assert "HIDE_CURSOR=true" in out
+    assert "Cursor will be hidden" in out
+
+
 def test_remote_mode_skips_docker_and_stack(tmp_path):
     rc, out = run_firstboot(
         tmp_path,
         "DEPLOYMENT_MODE=pi_remote\nREMOTE_SERVER_URL=http://192.168.1.50:9284\n",
     )
     assert rc == 0, out
-    assert "Pi Remote mode: skipping Docker" in out
+    assert "Satellite mode: skipping Docker" in out
     # The heavy steps must not run in remote mode.
     assert "Deploying stack" not in out
     assert "192.168.1.50:9284" in out
 
 
-def test_remote_mode_kiosk_points_at_remote(tmp_path):
+def test_remote_mode_kiosk_points_at_local_app(tmp_path):
+    # A satellite runs the full app locally on port 80 and pulls its backend
+    # config from the main server, so the kiosk shows the LOCAL UI. The app's
+    # setup-redirect handles the unconfigured case.
     rc, out = run_firstboot(
         tmp_path,
         "DEPLOYMENT_MODE=pi_remote\nREMOTE_SERVER_URL=http://server.local:9284\n",
@@ -131,26 +191,30 @@ def test_remote_mode_kiosk_points_at_remote(tmp_path):
     )
     assert rc == 0, out
     assert "Installing Chromium kiosk" in out
-    # Kiosk URL is the remote server, not localhost.
-    assert "server.local:9284/ui/?kiosk=1" in out
-    assert "localhost:9284/ui" not in out
+    # Kiosk URL is the local app on port 80, not the remote server.
+    assert "localhost/ui/?kiosk=1" in out
+    assert "server.local:9284/ui" not in out
 
 
-def test_remote_mode_without_url_warns(tmp_path):
+def test_remote_mode_without_url_instructs_web_ui(tmp_path):
+    # No REMOTE_SERVER_URL: provisioner should succeed and tell the user to
+    # open the web UI to configure the URL (no longer a fatal warning).
     rc, out = run_firstboot(tmp_path, "DEPLOYMENT_MODE=pi_remote\n")
     assert rc == 0, out
-    assert "REMOTE_SERVER_URL is empty" in out
+    assert "configure via web UI" in out or "browser" in out.lower()
 
 
-def test_remote_mode_streamdeck_gets_base_env(tmp_path):
+def test_remote_mode_streamdeck_drives_local_app(tmp_path):
     rc, out = run_firstboot(
         tmp_path,
         "DEPLOYMENT_MODE=pi_remote\nREMOTE_SERVER_URL=http://server.local:9284\n",
         extra_env={"FORCE_STREAMDECK": "1"},
     )
     assert rc == 0, out
-    # The DRY_RUN streamdeck step announces the remote base it will inject.
-    assert "base http://server.local:9284" in out
+    # The satellite's deck drives its own local app on port 80, not the server.
+    assert "base http://localhost:80" in out
+    # The deck base must not be the remote server.
+    assert "base http://server.local:9284" not in out
 
 
 def test_hosted_mode_still_deploys_stack(tmp_path):
@@ -158,6 +222,62 @@ def test_hosted_mode_still_deploys_stack(tmp_path):
     assert rc == 0, out
     assert "Deploying stack" in out
     assert "Pi Remote mode" not in out
+
+
+def test_hosted_mode_configures_port80_redirect(tmp_path):
+    # pi_hosted should set up the iptables 80 -> 9284 redirect so the UI is
+    # reachable on port 80.
+    rc, out = run_firstboot(tmp_path, "DEPLOYMENT_MODE=pi_hosted\n")
+    assert rc == 0, out
+    assert "PREROUTING 80->9284" in out
+    assert "9284" in out
+
+
+def test_hosted_mode_port80_persistence_invoked(tmp_path):
+    # The redirect must survive reboot: a systemd unit re-applies it on boot and
+    # iptables-persistent is used as a secondary save. Both must be referenced.
+    rc, out = run_firstboot(tmp_path, "DEPLOYMENT_MODE=pi_hosted\n")
+    assert rc == 0, out
+    assert "foodassistant-port80.service" in out
+    assert "re-apply the redirect on every boot" in out
+    assert "iptables-persistent" in out
+
+
+def test_hosted_mode_configures_mdns_avahi(tmp_path):
+    # pi_hosted should install/enable avahi so <hostname>.local resolves.
+    rc, out = run_firstboot(tmp_path, "DEPLOYMENT_MODE=pi_hosted\n")
+    assert rc == 0, out
+    assert "avahi-daemon" in out
+    assert "enable --now avahi-daemon" in out
+    assert ".local should resolve" in out
+
+
+def test_hosted_mode_mdns_notes_windows_bonjour(tmp_path):
+    # A note about Windows needing Bonjour helps users who cannot resolve .local.
+    rc, out = run_firstboot(tmp_path, "DEPLOYMENT_MODE=pi_hosted\n")
+    assert rc == 0, out
+    assert "Bonjour" in out
+
+
+def test_remote_mode_does_not_redirect_port80(tmp_path):
+    # The satellite binds uvicorn directly on port 80; it must NOT run the
+    # iptables redirect step (no PREROUTING 80->9284 hijack).
+    rc, out = run_firstboot(
+        tmp_path,
+        "DEPLOYMENT_MODE=pi_remote\nREMOTE_SERVER_URL=http://server.local:9284\n",
+    )
+    assert rc == 0, out
+    assert "PREROUTING 80->9284" not in out
+    assert "foodassistant-port80.service" not in out
+
+
+def test_default_mode_runs_port80_step(tmp_path):
+    # A plain (non-remote) deployment with no explicit mode still runs the
+    # port80 redirect step (same hosted path).
+    rc, out = run_firstboot(tmp_path, "HOSTNAME=foodassistant\n")
+    assert rc == 0, out
+    assert "PREROUTING 80->9284" in out
+    assert "foodassistant-port80.service" in out
 
 
 def test_mode_read_from_settings_json(tmp_path):
@@ -169,7 +289,7 @@ def test_mode_read_from_settings_json(tmp_path):
         extra_env={"SETTINGS_JSON": str(sf)},
     )
     assert rc == 0, out
-    assert "Pi Remote mode: skipping Docker" in out
+    assert "Satellite mode: skipping Docker" in out
     assert "from-json:9284" in out
 
 
@@ -242,23 +362,23 @@ def test_missing_config_uses_defaults(tmp_path):
     assert proc.returncode == 0, proc.stdout + proc.stderr
     out = proc.stdout + proc.stderr
     assert "No config file found" in out
-    assert "http://foodassistant.local:9284/" in out
+    assert "http://foodassistant.local/" in out
 
 
-def test_display_rotation_zero_skips(tmp_path):
-    # DISPLAY_ROTATION=0 should do nothing.
+def test_display_rotation_zero_normal(tmp_path):
+    # DISPLAY_ROTATION=0 maps to the compositor "normal" transform.
     rc, out = run_firstboot(tmp_path, "DISPLAY_ROTATION=0\n",
                             extra_env={"STEPS": "rotation"})
     assert rc == 0, out
-    assert "rotation is 0" in out
+    assert "WLR_OUTPUT_TRANSFORM=normal" in out
 
 
 def test_display_rotation_180_dry_run(tmp_path):
-    # DISPLAY_ROTATION=180 should log the DRY_RUN intent.
+    # DISPLAY_ROTATION=180 sets the compositor transform in the kiosk env file.
     rc, out = run_firstboot(tmp_path, "DISPLAY_ROTATION=180\n",
                             extra_env={"STEPS": "rotation"})
     assert rc == 0, out
-    assert "video=HDMI-A-1:rotate=180" in out or "cmdline.txt not found" in out
+    assert "WLR_OUTPUT_TRANSFORM=180" in out
 
 
 def test_display_rotation_invalid_warns(tmp_path):

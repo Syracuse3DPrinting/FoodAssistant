@@ -28,6 +28,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if "--dump-actions" in sys.argv:
+        import json
+        from .actions import catalog
+        print(json.dumps(catalog()))
+        return 0
     args = _parse_args(argv if argv is not None else sys.argv[1:])
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,

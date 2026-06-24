@@ -235,11 +235,74 @@ def test_commit_action_handles_failure():
     assert "failed" in msg
 
 
-def test_status_press_triggers_refresh():
-    ctx, refreshed = _ctx(_FakeClient())
-    msg = asyncio.run(actions.run_action(actions.ACTIONS["pending"], ctx))
+def _ctx_recording(navigate_result=True):
+    """Context that records navigate paths and refresh count.
+
+    Returns (ctx, navigated, refreshed) where navigated is a list of the paths
+    passed to navigate() and refreshed["n"] counts refresh() calls.
+    """
+    navigated = []
+    refreshed = {"n": 0}
+
+    async def refresh():
+        refreshed["n"] += 1
+
+    async def navigate(path):
+        navigated.append(path)
+        return navigate_result
+
+    ctx = actions.ActionContext(
+        client=_FakeClient(),
+        base_url="http://x",
+        refresh=refresh,
+        navigate=navigate,
+        cycle_brightness=lambda: 80,
+        page_next=lambda: None,
+        page_prev=lambda: None,
+    )
+    return ctx, navigated, refreshed
+
+
+def test_status_press_without_target_only_refreshes():
+    # A status spec with no target_path keeps the old refresh-only behavior and
+    # never touches the kiosk display.
+    spec = actions.ActionSpec(
+        name="bare", label="Bare", color="#000", kind="status",
+        status_field="pending",
+    )
+    ctx, navigated, refreshed = _ctx_recording()
+    msg = asyncio.run(actions.run_action(spec, ctx))
     assert msg == "refreshed"
     assert refreshed["n"] == 1
+    assert navigated == []
+
+
+def test_expiring_status_press_navigates_and_refreshes():
+    # Pressing the expiring status key deep-links the kiosk to the expiring
+    # list AND re-polls the counts.
+    ctx, navigated, refreshed = _ctx_recording()
+    msg = asyncio.run(actions.run_action(actions.ACTIONS["expiring"], ctx))
+    assert navigated == ["ui/expiring"]
+    assert refreshed["n"] == 1
+    assert msg == "opened"
+
+
+def test_pending_status_press_navigates_to_pending_view():
+    ctx, navigated, refreshed = _ctx_recording()
+    msg = asyncio.run(actions.run_action(actions.ACTIONS["pending"], ctx))
+    assert navigated == ["ui/pending"]
+    assert refreshed["n"] == 1
+    assert msg == "opened"
+
+
+def test_status_press_with_no_display_still_refreshes():
+    # When no kiosk display is attached, navigate returns False. The press must
+    # still refresh and report "refreshed" rather than raise.
+    ctx, navigated, refreshed = _ctx_recording(navigate_result=False)
+    msg = asyncio.run(actions.run_action(actions.ACTIONS["expiring"], ctx))
+    assert navigated == ["ui/expiring"]
+    assert refreshed["n"] == 1
+    assert msg == "refreshed"
 
 
 def test_brightness_action_returns_percent():
@@ -300,6 +363,95 @@ def test_density_factor_clamped_and_inverse():
     assert render._density_factor(96, 96) == 1.0
 
 
+# -- action -> icon mapping ------------------------------------------------
+
+
+def test_every_real_action_has_an_icon_glyph():
+    # Every bindable action (everything the web grid offers except the "blank"
+    # placeholder) must map to a Bootstrap Icons glyph name.
+    for name in actions.ACTIONS:
+        glyph = actions.icon_for(name)
+        assert glyph, f"action {name} has no icon mapping"
+
+
+def test_action_specs_carry_their_icon():
+    # The glyph stamped onto each ActionSpec must match the source-of-truth map.
+    for name, spec in actions.ACTIONS.items():
+        assert spec.icon == actions.ACTION_ICONS[name]
+
+
+def test_known_action_icons_match_web_ui():
+    # Spot-check the glyphs the web UI uses for the same action so the deck and
+    # the browser stay in sync (navigation.py + pending.html commit button).
+    assert actions.icon_for("inventory") == "grid"
+    assert actions.icon_for("expiring") == "clock-history"
+    assert actions.icon_for("add") == "plus-circle"
+    assert actions.icon_for("pending") == "hourglass-split"
+    assert actions.icon_for("cook") == "lightbulb"
+    assert actions.icon_for("commit") == "cloud-upload"
+    assert actions.icon_for("shopping") == "cart"
+    assert actions.icon_for("defaults") == "table"
+
+
+def test_catalog_exposes_icons():
+    cat = {a["name"]: a for a in actions.catalog()}
+    assert cat["commit"]["icon"] == "cloud-upload"
+    # The blank placeholder is not an action and carries no glyph.
+    assert cat["blank"].get("icon", "") == ""
+
+
+def test_every_action_glyph_resolves_to_a_codepoint():
+    # If the font map is vendored, every action glyph must resolve to a real
+    # codepoint. When the map is absent (font not yet dropped in), skip rather
+    # than fail, since the renderer degrades to text-only by design.
+    if not render._icon_codepoints():
+        pytest.skip("bootstrap-icons.json not vendored")
+    for name in actions.ACTIONS:
+        glyph = actions.icon_for(name)
+        assert render._icon_char(glyph) is not None, f"{name}:{glyph} unresolved"
+
+
+def test_icon_char_accepts_bi_prefix():
+    if not render._icon_codepoints():
+        pytest.skip("bootstrap-icons.json not vendored")
+    assert render._icon_char("bi-cart") == render._icon_char("cart")
+
+
+def test_icon_char_unknown_is_none():
+    assert render._icon_char("definitely-not-a-real-glyph-xyz") is None
+    assert render._icon_char("") is None
+
+
+# -- icon rendering --------------------------------------------------------
+
+
+def test_render_key_with_icon_size_and_mode():
+    img = render.render_key(96, 96, label="Cook", color="#7e22ce", icon="lightbulb")
+    assert img.size == (96, 96)
+    assert img.mode == "RGB"
+
+
+def test_render_key_with_missing_glyph_falls_back_to_text():
+    # An unknown glyph must not raise; it renders the same as a text-only key.
+    plain = render.render_key(96, 96, label="Cook", color="#7e22ce")
+    missing = render.render_key(
+        96, 96, label="Cook", color="#7e22ce", icon="no-such-glyph"
+    )
+    assert missing.size == plain.size == (96, 96)
+    assert missing.tobytes() == plain.tobytes()
+
+
+def test_status_key_ignores_icon_and_keeps_count_layout():
+    # Status keys keep their count-dominant layout regardless of an icon arg.
+    with_icon = render.render_key(
+        96, 96, label="Pending", color="#1d4ed8", count=3, icon="hourglass-split"
+    )
+    without = render.render_key(
+        96, 96, label="Pending", color="#1d4ed8", count=3
+    )
+    assert with_icon.tobytes() == without.tobytes()
+
+
 # -- rotation config -------------------------------------------------------
 
 
@@ -323,6 +475,24 @@ def test_rotation_rejects_bad_value(tmp_path):
 # -- rotation index remap --------------------------------------------------
 
 
+def test_display_dims_unrotated():
+    assert layout.display_dims(15, 0) == (5, 3)
+    assert layout.display_dims(32, 0) == (8, 4)
+    assert layout.display_dims(32, 180) == (8, 4)
+
+
+def test_display_dims_rotated_90():
+    # 90 and 270 swap cols/rows so the editor matches the physical orientation.
+    assert layout.display_dims(32, 90) == (4, 8)
+    assert layout.display_dims(32, 270) == (4, 8)
+    assert layout.display_dims(15, 90) == (3, 5)
+
+
+def test_rotated_index_zero_is_identity():
+    for i in range(32):
+        assert layout.rotated_index(i, 32, 0) == i
+
+
 def test_rotated_index_180_reverses_grid():
     # 15-key deck (5x3): top-left (0) maps to bottom-right (14) and back.
     assert layout.rotated_index(0, 15, 180) == 14
@@ -332,13 +502,36 @@ def test_rotated_index_180_reverses_grid():
         assert layout.rotated_index(layout.rotated_index(i, 15, 180), 15, 180) == i
 
 
-def test_rotated_index_zero_is_identity():
-    for i in range(32):
-        assert layout.rotated_index(i, 32, 0) == i
-
-
 def test_rotated_index_unknown_size_passthrough():
     assert layout.rotated_index(3, 7, 180) == 3
+
+
+def test_slot_for_physical_inverts_rotated_index():
+    # For every rotation and every known deck size, slot_for_physical must be
+    # the exact inverse of rotated_index across all valid slots.
+    for key_count in (6, 15, 32):
+        for rotation in (0, 90, 180, 270):
+            d_cols, d_rows = layout.display_dims(key_count, rotation)
+            total = d_cols * d_rows
+            for slot in range(total):
+                phys = layout.rotated_index(slot, key_count, rotation)
+                assert layout.slot_for_physical(phys, key_count, rotation) == slot, (
+                    f"round-trip failed: key_count={key_count} rotation={rotation} slot={slot} phys={phys}"
+                )
+
+
+def test_rotated_index_90_xl_top_left():
+    # XL (8x4) rotated 90 CW: visual slot 0 (top-left of the portrait grid)
+    # must land on a valid physical key and round-trip exactly.
+    phys = layout.rotated_index(0, 32, 90)
+    assert 0 <= phys < 32
+    assert layout.slot_for_physical(phys, 32, 90) == 0
+
+
+def test_rotated_index_270_xl_bijection():
+    # 270 must also be a bijection over all 32 keys (no two slots map same phys).
+    physicals = [layout.rotated_index(i, 32, 270) for i in range(32)]
+    assert len(set(physicals)) == 32, "rotated_index(270) is not injective"
 
 
 # -- timer widget ----------------------------------------------------------
@@ -351,31 +544,50 @@ def test_timer_idle_shows_base_label():
     assert not t.alerting
 
 
-def test_timer_press_cycles_presets():
+def test_timer_short_press_starts_at_one_minute():
     t = actions.TimerState()
-    t.press()  # -> 5 min
+    t.short_press()
     assert t.is_running()
-    assert t.remaining_seconds() > 0
+    assert t._minutes == 1
+    assert t.remaining_seconds() > 55
 
 
-def test_timer_press_through_all_resets_to_idle():
+def test_timer_rapid_presses_accumulate():
     t = actions.TimerState()
-    for _ in range(len(actions.TIMER_PRESETS) + 1):
-        t.press()
+    t.short_press()  # 1 min
+    t.short_press()  # 2 min
+    t.short_press()  # 3 min
+    assert t._minutes == 3
+    assert t.is_running()
+
+
+def test_timer_press_alias_works():
+    t = actions.TimerState()
+    t.press()  # same as short_press
+    assert t._minutes == 1
+    assert t.is_running()
+
+
+def test_timer_long_press_resets_to_idle():
+    t = actions.TimerState()
+    t.short_press()
+    assert t.is_running()
+    t.long_press()
     assert not t.is_running()
+    assert t._minutes == 0
     assert t.label("T") == "T"
 
 
 def test_timer_label_shows_countdown():
     t = actions.TimerState()
-    t.press()  # 5 min
+    t.short_press()  # 1 min
     label = t.label("Timer")
     assert ":" in label  # MM:SS format
 
 
 def test_timer_alerting_on_expiry():
     t = actions.TimerState()
-    t.press()
+    t.short_press()
     # Force expiry by backdating the deadline
     t._deadline = t._deadline - 400
     expired = t.tick()
@@ -384,15 +596,61 @@ def test_timer_alerting_on_expiry():
     assert t.label("T") == "Done!"
 
 
-def test_timer_dismiss_alert():
+def test_timer_dismiss_alert_via_short_press():
     t = actions.TimerState()
-    t.press()
+    t.short_press()
     t._deadline = t._deadline - 400
     t.tick()
     assert t.alerting
-    t.press()  # dismiss
+    t.short_press()  # dismiss
     assert not t.alerting
     assert t.label("T") == "T"
+
+
+def test_timer_long_press_dismisses_alert():
+    t = actions.TimerState()
+    t.short_press()
+    t._deadline = t._deadline - 400
+    t.tick()
+    assert t.alerting
+    t.long_press()
+    assert not t.alerting
+    assert t._minutes == 0
+
+
+def test_timer_alert_blinks_bright_and_dim_by_phase():
+    t = actions.TimerState()
+    t.short_press()
+    t._deadline = t._deadline - 400
+    t.tick()
+    assert t.alerting
+    bright = t.alert_color(0)
+    dim = t.alert_color(1)
+    assert bright != dim
+    # Even phases are bright, odd phases are dim, so the key alternates.
+    assert t.alert_color(2) == bright
+    assert t.alert_color(3) == dim
+    assert t.alert_color(4) == bright
+
+
+def test_timer_color_uses_blink_phase_while_alerting():
+    t = actions.TimerState()
+    t.short_press()
+    t._deadline = t._deadline - 400
+    t.tick()
+    assert t.color("#000000", blink_phase=0) == t.alert_color(0)
+    assert t.color("#000000", blink_phase=1) == t.alert_color(1)
+    assert t.color("#000000", blink_phase=0) != t.color("#000000", blink_phase=1)
+
+
+def test_timer_color_ignores_blink_phase_when_not_alerting():
+    t = actions.TimerState()
+    # Idle: phase must never change the resting colour.
+    assert t.color("#123456", blink_phase=0) == "#123456"
+    assert t.color("#123456", blink_phase=1) == "#123456"
+    # Running: countdown colour is phase-independent.
+    t.short_press()
+    assert t.color("#123456", blink_phase=0) == t.color("#123456", blink_phase=1)
 
 
 def test_timer_action_registered():
@@ -404,8 +662,9 @@ def test_timer_action_registered():
 def test_timer_press_via_action_context():
     pressed = {}
 
-    def fake_timer_press(name):
+    def fake_timer_press(name, long_press=False):
         pressed["name"] = name
+        pressed["long"] = long_press
 
     ctx = actions.ActionContext(
         client=None,
@@ -419,6 +678,29 @@ def test_timer_press_via_action_context():
     )
     asyncio.run(actions.run_action(actions.ACTIONS["timer_1"], ctx))
     assert pressed.get("name") == "timer_1"
+    assert pressed.get("long") is False
+
+
+def test_timer_long_press_via_action_context():
+    pressed = {}
+
+    def fake_timer_press(name, long_press=False):
+        pressed["name"] = name
+        pressed["long"] = long_press
+
+    ctx = actions.ActionContext(
+        client=None,
+        base_url="http://x",
+        refresh=lambda: None,
+        navigate=lambda _: None,
+        cycle_brightness=lambda: 80,
+        page_next=lambda: None,
+        page_prev=lambda: None,
+        timer_press=fake_timer_press,
+    )
+    asyncio.run(actions.run_action(actions.ACTIONS["timer_1"], ctx, long_press=True))
+    assert pressed.get("name") == "timer_1"
+    assert pressed.get("long") is True
 
 
 # -- weather widget ---------------------------------------------------------
@@ -559,6 +841,188 @@ def test_ha_run_action_unconfigured():
     assert "not configured" in msg
 
 
+# -- PIN keypad ------------------------------------------------------------
+
+
+def test_pin_buffer_accumulates_digits():
+    b = actions.PinBuffer()
+    assert b.is_empty()
+    for ch in "1234":
+        b.digit(ch)
+    assert b.length() == 4
+    assert b.value == "1234"
+    assert not b.is_empty()
+
+
+def test_pin_buffer_masks_and_never_shows_digits():
+    b = actions.PinBuffer()
+    for ch in "9173":
+        b.digit(ch)
+    masked = b.masked()
+    assert len(masked) == 4
+    # The mask must not leak any actual digit.
+    assert not any(c.isdigit() for c in masked)
+
+
+def test_pin_buffer_backspace_and_clear():
+    b = actions.PinBuffer()
+    for ch in "555":
+        b.digit(ch)
+    b.backspace()
+    assert b.value == "55"
+    b.clear()
+    assert b.is_empty()
+    assert b.value == ""
+    # Backspace on an empty buffer is a no-op, not an error.
+    b.backspace()
+    assert b.is_empty()
+
+
+def test_pin_buffer_ignores_non_digits_and_overflow():
+    b = actions.PinBuffer(max_len=3)
+    b.digit("a")     # not a digit
+    b.digit("12")    # not a single char
+    assert b.is_empty()
+    for ch in "12345":
+        b.digit(ch)  # caps at max_len
+    assert b.length() == 3
+    assert b.value == "123"
+
+
+def test_pin_action_registered():
+    assert "pin" in actions.ACTIONS
+    assert actions.ACTIONS["pin"].kind == "pin"
+
+
+def test_keypad_specs_cover_digits_and_controls():
+    specs = actions.keypad_specs()
+    for d in "0123456789":
+        assert specs[f"keypad_{d}"].keypad_key == d
+        assert specs[f"keypad_{d}"].kind == "keypad"
+    for ctl in (actions.KEYPAD_CLEAR, actions.KEYPAD_ENTER, actions.KEYPAD_CANCEL):
+        assert specs[f"keypad_{ctl}"].keypad_key == ctl
+
+
+def test_pin_action_enters_keypad_via_context():
+    entered = {"n": 0}
+
+    async def noop():
+        pass
+
+    ctx = actions.ActionContext(
+        client=None,
+        base_url="http://x",
+        refresh=noop,
+        navigate=lambda _: noop(),
+        cycle_brightness=lambda: 80,
+        page_next=lambda: None,
+        page_prev=lambda: None,
+        keypad_enter=lambda: entered.__setitem__("n", entered["n"] + 1),
+    )
+    msg = asyncio.run(actions.run_action(actions.ACTIONS["pin"], ctx))
+    assert msg == "keypad"
+    assert entered["n"] == 1
+
+
+def test_keypad_press_dispatched_via_context():
+    pressed = []
+
+    async def fake_keypad_press(key):
+        pressed.append(key)
+
+    async def noop():
+        pass
+
+    ctx = actions.ActionContext(
+        client=None,
+        base_url="http://x",
+        refresh=noop,
+        navigate=lambda _: noop(),
+        cycle_brightness=lambda: 80,
+        page_next=lambda: None,
+        page_prev=lambda: None,
+        keypad_press=fake_keypad_press,
+    )
+    spec = actions.keypad_specs()["keypad_7"]
+    msg = asyncio.run(actions.run_action(spec, ctx))
+    assert msg == "keypad 7"
+    assert pressed == ["7"]
+
+
+def test_submit_pin_success():
+    client = _FakeClient(post_map={"/ui/login": _Resp(303, {})})
+    ok = asyncio.run(actions.submit_pin(client, "http://x", "1234"))
+    assert ok is True
+    assert client.calls == [("POST", "http://x/ui/login")]
+
+
+def test_submit_pin_failure_on_401():
+    client = _FakeClient(post_map={"/ui/login": _Resp(401, {})})
+    ok = asyncio.run(actions.submit_pin(client, "http://x", "0000"))
+    assert ok is False
+
+
+def test_submit_pin_tolerates_errors():
+    class Boom:
+        async def post(self, *a, **k):
+            raise RuntimeError("network down")
+
+    ok = asyncio.run(actions.submit_pin(Boom(), "http://x", "1234"))
+    assert ok is False
+
+
+# -- keypad layout ---------------------------------------------------------
+
+
+def test_keypad_pages_cover_all_keys_across_pages():
+    for key_count in layout.supported_key_counts():
+        pages = layout.build_keypad_pages(key_count)
+        assert pages
+        for page in pages:
+            assert len(page) == key_count
+        # Gather every keypad key across all pages: the full pad must be present
+        # somewhere, even on a deck that has to paginate.
+        keys = {
+            s.keypad_key
+            for page in pages
+            for s in page
+            if s is not None and s.kind == "keypad"
+        }
+        for d in "0123456789":
+            assert d in keys
+        assert actions.KEYPAD_CLEAR in keys
+        assert actions.KEYPAD_ENTER in keys
+        assert actions.KEYPAD_CANCEL in keys
+
+
+def test_keypad_single_page_when_it_fits():
+    # The 15-key Original holds the whole pad on one page.
+    assert len(layout.build_keypad_pages(15)) == 1
+    assert len(layout.build_keypad_pages(32)) == 1
+
+
+def test_keypad_paginates_on_mini():
+    # The 6-key Mini cannot fit the 13-key pad, so it spills onto more pages,
+    # each ending in a wrapping page-cycle key.
+    pages = layout.build_keypad_pages(6)
+    assert len(pages) > 1
+    for page in pages:
+        assert page[-1].name == "page_next"
+
+
+def test_keypad_pages_reject_bad_size():
+    with pytest.raises(ValueError):
+        layout.build_keypad_pages(0)
+
+
+def test_keypad_xl_phone_block():
+    # On the XL (8x4) the first three digits sit in the top-left row.
+    page = layout.build_keypad_pages(32)[0]
+    assert page[0].keypad_key == "1"
+    assert page[1].keypad_key == "2"
+    assert page[2].keypad_key == "3"
+
+
 def test_ha_run_action_calls_service():
     import json
     calls = []
@@ -611,3 +1075,148 @@ def test_ha_run_action_calls_service():
     assert calls, "should have POSTed to HA"
     assert "light/toggle" in calls[0]["url"]
     assert refreshed, "ha_entity_refresh should have been called"
+
+
+# -- idle blank ----------------------------------------------------------------
+
+
+class _FakeDeck:
+    """Minimal stand-in for a StreamDeck device used in idle-blank tests."""
+
+    def __init__(self, key_count=15):
+        self._key_count = key_count
+        self.brightness_calls: list[int] = []
+        self.reset_calls: int = 0
+        self._callback = None
+
+    def key_count(self) -> int:
+        return self._key_count
+
+    def key_image_format(self) -> dict:
+        return {"size": (72, 72)}
+
+    def deck_type(self) -> str:
+        return "FakeDeck"
+
+    def open(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    def set_brightness(self, pct: int) -> None:
+        self.brightness_calls.append(pct)
+
+    def reset(self) -> None:
+        self.reset_calls += 1
+
+    def set_key_callback(self, cb) -> None:
+        self._callback = cb
+
+    def set_key_image(self, key, image) -> None:
+        pass
+
+    def press(self, key: int) -> None:
+        """Simulate a key press+release pair."""
+        if self._callback:
+            self._callback(self, key, True)
+            self._callback(self, key, False)
+
+    def press_down(self, key: int) -> None:
+        """Simulate only the press event (key held down)."""
+        if self._callback:
+            self._callback(self, key, True)
+
+    def release(self, key: int) -> None:
+        """Simulate only the release event."""
+        if self._callback:
+            self._callback(self, key, False)
+
+
+def _make_controller(idle_timeout_minutes: int = 0):
+    """Build a Controller backed by a fake deck with no real hardware."""
+    from foodassistant_streamdeck.controller import Controller
+
+    cfg = config.Config(idle_timeout_minutes=idle_timeout_minutes).validated()
+    deck = _FakeDeck()
+    ctrl = Controller(deck, cfg)
+    # Give the controller a minimal event loop reference so _on_key can schedule.
+    loop = asyncio.new_event_loop()
+    ctrl.loop = loop
+    # Wire up the key callback as run() would do.
+    deck.set_key_callback(ctrl._on_key)
+    # Stub _draw_page to avoid importing the real StreamDeck library.
+    ctrl._draw_page = lambda: None
+    return ctrl, deck, loop
+
+
+def test_key_press_updates_last_activity():
+    import time as _time
+    ctrl, deck, loop = _make_controller()
+    before = ctrl._last_activity
+    _time.sleep(0.02)
+    deck.press_down(0)
+    assert ctrl._last_activity > before
+    loop.close()
+
+
+def test_idle_blanks_deck_after_timeout():
+    import time as _time
+    ctrl, deck, loop = _make_controller(idle_timeout_minutes=1)
+    # Wind the clock back so the controller looks idle.
+    ctrl._last_activity = _time.monotonic() - 70
+    loop.run_until_complete(ctrl._idle_loop_once())
+    assert ctrl._idle_blanked
+    assert deck.reset_calls >= 1
+    assert 0 in deck.brightness_calls
+    loop.close()
+
+
+def test_idle_loop_does_not_blank_when_timeout_zero():
+    import time as _time
+    ctrl, deck, loop = _make_controller(idle_timeout_minutes=0)
+    ctrl._last_activity = _time.monotonic() - 3600
+    loop.run_until_complete(ctrl._idle_loop_once())
+    assert not ctrl._idle_blanked
+    assert deck.reset_calls == 0
+    loop.close()
+
+
+def test_wake_on_key_press_when_blanked():
+    ctrl, deck, loop = _make_controller(idle_timeout_minutes=1)
+    # Force blanked state.
+    ctrl._idle_blanked = True
+    # Press down a key -- should record the key as a wake key.
+    deck.press_down(0)
+    assert 0 in ctrl._wake_keys
+    # Drain any pending coroutines scheduled by run_coroutine_threadsafe.
+    loop.run_until_complete(asyncio.sleep(0))
+    loop.close()
+
+
+def test_wake_key_release_does_not_trigger_action():
+    ctrl, deck, loop = _make_controller(idle_timeout_minutes=1)
+    ctrl._idle_blanked = True
+    handled = []
+
+    async def fake_handle(spec, long_press=False):
+        handled.append(spec)
+
+    ctrl._handle = fake_handle
+    # Press down while blanked: key lands in _wake_keys.
+    deck.press_down(0)
+    # Clear the blanked flag (as _wake_from_idle would do) so release can run.
+    ctrl._idle_blanked = False
+    # Release: action must be swallowed because the key is in _wake_keys.
+    deck.release(0)
+    loop.run_until_complete(asyncio.sleep(0))
+    assert handled == [], "action must not fire on a wake press"
+    loop.close()
+
+
+def test_wake_restores_page_and_clears_blank_flag():
+    ctrl, deck, loop = _make_controller(idle_timeout_minutes=1)
+    ctrl._idle_blanked = True
+    loop.run_until_complete(ctrl._wake_from_idle())
+    assert not ctrl._idle_blanked
+    loop.close()

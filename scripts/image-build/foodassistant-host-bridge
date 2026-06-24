@@ -10,39 +10,119 @@ as Wi-Fi, hostname, display KMS rotation, and service restarts.
 
 Endpoints
 ---------
-GET  /wifi/status          current Wi-Fi SSID (from nmcli)
+GET  /wifi/status          current Wi-Fi state + SSID (from nmcli)
+GET  /wifi/scan            list visible networks {ssid, signal, security}
 POST /wifi/connect         connect to a network  {ssid, password?}
 GET  /hostname             current hostname
 POST /hostname             change hostname       {hostname}
 GET  /display/rotation     current KMS rotation (from /boot/firmware/config.txt)
 POST /display/rotation     set KMS rotation      {degrees, reboot?}
 POST /streamdeck/restart   restart Stream Deck service
-GET  /mealie/status        whether the Mealie container is running
-POST /mealie/start         start Mealie via docker compose --profile with-mealie up -d
+GET  /streamdeck/actions     list assignable deck actions (for the web editor)
+POST /kiosk/restart        restart the kiosk browser (apply scale/rotation)
+GET  /mealie/status        Mealie state: not-installed / starting / running
+POST /mealie/start         start Mealie in the background (docker compose --profile with-mealie up -d)
+GET  /logs/<name>          tail of an install/start log (name in mealie/kiosk/streamdeck)
 GET  /hardware/status      display/Stream Deck presence + service/install state
 POST /kiosk/install        provision the kiosk service (display attached later)
 POST /streamdeck/install   provision the Stream Deck service (attached later)
+GET  /ap/status            whether the fallback AP is active {active: bool}
+POST /ap/disable           stop hostapd+dnsmasq and remove the AP flag file
 """
 import http.server
 import json
 import os
+from pathlib import Path
 import re
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 
 LISTEN_HOST = "127.0.0.1"
 LISTEN_PORT = 9299
 INSTALL_DIR = "/opt/foodassistant"
+# Mealie serves on this host port (mapped from the container's 9000 in the
+# appliance compose file). Used for the readiness probe below.
+MEALIE_PORT = 9285
+# Flag file written by the AP watchdog service when the fallback hotspot is
+# active. Checked by GET /ap/status and removed by POST /ap/disable.
+_AP_FLAG = "/run/foodassistant-ap-active"
 
 # Candidate locations for the provisioner script (curl-installer clone first,
 # then a baked-image asset dir, then the legacy home-dir clone).
 _FIRSTBOOT_CANDIDATES = [
-    "/opt/foodassistant-src/scripts/image-build/firstboot.sh",
-    "/opt/foodassistant-setup/firstboot.sh",
+    "/boot/firmware/firstboot.sh",
     "/home/foodassistant/FoodAssistant/scripts/image-build/firstboot.sh",
+    "/opt/foodassistant-src/scripts/image-build/firstboot.sh",
 ]
-# Background provisioning processes, keyed by step name ("kiosk"/"streamdeck").
+# Background long-running processes, keyed by step name
+# ("kiosk"/"streamdeck" installs, "mealie" start). Each value is a Popen whose
+# poll() tells us whether the work is still in flight.
 _INSTALL_PROCS = {}
+
+# Log files the background steps stream their stdout/stderr into. The setup UI
+# tails these (via GET /logs/<name>) to show live install/start output. The
+# Mealie start writes the first path; the kiosk/streamdeck installs use the
+# foodassistant-<name>-install.log pattern that _provision() opens.
+_LOG_PATHS = {
+    "mealie": "/var/log/foodassistant-mealie-start.log",
+    "kiosk": "/var/log/foodassistant-kiosk-install.log",
+    "streamdeck": "/var/log/foodassistant-streamdeck-install.log",
+}
+
+# Cap the bytes we read off the tail of a log so a long-running install cannot
+# return a multi-megabyte body to the polling UI.
+_LOG_TAIL_BYTES = 8192
+
+
+def _tail_log(name, max_bytes=_LOG_TAIL_BYTES):
+    """Return the last max_bytes of the named log as a list of lines.
+
+    Safe by design: an unknown name, a missing file, or any read error yields
+    an empty list rather than raising, so the polling endpoint never 500s just
+    because a step has not created its log yet.
+    """
+    path = _LOG_PATHS.get(name)
+    if not path:
+        return []
+    try:
+        with open(path, "rb") as f:
+            try:
+                f.seek(0, os.SEEK_END)
+                size = f.tell()
+                f.seek(max(0, size - max_bytes))
+            except OSError:
+                # Not seekable for some reason; fall back to a plain read.
+                f.seek(0)
+            data = f.read()
+        text = data.decode("utf-8", "replace")
+        # Drop a leading partial line when we seeked into the middle of one.
+        if len(data) >= max_bytes and "\n" in text:
+            text = text.split("\n", 1)[1]
+        return [ln for ln in text.splitlines() if ln.strip()]
+    except OSError:
+        return []
+    except Exception:
+        return []
+
+
+def _http_serving(url, timeout=3):
+    """True when a GET to url gets any HTTP response (server is up).
+
+    A redirect or even a 4xx still means the web server answered, so anything
+    short of a connection failure or a 5xx counts as serving. Used to tell a
+    container that is merely created apart from one that is actually ready.
+    """
+    try:
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status < 500
+    except urllib.error.HTTPError:
+        # The server answered with an error status; it is up.
+        return True
+    except Exception:
+        return False
 
 
 def _find_firstboot():
@@ -58,6 +138,22 @@ def _find_firstboot():
     return None, None
 
 
+def _compose_env():
+    """Environment for `docker compose` runs from INSTALL_DIR.
+
+    The appliance compose file resolves the service build context from
+    ${REPO_DIR}; firstboot.sh exports it before every compose call. The bridge
+    process does not inherit that export, so derive it the same way (from the
+    provisioner location, falling back to the compose file's own default) to
+    keep the build context valid if compose ever needs to build `service`.
+    """
+    env = dict(os.environ)
+    if not env.get("REPO_DIR"):
+        _, repo_dir = _find_firstboot()
+        env["REPO_DIR"] = repo_dir or "/home/foodassistant/FoodAssistant"
+    return env
+
+
 def _service_active(unit):
     """True when the given systemd unit is active."""
     try:
@@ -70,6 +166,72 @@ def _service_active(unit):
 
 def _display_present():
     return os.path.exists("/dev/dri/card0")
+
+
+# Stream Deck / display detection from sysfs
+# ------------------------------------------
+# These read sysfs directly (no lsusb, no extra packages) so the appliance can
+# report attached hardware on a minimal image. They take the sysfs root as an
+# argument so they are testable against a faked layout under tmp_path.
+
+# Elgato (Stream Deck maker) USB vendor id.
+_STREAMDECK_VENDOR = "0fd9"
+
+
+def _read_sysfs(path):
+    """Return the stripped contents of a sysfs file, or "" on any error."""
+    try:
+        with open(path) as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+    except Exception:
+        return ""
+
+
+def _drm_connected(root="/sys/class/drm"):
+    """Return the list of connected DRM connector names under root.
+
+    Scans <root>/*/status; a connector counts as connected when its status
+    file reads "connected" (the kernel also emits "disconnected", which must
+    not match). A missing root yields an empty list rather than raising.
+    """
+    import glob
+    names = []
+    for status_path in sorted(glob.glob(os.path.join(root, "*", "status"))):
+        if _read_sysfs(status_path) == "connected":
+            names.append(os.path.basename(os.path.dirname(status_path)))
+    return names
+
+
+def _streamdeck_info(usb_root="/sys/bus/usb/devices"):
+    """Return (present, model) for an attached Stream Deck under usb_root.
+
+    Scans <usb_root>/*/idVendor for the Elgato vendor id; on a match reads the
+    sibling product file for the model string. Returns (False, "") when none is
+    found or the tree is absent.
+    """
+    import glob
+    for vendor_path in sorted(glob.glob(os.path.join(usb_root, "*", "idVendor"))):
+        if _read_sysfs(vendor_path).lower() == _STREAMDECK_VENDOR:
+            product = _read_sysfs(os.path.join(os.path.dirname(vendor_path), "product"))
+            return True, product
+    return False, ""
+
+
+def _hardware_status():
+    """Display + Stream Deck presence read straight from sysfs.
+
+    Returned as the body of GET /hardware/status. Always succeeds: a missing
+    sysfs tree degrades to present=false rather than raising.
+    """
+    connectors = _drm_connected()
+    sd_present, sd_model = _streamdeck_info()
+    return {
+        "ok": True,
+        "display": {"present": bool(connectors), "connectors": connectors},
+        "streamdeck": {"present": sd_present, "model": sd_model},
+    }
 
 
 def _streamdeck_present():
@@ -94,9 +256,133 @@ def _streamdeck_present():
     return False
 
 
+# Elgato USB product IDs mapped to their key counts. Lets the web editor size
+# its grid to the deck that is actually attached instead of guessing.
+_SD_PRODUCT_KEYS = {
+    "0060": 15, "006d": 15, "0080": 15,   # Original / v2 / MK.2
+    "0063": 6, "0090": 6,                 # Mini / Mini MK.2
+    "006c": 32, "008f": 32,               # XL / XL v2
+}
+
+
+def _streamdeck_keycount():
+    """Best-effort key count for the attached deck, or None if unknown."""
+    try:
+        import re
+        out = subprocess.run(["lsusb"], capture_output=True, text=True, timeout=5).stdout
+        m = re.search(r"0fd9:([0-9a-fA-F]{4})", out)
+        if m:
+            return _SD_PRODUCT_KEYS.get(m.group(1).lower())
+    except Exception:
+        pass
+    return None
+
+
 def _installing(step):
     p = _INSTALL_PROCS.get(step)
     return bool(p and p.poll() is None)
+
+
+# Wi-Fi helpers
+# -------------
+# nmcli is always invoked in terse mode (-t -f) so the output is colon-separated
+# and stable across versions. nmcli escapes literal colons in field values as
+# "\:", so splitting must unescape them rather than a naive str.split(":").
+
+def _nmcli_split(line):
+    """Split one terse nmcli line into fields, honoring backslash escapes.
+
+    nmcli escapes ':' and '\\' in values as '\\:' and '\\\\'. A naive split on
+    ':' would break SSIDs that contain a colon, so walk the string instead.
+    """
+    fields = []
+    cur = []
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if ch == "\\" and i + 1 < len(line):
+            cur.append(line[i + 1])
+            i += 2
+            continue
+        if ch == ":":
+            fields.append("".join(cur))
+            cur = []
+            i += 1
+            continue
+        cur.append(ch)
+        i += 1
+    fields.append("".join(cur))
+    return fields
+
+
+def _parse_wifi_device(out):
+    """Pick the wifi device from `nmcli -t -f DEVICE,TYPE,STATE device` output.
+
+    Returns (device, state) for the first wifi device, or (None, None) when no
+    wifi hardware is present. state is the raw nmcli state string, for example
+    "connected", "disconnected", or "unmanaged".
+    """
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        parts = _nmcli_split(line)
+        if len(parts) < 3:
+            continue
+        device, dtype, state = parts[0], parts[1], parts[2]
+        if dtype == "wifi":
+            return device, state
+    return None, None
+
+
+def _parse_active_ssid(out):
+    """Connected SSID from `nmcli -t -f ACTIVE,SSID dev wifi`, or "" if none."""
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        parts = _nmcli_split(line)
+        if len(parts) >= 2 and parts[0] == "yes":
+            return parts[1]
+    return ""
+
+
+def _parse_wifi_scan(out):
+    """Parse `nmcli -t -f SSID,SIGNAL,SECURITY dev wifi list` output.
+
+    Returns a list of {ssid, signal, security} dicts, hidden/blank SSIDs
+    dropped, deduped by SSID (keeping the strongest signal), sorted by signal
+    descending.
+    """
+    best = {}
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        parts = _nmcli_split(line)
+        if len(parts) < 1:
+            continue
+        ssid = parts[0]
+        if not ssid:
+            continue
+        try:
+            signal = int(parts[1]) if len(parts) > 1 and parts[1] else 0
+        except ValueError:
+            signal = 0
+        security = parts[2] if len(parts) > 2 else ""
+        prev = best.get(ssid)
+        if prev is None or signal > prev["signal"]:
+            best[ssid] = {"ssid": ssid, "signal": signal, "security": security}
+    return sorted(best.values(), key=lambda n: n["signal"], reverse=True)
+
+
+def _nm_running():
+    """True when NetworkManager (nmcli) is reachable."""
+    try:
+        r = subprocess.run(
+            ["nmcli", "-t", "-f", "RUNNING", "general"],
+            capture_output=True, text=True, timeout=5
+        )
+        return r.returncode == 0 and "running" in r.stdout.lower()
+    except Exception:
+        return False
 
 
 class _Handler(http.server.BaseHTTPRequestHandler):
@@ -115,14 +401,24 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/wifi/status":
             self._wifi_status()
+        elif self.path == "/wifi/scan":
+            self._wifi_scan()
         elif self.path == "/hostname":
             self._get_hostname()
         elif self.path == "/display/rotation":
             self._get_rotation()
         elif self.path == "/mealie/status":
             self._mealie_status()
+        elif self.path.startswith("/logs/"):
+            self._logs(self.path[len("/logs/"):])
         elif self.path == "/hardware/status":
             self._hardware_status()
+        elif self.path == "/streamdeck/config":
+            self._streamdeck_get_config()
+        elif self.path == "/streamdeck/actions":
+            self._streamdeck_actions()
+        elif self.path == "/ap/status":
+            self._ap_status()
         else:
             self._send(404, {"error": "not found"})
 
@@ -135,26 +431,96 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._set_rotation()
         elif self.path == "/streamdeck/restart":
             self._streamdeck_restart()
+        elif self.path == "/kiosk/restart":
+            self._kiosk_restart()
         elif self.path == "/mealie/start":
             self._mealie_start()
         elif self.path == "/kiosk/install":
             self._provision("kiosk", "foodassistant-kiosk.service")
         elif self.path == "/streamdeck/install":
             self._provision("streamdeck", "foodassistant-streamdeck.service")
+        elif self.path == "/streamdeck/config":
+            self._streamdeck_set_config()
+        elif self.path == "/ap/disable":
+            self._ap_disable()
         else:
             self._send(404, {"error": "not found"})
 
     def _wifi_status(self):
+        # Report a structured state the UI can show instead of a bare blank:
+        #   no-networkmanager -> nmcli/NetworkManager is not running
+        #   no-adapter        -> no wifi hardware on this device
+        #   unmanaged         -> wifi device exists but NM does not manage it
+        #   disconnected      -> wifi adapter present, no active connection
+        #   connected         -> joined a network (ssid is set)
         try:
-            out = subprocess.run(
+            if not _nm_running():
+                self._send(200, {
+                    "ok": True, "state": "no-networkmanager", "ssid": "",
+                    "detail": "NetworkManager is not running.",
+                })
+                return
+            dev_out = subprocess.run(
+                ["nmcli", "-t", "-f", "DEVICE,TYPE,STATE", "device"],
+                capture_output=True, text=True, timeout=5
+            ).stdout
+            device, dev_state = _parse_wifi_device(dev_out)
+            if not device:
+                self._send(200, {
+                    "ok": True, "state": "no-adapter", "ssid": "",
+                    "detail": "No Wi-Fi adapter found.",
+                })
+                return
+            if dev_state == "unmanaged":
+                self._send(200, {
+                    "ok": True, "state": "unmanaged", "ssid": "", "device": device,
+                    "detail": "Wi-Fi device is not managed by NetworkManager.",
+                })
+                return
+            ssid_out = subprocess.run(
                 ["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"],
                 capture_output=True, text=True, timeout=5
             ).stdout
-            ssid = next(
-                (line[4:] for line in out.splitlines() if line.startswith("yes:")),
-                ""
+            ssid = _parse_active_ssid(ssid_out)
+            self._send(200, {
+                "ok": True,
+                "state": "connected" if ssid else "disconnected",
+                "ssid": ssid,
+                "device": device,
+            })
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _wifi_scan(self):
+        try:
+            if not _nm_running():
+                self._send(200, {
+                    "ok": True, "state": "no-networkmanager", "networks": [],
+                    "detail": "NetworkManager is not running.",
+                })
+                return
+            dev_out = subprocess.run(
+                ["nmcli", "-t", "-f", "DEVICE,TYPE,STATE", "device"],
+                capture_output=True, text=True, timeout=5
+            ).stdout
+            device, _ = _parse_wifi_device(dev_out)
+            if not device:
+                self._send(200, {
+                    "ok": True, "state": "no-adapter", "networks": [],
+                    "detail": "No Wi-Fi adapter found.",
+                })
+                return
+            r = subprocess.run(
+                ["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list"],
+                capture_output=True, text=True, timeout=20
             )
-            self._send(200, {"ok": True, "ssid": ssid})
+            if r.returncode != 0:
+                self._send(500, {"ok": False, "error": (r.stderr or r.stdout).strip()})
+                return
+            self._send(200, {
+                "ok": True, "state": "ok",
+                "networks": _parse_wifi_scan(r.stdout),
+            })
         except Exception as e:
             self._send(500, {"ok": False, "error": str(e)})
 
@@ -210,12 +576,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _get_rotation(self):
         rotation = 0
         try:
-            with open("/boot/firmware/config.txt") as f:
+            with open("/etc/foodassistant/kiosk-env") as f:
                 for line in f:
-                    m = re.match(r"^\s*display_rotate\s*=\s*(\d+)", line)
+                    m = re.match(r"^\s*WLR_OUTPUT_TRANSFORM\s*=\s*(\S+)", line)
                     if m:
-                        deg_map = {"0": 0, "1": 90, "2": 180, "3": 270}
-                        rotation = deg_map.get(m.group(1), 0)
+                        val = m.group(1).strip()
+                        rotation = int(val) if val.isdigit() else 0
         except OSError:
             pass
         self._send(200, {"ok": True, "rotation": rotation})
@@ -243,6 +609,77 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self._send(500, {"ok": False, "error": str(e)})
 
+    def _streamdeck_get_config(self):
+        try:
+            import tomllib
+            path = "/opt/foodassistant/config.toml"
+            if not os.path.exists(path):
+                self._send(200, {"ok": True, "config": {}})
+                return
+            with open(path, "rb") as f:
+                data = tomllib.load(f)
+            self._send(200, {"ok": True, "config": data})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _streamdeck_set_config(self):
+        try:
+            body = self._body()
+            cfg = body.get("config", {})
+
+            def _scalar(v):
+                if isinstance(v, bool):
+                    return "true" if v else "false"
+                if isinstance(v, int):
+                    return str(v)
+                if isinstance(v, float):
+                    return repr(v)
+                # Strings (and anything else) are emitted as escaped strings.
+                s = str(v).replace("\\", "\\\\").replace('"', '\\"')
+                return f'"{s}"'
+
+            # Scalars and string/number lists are written as inline keys; a list
+            # of dicts (e.g. key_overrides) is written as an array of tables so
+            # the controller's TOML loader reads it back as configured slots.
+            lines = []
+            table_blocks = []
+            for k, v in cfg.items():
+                if isinstance(v, list) and any(isinstance(x, dict) for x in v):
+                    for entry in v:
+                        if not isinstance(entry, dict):
+                            continue
+                        table_blocks.append(f"[[{k}]]")
+                        for ek, ev in entry.items():
+                            table_blocks.append(f"{ek} = {_scalar(ev)}")
+                        table_blocks.append("")
+                elif isinstance(v, list):
+                    items = ", ".join(_scalar(x) for x in v)
+                    lines.append(f"{k} = [{items}]")
+                elif isinstance(v, (bool, int, float, str)):
+                    lines.append(f"{k} = {_scalar(v)}")
+            toml_str = "\n".join(lines + [""] + table_blocks).rstrip("\n") + "\n"
+            
+            path = "/opt/foodassistant/config.toml"
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(toml_str)
+            self._send(200, {"ok": True})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _streamdeck_actions(self):
+        try:
+            r = subprocess.run(
+                ["/opt/foodassistant/venv/bin/python", "-m", "foodassistant_streamdeck", "--dump-actions"],
+                cwd="/opt/foodassistant", capture_output=True, text=True, timeout=10
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                self._send(200, {"ok": True, "actions": json.loads(r.stdout)})
+            else:
+                self._send(500, {"ok": False, "error": (r.stderr or "no output").strip()})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
     def _streamdeck_restart(self):
         try:
             subprocess.run(
@@ -255,46 +692,137 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self._send(500, {"ok": False, "error": str(e)})
 
-    def _mealie_status(self):
+    def _kiosk_restart(self):
+        try:
+            subprocess.run(
+                ["systemctl", "restart", "foodassistant-kiosk.service"],
+                check=True, timeout=30
+            )
+            self._send(200, {"ok": True})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _mealie_container_up(self):
+        """True when the Mealie container exists (compose service 'mealie')."""
         try:
             r = subprocess.run(
                 ["docker", "compose", "ps", "--format=json", "mealie"],
                 cwd=INSTALL_DIR,
                 capture_output=True, text=True, timeout=10
             )
-            running = bool(r.stdout.strip()) and r.returncode == 0
-            self._send(200, {"ok": True, "running": running})
+            return bool(r.stdout.strip()) and r.returncode == 0
+        except Exception:
+            return False
+
+    def _mealie_serving(self):
+        """True when Mealie actually answers HTTP on its port.
+
+        The container can sit in 'health: starting' for a minute after it is
+        created, during which docker compose ps already lists it but the web
+        server refuses connections. Probing the port is what tells us the link
+        the user is about to click will actually work.
+        """
+        return _http_serving(f"http://127.0.0.1:{MEALIE_PORT}/")
+
+    def _mealie_running(self):
+        """Backwards-compatible alias: True when Mealie is up and serving."""
+        return self._mealie_container_up() and self._mealie_serving()
+
+    def _mealie_status(self):
+        # Report a single phase the web UI can poll on. We only call Mealie
+        # 'running' once it actually answers HTTP, so the user never gets a
+        # link that refuses the connection:
+        #   running        -> the container is up AND serving HTTP
+        #   starting       -> the pull/up is in flight, OR the container exists
+        #                     but is not serving yet (health: starting)
+        #   not-installed  -> neither (idle, image not pulled / not started)
+        try:
+            container_up = self._mealie_container_up()
+            serving = container_up and self._mealie_serving()
+            starting = _installing("mealie")
+            if serving:
+                state = "running"
+            elif starting or container_up:
+                state = "starting"
+            else:
+                state = "not-installed"
+            self._send(200, {
+                "ok": True,
+                "state": state,
+                "running": serving,
+                "starting": state == "starting",
+            })
         except Exception as e:
             self._send(500, {"ok": False, "error": str(e)})
 
     def _mealie_start(self):
+        # Pulling the Mealie image on first run can take several minutes on a
+        # Pi, far longer than any reasonable HTTP timeout. Run the pull/up in
+        # the background (mirroring the install provisioner) and return
+        # immediately; the web UI polls /mealie/status for progress.
+        if self._mealie_running():
+            self._send(200, {"ok": True, "started": False, "state": "running"})
+            return
+        if _installing("mealie"):
+            self._send(200, {"ok": True, "started": False, "state": "starting"})
+            return
         try:
-            r = subprocess.run(
+            log_path = "/var/log/foodassistant-mealie-start.log"
+            log = open(log_path, "ab")
+            p = subprocess.Popen(
                 ["docker", "compose", "--profile", "with-mealie", "up", "-d"],
                 cwd=INSTALL_DIR,
-                capture_output=True, text=True, timeout=120
+                env=_compose_env(),
+                stdout=log, stderr=subprocess.STDOUT,
             )
-            if r.returncode == 0:
-                self._send(200, {"ok": True})
-            else:
-                self._send(500, {"ok": False, "error": (r.stderr or r.stdout).strip()})
-        except subprocess.TimeoutExpired:
-            self._send(500, {"ok": False, "error": "Timed out starting Mealie."})
+            _INSTALL_PROCS["mealie"] = p
+            self._send(200, {"ok": True, "started": True, "state": "starting"})
         except Exception as e:
             self._send(500, {"ok": False, "error": str(e)})
 
+    def _logs(self, name):
+        # Tail of an install/start log so the setup UI can show live output.
+        # Strip any trailing slash/query and never raise: an unknown name or a
+        # log that does not exist yet just returns an empty line list.
+        name = name.split("?", 1)[0].strip("/")
+        if name not in _LOG_PATHS:
+            self._send(404, {"ok": False, "error": "unknown log name"})
+            return
+        try:
+            lines = _tail_log(name)
+            self._send(200, {
+                "ok": True,
+                "name": name,
+                "running": _installing(name),
+                "lines": lines,
+            })
+        except Exception as e:
+            # Defensive: _tail_log already swallows errors, but keep the
+            # endpoint from ever bubbling an exception to the client.
+            self._send(200, {"ok": True, "name": name, "running": False, "lines": [], "error": str(e)})
+
     def _hardware_status(self):
+        # Live attached-hardware detection (display connectors + Stream Deck
+        # model) read straight from sysfs, merged with the kiosk/streamdeck
+        # service-install state the setup UI already polls for. The detection
+        # block lives under "display" and the deck "model"/sysfs presence is
+        # folded into the existing "streamdeck" object.
+        hw = _hardware_status()
+        sd_present, sd_model = hw["streamdeck"]["present"], hw["streamdeck"]["model"]
         self._send(200, {
             "ok": True,
+            "display": hw["display"],
             "kiosk": {
                 "present": _display_present(),
                 "active": _service_active("foodassistant-kiosk.service"),
                 "installing": _installing("kiosk"),
             },
             "streamdeck": {
-                "present": _streamdeck_present(),
+                "present": _streamdeck_present() or sd_present,
+                "model": sd_model,
                 "active": _service_active("foodassistant-streamdeck.service"),
                 "installing": _installing("streamdeck"),
+                "key_count": _streamdeck_keycount(),
             },
         })
 
@@ -317,6 +845,36 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             )
             _INSTALL_PROCS[step] = p
             self._send(200, {"ok": True, "started": True})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _ap_status(self):
+        """Return whether the fallback AP is active."""
+        try:
+            active = Path(_AP_FLAG).exists()
+            self._send(200, {"ok": True, "active": active})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _ap_disable(self):
+        """Stop the fallback AP and remove the flag file."""
+        try:
+            subprocess.run(["systemctl", "stop", "hostapd"], timeout=10)
+            subprocess.run(["systemctl", "stop", "dnsmasq"], timeout=10)
+            try:
+                subprocess.run(
+                    ["ip", "addr", "del", "192.168.99.1/24", "dev", "wlan0"],
+                    timeout=5
+                )
+            except Exception:
+                pass
+            try:
+                Path(_AP_FLAG).unlink(missing_ok=True)
+            except TypeError:
+                # missing_ok added in Python 3.8; fall back for older versions.
+                if Path(_AP_FLAG).exists():
+                    Path(_AP_FLAG).unlink()
+            self._send(200, {"ok": True})
         except Exception as e:
             self._send(500, {"ok": False, "error": str(e)})
 

@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <html lang="en" data-bs-theme="{{ theme_mode }}"
       data-ui-scale="{{ ui_scale_factor | default(1.0) }}"
-      data-display-rotation="{{ display_rotation | default(0) }}">
+      data-display-rotation="{{ display_rotation | default(0) }}"
+      data-rotation-mode="{{ 'compositor' if is_pi else 'css' }}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -35,6 +36,8 @@
   </script>
   <!-- Applies scale + orientation on the attached kiosk display only -->
   <script src="static/js/kiosk-display.js"></script>
+  <!-- USB-keyboard navigation: number keys jump to nav tabs, "?" shows help -->
+  <script src="static/js/keyboard-nav.js"></script>
   <style>
     body { padding-top: 60px; }
     .navbar-brand { font-weight: 700; letter-spacing: -0.5px; }
@@ -74,6 +77,12 @@
           </li>
         </ul>
         <ul class="navbar-nav">
+          <li class="nav-item">
+            <a class="nav-link" href="#" title="Keyboard shortcuts (press ?)"
+               onclick="if(window.__kbdNavHelp){window.__kbdNavHelp();}return false;">
+              <i class="bi bi-keyboard"></i>
+            </a>
+          </li>
           <li class="nav-item">
             <button class="nav-link btn btn-link" data-bs-toggle="modal" data-bs-target="#qrModal" title="Phone QR code">
               <i class="bi bi-qr-code"></i>
@@ -135,7 +144,16 @@
     })();
   </script>
 
-  <div class="container-fluid px-4">
+  {% if pin_readonly %}
+  <div class="alert alert-warning alert-dismissible d-flex align-items-center mb-0 rounded-0 py-2 px-3" role="alert"
+       style="position:fixed;top:56px;left:0;right:0;z-index:1040;">
+    <i class="bi bi-lock-fill me-2"></i>
+    <span>Locked &mdash; viewing read-only.</span>
+    <a href="ui/pin" class="btn btn-sm btn-warning ms-3">Tap to log in</a>
+    <button type="button" class="btn-close ms-auto" data-bs-dismiss="alert"></button>
+  </div>
+  {% endif %}
+  <div class="container-fluid px-4" {% if pin_readonly %}style="margin-top:3rem"{% endif %}>
     {% if message %}
     <div class="flash">
       <div class="alert alert-{{ message_type or 'success' }} alert-dismissible fade show" role="alert">

@@ -19,11 +19,21 @@ class GrocyClient:
     them for every item."""
 
     def __init__(self):
-        self.base = settings.grocy_base_url.rstrip("/") + "/api"
-        self.headers = {
-            "GROCY-API-KEY": settings.grocy_api_key,
-            "Content-Type": "application/json",
-        }
+        if settings.is_satellite() and settings.remote_server_url and settings.upstream_api_key:
+            # A satellite has no Docker network, so it cannot reach the server's
+            # internal Grocy (http://grocy:80). Route calls through the main
+            # server's authenticated proxy, which forwards them to its Grocy.
+            self.base = settings.remote_server_url.rstrip("/") + "/api/proxy/grocy/api"
+            self.headers = {
+                "X-API-Key": settings.upstream_api_key,
+                "Content-Type": "application/json",
+            }
+        else:
+            self.base = settings.grocy_base_url.rstrip("/") + "/api"
+            self.headers = {
+                "GROCY-API-KEY": settings.grocy_api_key,
+                "Content-Type": "application/json",
+            }
         self._cache: dict[str, list[dict]] = {}
 
     async def _request(self, method: str, path: str, body: dict | None = None) -> list | dict:
@@ -105,9 +115,15 @@ class GrocyClient:
         best_before = (
             item.best_by_date.isoformat() if item.best_by_date else date.today().isoformat()
         )
+        # When the item came off a back-dated receipt, land it on the receipt's
+        # purchase date; otherwise Grocy defaults the entry to today.
+        purchased = (
+            item.purchased_on.isoformat() if item.purchased_on else date.today().isoformat()
+        )
         return await self._post(f"/stock/products/{product_id}/add", {
             "amount": item.quantity,
             "best_before_date": best_before,
+            "purchased_date": purchased,
             "price": None,
             "note": item.brand or "",
         })

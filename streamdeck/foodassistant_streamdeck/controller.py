@@ -12,12 +12,23 @@ import json
 import logging
 import shutil
 import subprocess
+import time
 from typing import Optional
 
 import httpx
 
 from . import actions, layout, render
-from .actions import ActionContext, ActionSpec, HaEntityState, TimerState, WeatherState
+from .actions import (
+    KEYPAD_CANCEL,
+    KEYPAD_CLEAR,
+    KEYPAD_ENTER,
+    ActionContext,
+    ActionSpec,
+    HaEntityState,
+    PinBuffer,
+    TimerState,
+    WeatherState,
+)
 from .config import BRIGHTNESS_STEPS, Config
 
 log = logging.getLogger("foodassistant.streamdeck")
@@ -34,9 +45,31 @@ class Controller:
         self.pages: list[list[Optional[ActionSpec]]] = layout.build_pages(
             config.keys, self.key_count
         )
+        # Advanced per-key overrides from the web setup page. Parsed into
+        # ActionSpec entries and stamped onto the default layout, replacing the
+        # stock action at each configured slot.
+        self.key_overrides: dict[int, ActionSpec] = actions.overrides_to_specs(
+            getattr(config, "key_overrides", []) or [], self.key_count
+        )
+        layout.apply_overrides(self.pages, self.key_overrides, self.key_count)
         self.page = 0
+        # On-deck PIN keypad. ``keypad_mode`` swaps the visible page for the
+        # numeric pad; ``pin_buffer`` accumulates the entered code and
+        # ``pin_status`` carries a short transient label (e.g. an error) shown
+        # while the pad is up.
+        self.keypad_mode: bool = False
+        self.keypad_pages: list[list[Optional[ActionSpec]]] = layout.build_keypad_pages(
+            self.key_count
+        )
+        self.keypad_page_idx: int = 0
+        self.pin_buffer: PinBuffer = PinBuffer()
+        self.pin_status: str = ""
         self.status: dict[str, int] = {"expiring": 0, "pending": 0}
         self.timers: dict[str, TimerState] = {}  # action name -> timer state
+        # Toggles each poll tick while a timer alert is active so the key blinks
+        # bright/dim until the alert is dismissed.
+        self._blink_phase: int = 0
+        self._key_down_time: dict[int, float] = {}  # physical key -> press timestamp
         self.weather: WeatherState = WeatherState(
             location=config.weather_location, units=config.weather_units
         )
@@ -58,12 +91,34 @@ class Controller:
             )
             self.ha_entities[slot_name] = HaEntityState(entity_id, color_on, color_off)
 
+        # Register state for override keys. Weather overrides may each carry
+        # their own location, so they get a dedicated WeatherState keyed by the
+        # spec name rather than sharing the single global widget. HA action
+        # overrides get an HaEntityState so the key reflects live entity state.
+        self.override_weather: dict[str, WeatherState] = {}
+        for spec in self.key_overrides.values():
+            if spec.kind == "weather":
+                self.override_weather[spec.name] = WeatherState(
+                    location=spec.weather_location or config.weather_location,
+                    units=config.weather_units,
+                )
+            elif spec.kind == "ha_entity" and spec.ha_entity_id:
+                self.ha_entities[spec.name] = HaEntityState(spec.ha_entity_id)
+
         try:
             self._bright_idx = BRIGHTNESS_STEPS.index(
                 min(BRIGHTNESS_STEPS, key=lambda s: abs(s - config.brightness))
             )
         except ValueError:
             self._bright_idx = len(BRIGHTNESS_STEPS) // 2
+
+        # Idle-blank state. _last_activity is reset on every key press.
+        # _idle_blanked is True while the deck is blanked due to inactivity.
+        # _wake_keys tracks which physical keys were pressed while blanked so
+        # their release events can be swallowed without triggering actions.
+        self._last_activity: float = time.monotonic()
+        self._idle_blanked: bool = False
+        self._wake_keys: set[int] = set()
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -86,7 +141,7 @@ class Controller:
                 self.key_count,
                 len(self.pages),
             )
-            await self._poll_forever()
+            await asyncio.gather(self._poll_forever(), self._idle_loop())
 
     def close(self) -> None:
         try:
@@ -98,6 +153,8 @@ class Controller:
     # -- rendering ---------------------------------------------------------
 
     def _current(self) -> list[Optional[ActionSpec]]:
+        if self.keypad_mode:
+            return self.keypad_pages[self.keypad_page_idx % len(self.keypad_pages)]
         return self.pages[self.page % len(self.pages)]
 
     def _draw_page(self) -> None:
@@ -108,15 +165,27 @@ class Controller:
             if spec is None:
                 image = render.blank_key(*self._key_size())
             else:
-                if spec.kind == "timer":
+                if spec.kind == "keypad":
+                    label, color = self._keypad_face(spec)
+                    alert = False
+                    count = None
+                elif spec.kind == "timer":
                     t = self.timers.get(spec.name)
                     label = t.label(spec.label) if t else spec.label
-                    color = t.color(spec.color) if t else spec.color
+                    color = (
+                        t.color(spec.color, self._blink_phase) if t else spec.color
+                    )
                     alert = t.alert_active() if t else False
                     count = None
                 elif spec.kind == "weather":
-                    label = self.weather.label(spec.label)
-                    color = self.weather.color(spec.color)
+                    w = self.override_weather.get(spec.name, self.weather)
+                    label = w.label(spec.label)
+                    color = w.color(spec.color)
+                    alert = False
+                    count = None
+                elif spec.kind == "forecast":
+                    label = self.weather.forecast_label(spec.label)
+                    color = self.weather.forecast_color(spec.color)
                     alert = False
                     count = None
                 elif spec.kind == "ha_entity":
@@ -140,6 +209,7 @@ class Controller:
                     color=color,
                     count=count,
                     alert=alert,
+                    icon=spec.icon,
                 )
             if rotation:
                 # PIL rotates counter-clockwise, so negate to turn the face
@@ -152,32 +222,58 @@ class Controller:
             phys = layout.rotated_index(index, self.key_count, rotation)
             self.deck.set_key_image(phys, PILHelper.to_native_format(self.deck, image))
 
+    def _keypad_face(self, spec: ActionSpec) -> tuple[str, str]:
+        """Label and colour for a keypad key.
+
+        Digit and Clear/Cancel keys show their static label. The Enter key
+        doubles as the feedback surface: it shows masked dots for the entered
+        code (never the digits themselves) or a transient status such as an
+        error, so a user without a screen still sees their progress.
+        """
+        if spec.keypad_key == KEYPAD_ENTER:
+            if self.pin_status:
+                return self.pin_status, "#7f1d1d"
+            if self.pin_buffer.is_empty():
+                return spec.label, spec.color
+            return self.pin_buffer.masked(), spec.color
+        return spec.label, spec.color
+
     def _key_size(self) -> tuple[int, int]:
         w, h = self.deck.key_image_format()["size"]
         return w, h
 
     def _visual_slot(self, phys: int) -> int:
-        """Invert the draw-time index mapping for a pressed physical key.
+        """Recover the displayed-grid slot for a pressed physical key.
 
-        ``rotated_index`` maps visual slot -> physical key. We invert it by
-        searching the visual slots for the one that lands on ``phys``. For 180
-        this is exact; for 90/270 it inherits the same best-effort transpose
-        limitation noted in ``layout.rotated_index`` (a wide deck cannot map
-        perfectly onto its transpose), so an unmapped press falls back to the
-        physical index unchanged.
+        ``layout.slot_for_physical`` is the exact inverse of the draw-time
+        ``rotated_index`` mapping, so a press always resolves to the slot the
+        user sees, for every rotation.
         """
-        rotation = self.config.rotation
-        if not rotation:
-            return phys
-        for slot in range(self.key_count):
-            if layout.rotated_index(slot, self.key_count, rotation) == phys:
-                return slot
-        return phys
+        return layout.slot_for_physical(phys, self.key_count, self.config.rotation)
 
     # -- input -------------------------------------------------------------
 
     def _on_key(self, deck, key: int, pressed: bool) -> None:
-        if not pressed or self.loop is None:
+        if self.loop is None:
+            return
+        if pressed:
+            # Record when this key went down so we can measure hold duration.
+            self._key_down_time[key] = time.monotonic()
+            # Any press counts as activity, resetting the idle timer.
+            self._last_activity = time.monotonic()
+            # If the deck is blanked, mark this key as a wake key and restore.
+            if self._idle_blanked:
+                self._wake_keys.add(key)
+                asyncio.run_coroutine_threadsafe(
+                    self._wake_from_idle(), self.loop
+                )
+            return
+        # Key released: determine short vs long press.
+        down_at = self._key_down_time.pop(key, None)
+        long_press = down_at is not None and (time.monotonic() - down_at) >= 0.5
+        # If this key woke the deck from idle, swallow the action.
+        if key in self._wake_keys:
+            self._wake_keys.discard(key)
             return
         # `key` is the physical index pressed. Invert the draw-time mapping to
         # recover the visual slot, so the action matches what the user sees.
@@ -186,15 +282,92 @@ class Controller:
         if slot >= len(page) or page[slot] is None:
             return
         spec = page[slot]
-        asyncio.run_coroutine_threadsafe(self._handle(spec), self.loop)
+        fut = asyncio.run_coroutine_threadsafe(
+            self._handle(spec, long_press=long_press), self.loop
+        )
+        def _on_done(f):
+            try:
+                f.result()
+            except Exception as e:
+                log.error("Action failed: %s", e)
+        fut.add_done_callback(_on_done)
 
-    def _timer_press(self, name: str) -> None:
-        if name not in self.timers:
-            self.timers[name] = TimerState()
-        self.timers[name].press()
+    def _enter_keypad(self) -> None:
+        """Switch the deck into PIN keypad mode with a fresh, empty buffer."""
+        self.keypad_mode = True
+        self.keypad_page_idx = 0
+        self.pin_buffer.clear()
+        self.pin_status = ""
         self._draw_page()
 
-    async def _handle(self, spec: ActionSpec) -> None:
+    def _exit_keypad(self) -> None:
+        """Leave keypad mode and return to the normal layout."""
+        self.keypad_mode = False
+        self.pin_buffer.clear()
+        self.pin_status = ""
+        self._draw_page()
+
+    async def _keypad_press(self, keypad_key: str) -> None:
+        """Handle one keypad key. Digits accumulate; controls act immediately."""
+        # Any press clears a lingering error so the next attempt starts clean.
+        self.pin_status = ""
+        if keypad_key.isdigit():
+            self.pin_buffer.digit(keypad_key)
+            self._draw_page()
+            return
+        if keypad_key == KEYPAD_CLEAR:
+            self.pin_buffer.backspace()
+            self._draw_page()
+            return
+        if keypad_key == KEYPAD_CANCEL:
+            self._exit_keypad()
+            return
+        if keypad_key == KEYPAD_ENTER:
+            await self._submit_pin()
+            return
+
+    async def _submit_pin(self) -> None:
+        """Submit the buffered PIN. Return to normal on success, else show error."""
+        if self.pin_buffer.is_empty() or self.client is None:
+            self.pin_status = "Empty"
+            self._draw_page()
+            return
+        ok = await actions.submit_pin(
+            self.client, self.config.base_url, self.pin_buffer.value
+        )
+        if ok:
+            self._exit_keypad()
+        else:
+            self.pin_buffer.clear()
+            self.pin_status = "Wrong"
+            self._draw_page()
+
+    def _timer_press(self, name: str, long_press: bool = False) -> None:
+        if name not in self.timers:
+            self.timers[name] = TimerState()
+        timer = self.timers[name]
+        # A timer-override key with a preset duration loads its whole preset on
+        # a fresh short press (when idle and not alerting), so one tap starts an
+        # N-minute countdown rather than counting up a minute at a time.
+        preset = self._override_timer_minutes(name)
+        if long_press:
+            timer.long_press()
+        elif preset > 0 and not timer.is_running() and not timer.alert_active():
+            timer.set_minutes(preset)
+        else:
+            timer.short_press()
+        # Reset the blink phase so a fresh alert starts on its bright frame.
+        self._blink_phase = 0
+        self._draw_page()
+
+    def _override_timer_minutes(self, name: str) -> int:
+        """Preset minutes for a timer-override key, or 0 for a stock timer."""
+        for spec in self.key_overrides.values():
+            if spec.name == name and spec.kind == "timer":
+                return spec.timer_minutes
+        return 0
+
+    async def _handle(self, spec: ActionSpec, long_press: bool = False) -> None:
         ctx = ActionContext(
             client=self.client,
             base_url=self.config.base_url,
@@ -208,9 +381,11 @@ class Controller:
             ha_base_url=self.config.ha_base_url,
             ha_token=self.config.ha_token,
             ha_entity_refresh=self._refresh_ha_entities,
+            keypad_enter=self._enter_keypad,
+            keypad_press=self._keypad_press,
         )
         try:
-            msg = await actions.run_action(spec, ctx)
+            msg = await actions.run_action(spec, ctx, long_press=long_press)
             if msg:
                 log.info("%s -> %s", spec.name, msg)
         except Exception as e:  # noqa: BLE001 - one bad press must not crash
@@ -218,18 +393,51 @@ class Controller:
 
     # -- effects exposed to actions ---------------------------------------
 
+    async def _wake_from_idle(self) -> None:
+        """Restore the current page after the deck was blanked by the idle timer."""
+        self._idle_blanked = False
+        self.deck.set_brightness(BRIGHTNESS_STEPS[self._bright_idx])
+        self._draw_page()
+
+    async def _idle_loop_once(self) -> None:
+        """Check idle state and blank the deck if the timeout has elapsed.
+
+        This is the per-tick body extracted for testability. The main
+        _idle_loop calls this repeatedly on a 10-second interval.
+        """
+        timeout_mins = self.config.idle_timeout_minutes
+        if timeout_mins <= 0 or self._idle_blanked:
+            return
+        idle_secs = time.monotonic() - self._last_activity
+        if idle_secs >= timeout_mins * 60:
+            log.info("Stream Deck idle for %.0fs -- blanking", idle_secs)
+            self._idle_blanked = True
+            self.deck.set_brightness(0)
+            self.deck.reset()
+
+    async def _idle_loop(self) -> None:
+        """Blank the deck after idle_timeout_minutes without a key press."""
+        while True:
+            await asyncio.sleep(10)
+            await self._idle_loop_once()
+
     async def _refresh(self) -> None:
         await self._poll_once()
         self._draw_page()
 
     async def _refresh_weather(self) -> None:
         has_weather_key = any(
-            spec is not None and spec.kind == "weather"
+            spec is not None and spec.kind in ("weather", "forecast")
             for page in self.pages for spec in page
         )
-        if not has_weather_key:
+        if not has_weather_key and not self.override_weather:
             return
-        await self.weather.refresh()
+        if has_weather_key:
+            await self.weather.refresh()
+        # Override weather keys each fetch their own (possibly different)
+        # location, so refresh them alongside the shared widget.
+        for w in self.override_weather.values():
+            await w.refresh()
         self._draw_page()
 
     async def _refresh_ha_entities(self) -> None:
@@ -246,11 +454,17 @@ class Controller:
         return pct
 
     def _page_next(self) -> None:
-        self.page = (self.page + 1) % len(self.pages)
+        if self.keypad_mode:
+            self.keypad_page_idx = (self.keypad_page_idx + 1) % len(self.keypad_pages)
+        else:
+            self.page = (self.page + 1) % len(self.pages)
         self._draw_page()
 
     def _page_prev(self) -> None:
-        self.page = (self.page - 1) % len(self.pages)
+        if self.keypad_mode:
+            self.keypad_page_idx = (self.keypad_page_idx - 1) % len(self.keypad_pages)
+        else:
+            self.page = (self.page - 1) % len(self.pages)
         self._draw_page()
 
     async def _navigate(self, path: str) -> bool:
@@ -312,17 +526,27 @@ class Controller:
             try:
                 expired = self._tick_timers()
                 any_running = any(t.is_running() for t in self.timers.values())
-                # Redraw every second while a timer is active or just expired;
-                # otherwise only redraw after a full poll cycle.
-                if any_running or expired:
+                any_alerting = any(t.alert_active() for t in self.timers.values())
+                # While any timer alert is undismissed, advance the blink phase
+                # so the key flashes bright/dim each tick until it is pressed.
+                if any_alerting:
+                    self._blink_phase += 1
+                else:
+                    self._blink_phase = 0
+                # Redraw every second while a timer is active, alerting, or just
+                # expired; otherwise only redraw after a full poll cycle.
+                if any_running or any_alerting or expired:
                     self._draw_page()
                 if tick >= self.config.poll_seconds:
                     tick = 0
                     await self._poll_once()
                     self._draw_page()
                 weather_secs = self.config.weather_poll_minutes * 60
-                if (weather_secs > 0
-                        and self.weather.age_seconds() >= weather_secs):
+                weather_due = self.weather.age_seconds() >= weather_secs or any(
+                    w.age_seconds() >= weather_secs
+                    for w in self.override_weather.values()
+                )
+                if weather_secs > 0 and weather_due:
                     await self._refresh_weather()
                 ha_secs = self.config.ha_poll_seconds
                 if (ha_secs > 0 and self.ha_entities

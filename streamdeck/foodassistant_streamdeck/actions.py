@@ -11,28 +11,25 @@ paging, kiosk navigation).
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Awaitable, Callable, Optional
-
-# Preset durations (minutes) cycled through on each timer key press.
-TIMER_PRESETS: tuple[int, ...] = (5, 10, 15, 30, 60)
-
 
 class TimerState:
     """Mutable per-key countdown timer.
 
-    Pressing cycles: idle -> 5 min -> 10 min -> 15 min -> 30 min -> 60 min -> idle.
-    While counting down, ``label()`` returns MM:SS remaining. When expired,
-    ``alerting`` flips to True; the next press dismisses it.
+    Short press: add 1 minute (starts from idle; rapid presses accumulate).
+    Long press: reset to idle immediately.
+    When the countdown expires, ``alerting`` flips to True; the next short
+    press dismisses it.
     """
 
     def __init__(self) -> None:
-        self._preset_idx: int = -1   # -1 = idle
+        self._minutes: int = 0       # 0 = idle; positive = minutes set
         self._deadline: float = 0.0  # monotonic clock target
         self.alerting: bool = False
 
     def is_running(self) -> bool:
-        return self._preset_idx >= 0 and not self.alerting
+        return self._minutes > 0 and not self.alerting
 
     def remaining_seconds(self) -> int:
         if not self.is_running():
@@ -42,42 +39,180 @@ class TimerState:
     def label(self, base_label: str) -> str:
         if self.alerting:
             return "Done!"
-        if self._preset_idx < 0:
+        if self._minutes == 0:
             return base_label
         secs = self.remaining_seconds()
         if secs <= 0:
             return "Done!"
         return f"{secs // 60}:{secs % 60:02d}"
 
-    def color(self, base_color: str) -> str:
+    # The expired-alert colours the key blinks between: a bright red on the
+    # "on" phase and a dim red on the "off" phase, so the key flashes until the
+    # alert is dismissed.
+    _ALERT_BRIGHT = "#ef4444"
+    _ALERT_DIM = "#450a0a"
+
+    def color(self, base_color: str, blink_phase: int = 0) -> str:
         if self.alerting:
-            return "#ef4444"
-        if self._preset_idx < 0:
+            return self.alert_color(blink_phase)
+        if self._minutes == 0:
             return base_color
         secs = self.remaining_seconds()
         return "#f59e0b" if secs < 60 else "#0d9488"
 
+    def alert_color(self, blink_phase: int) -> str:
+        """Colour for an expired alert at the given blink phase.
+
+        Even phases are bright, odd phases are dim, so successive poll ticks
+        flash the key. Only meaningful while ``alerting`` is True.
+        """
+        return self._ALERT_BRIGHT if blink_phase % 2 == 0 else self._ALERT_DIM
+
     def alert_active(self) -> bool:
         return self.alerting
 
-    def press(self) -> None:
+    def short_press(self) -> None:
+        """Add one minute. Dismisses the alert if one is active."""
         if self.alerting:
             self.alerting = False
-            self._preset_idx = -1
-            return
-        self._preset_idx += 1
-        if self._preset_idx >= len(TIMER_PRESETS):
-            self._preset_idx = -1
+            self._minutes = 0
             self._deadline = 0.0
-        else:
-            self._deadline = time.monotonic() + TIMER_PRESETS[self._preset_idx] * 60
+            return
+        self._minutes += 1
+        self._deadline = time.monotonic() + self._minutes * 60
+
+    def set_minutes(self, minutes: int) -> None:
+        """Start (or restart) the countdown at a fixed number of minutes.
+
+        Used by timer-override keys that carry a preset duration: one short
+        press loads the whole preset rather than adding a single minute.
+        """
+        minutes = max(0, int(minutes))
+        self.alerting = False
+        self._minutes = minutes
+        self._deadline = time.monotonic() + minutes * 60 if minutes else 0.0
+
+    def long_press(self) -> None:
+        """Reset the timer to idle immediately."""
+        self.alerting = False
+        self._minutes = 0
+        self._deadline = 0.0
+
+    def press(self) -> None:
+        """Backward-compatible alias for short_press."""
+        self.short_press()
 
     def tick(self) -> bool:
         """Return True (and set alerting) if the timer just expired."""
         if self.is_running() and self.remaining_seconds() <= 0:
             self.alerting = True
-            self._preset_idx = -1
+            self._minutes = 0
             return True
+        return False
+
+
+# Largest PIN the buffer will hold. Generous enough for any reasonable unlock
+# code; extra presses past this are ignored rather than silently truncating a
+# longer code into a different one.
+PIN_MAX_LEN: int = 12
+
+
+class PinBuffer:
+    """Accumulates a numeric PIN entered on the deck keypad.
+
+    The buffer never exposes the entered digits for rendering; callers ask for
+    ``masked()`` (a row of dots) or ``length()`` so the actual code is never
+    drawn on a key face. ``digit`` appends, ``backspace`` removes the last
+    digit, and ``clear`` empties the whole buffer. ``value`` is only read when
+    the controller submits the code over HTTP.
+    """
+
+    def __init__(self, max_len: int = PIN_MAX_LEN) -> None:
+        self._digits: list[str] = []
+        self._max_len = max(1, int(max_len))
+
+    def digit(self, ch: str) -> None:
+        """Append a single digit. Non-digits and overflow are ignored."""
+        if len(ch) == 1 and ch.isdigit() and len(self._digits) < self._max_len:
+            self._digits.append(ch)
+
+    def backspace(self) -> None:
+        if self._digits:
+            self._digits.pop()
+
+    def clear(self) -> None:
+        self._digits.clear()
+
+    def length(self) -> int:
+        return len(self._digits)
+
+    def is_empty(self) -> bool:
+        return not self._digits
+
+    @property
+    def value(self) -> str:
+        """The raw entered PIN. Only the submit path should read this."""
+        return "".join(self._digits)
+
+    def masked(self) -> str:
+        """A face-safe representation: one dot per entered digit."""
+        return "•" * len(self._digits)
+
+
+# Logical keys on the on-deck keypad. Digit keys carry the digit itself; the two
+# editing keys use these sentinel names.
+KEYPAD_CLEAR = "clear"
+KEYPAD_ENTER = "enter"
+KEYPAD_CANCEL = "cancel"
+
+
+def keypad_specs() -> dict[str, ActionSpec]:
+    """Build the ActionSpecs used on the keypad page.
+
+    Digits 0-9 plus a clear/backspace, an enter/submit, and a cancel that drops
+    back to the normal layout. These are generated rather than stored in the
+    static ACTIONS registry so the keypad never appears as a bindable key in a
+    user's config.
+    """
+    specs: dict[str, ActionSpec] = {}
+    for d in "0123456789":
+        specs[f"keypad_{d}"] = ActionSpec(
+            name=f"keypad_{d}", label=d, color="#1e293b",
+            kind="keypad", keypad_key=d,
+        )
+    specs[f"keypad_{KEYPAD_CLEAR}"] = ActionSpec(
+        name=f"keypad_{KEYPAD_CLEAR}", label="Clear", color="#7f1d1d",
+        kind="keypad", keypad_key=KEYPAD_CLEAR,
+    )
+    specs[f"keypad_{KEYPAD_ENTER}"] = ActionSpec(
+        name=f"keypad_{KEYPAD_ENTER}", label="Enter", color="#166534",
+        kind="keypad", keypad_key=KEYPAD_ENTER,
+    )
+    specs[f"keypad_{KEYPAD_CANCEL}"] = ActionSpec(
+        name=f"keypad_{KEYPAD_CANCEL}", label="Cancel", color="#334155",
+        kind="keypad", keypad_key=KEYPAD_CANCEL,
+    )
+    return specs
+
+
+async def submit_pin(client: Any, base_url: str, pin: str) -> bool:
+    """Submit a PIN to the app's login endpoint. Returns True on success.
+
+    The app authenticates with a password (which may be a numeric PIN) posted
+    to ``/ui/login`` as a form field. A successful login answers with a redirect
+    to the dashboard (status < 400 without following it); a wrong code answers
+    401. Network or service errors return False so the deck shows an error state
+    rather than crashing.
+    """
+    base = base_url.rstrip("/")
+    try:
+        r = await client.post(
+            f"{base}/ui/login",
+            data={"password": pin},
+            follow_redirects=False,
+        )
+        return r.status_code < 400
+    except Exception:  # noqa: BLE001 - surface as failure, never crash
         return False
 
 
@@ -113,6 +248,8 @@ class WeatherState:
         self._color: str = "#1e40af"
         self._fetched_at: float = 0.0
         self._error: bool = False
+        self._fc_label: str = "Forecast"
+        self._fc_color: str = "#0e7490"
 
     def age_seconds(self) -> float:
         return time.monotonic() - self._fetched_at
@@ -122,6 +259,12 @@ class WeatherState:
 
     def color(self, base_color: str) -> str:
         return self._color
+
+    def forecast_label(self, base_label: str) -> str:
+        return self._fc_label if self._fetched_at else base_label
+
+    def forecast_color(self, base_color: str) -> str:
+        return self._fc_color
 
     async def refresh(self) -> None:
         try:
@@ -134,6 +277,7 @@ class WeatherState:
                 self._label = "No signal"
                 self._color = "#6b7280"
                 self._error = True
+                self._fc_label = "No signal"
                 return
             data = r.json()
             cond = data["current_condition"][0]
@@ -145,10 +289,21 @@ class WeatherState:
             self._label = f"{temp}°{unit_sym} {desc}"
             self._color = "#1e40af"
             self._error = False
+            try:
+                today = data["weather"][0]
+                hi_key = "maxtempF" if self.units == "f" else "maxtempC"
+                lo_key = "mintempF" if self.units == "f" else "mintempC"
+                hi = today.get(hi_key, "?")
+                lo = today.get(lo_key, "?")
+                self._fc_label = f"H{hi} L{lo}"
+                self._fc_color = "#0e7490"
+            except Exception:
+                self._fc_label = "Forecast"
         except Exception:
             self._label = "No signal"
             self._color = "#6b7280"
             self._error = True
+            self._fc_label = "No signal"
         finally:
             self._fetched_at = time.monotonic()
 
@@ -227,7 +382,54 @@ class ActionSpec:
     target_path: str = ""    # for kind=="nav": app path to open in the kiosk
     ha_entity_id: str = ""   # for kind=="ha_entity": HA entity to show/toggle
     ha_service: str = ""     # for kind=="ha_entity": HA service to call on press
+    keypad_key: str = ""     # for kind=="keypad": digit or clear/enter/cancel
+    timer_minutes: int = 0   # for kind=="timer" overrides: preset minutes (0=cycle)
+    weather_location: str = ""  # for kind=="weather" overrides: per-key location
     description: str = ""
+    icon: str = ""           # Bootstrap Icons glyph name (without the "bi-"
+                             # prefix) drawn above the label; see ACTION_ICONS.
+
+
+# Single source of truth for key iconography. Each action maps to the same
+# Bootstrap Icons glyph the web UI uses for that feature, so the deck face and
+# the browser stay visually in sync. Values are glyph names without the "bi-"
+# prefix (the render layer rasterises them from the vendored bootstrap-icons
+# font). Keep this in step with service/app/navigation.py (nav tab icons) and
+# the action buttons in the page templates:
+#   nav tabs (navigation.py): inventory=grid, expiring=clock-history,
+#     add=plus-circle, pending=hourglass-split, recipes=journal-richtext,
+#     cook=lightbulb, mealplan=calendar-week, shopping=cart, defaults=table.
+#   commit button (pending.html): cloud-upload.
+# The remaining keys are deck-only widgets with no web equivalent; they use the
+# closest standard Bootstrap glyph (timers=stopwatch, weather=cloud-sun,
+# forecast=thermometer-half, brightness=brightness-high, paging=chevrons,
+# Home Assistant=house).
+ACTION_ICONS: dict[str, str] = {
+    "expiring": "clock-history",
+    "pending": "hourglass-split",
+    "commit": "cloud-upload",
+    "add": "plus-circle",
+    "inventory": "grid",
+    "cook": "lightbulb",
+    "recipes": "journal-richtext",
+    "mealplan": "calendar-week",
+    "shopping": "cart",
+    "defaults": "table",
+    "brightness": "brightness-high",
+    "page_next": "chevron-right",
+    "page_prev": "chevron-left",
+    "timer_1": "stopwatch",
+    "timer_2": "stopwatch",
+    "timer_3": "stopwatch",
+    "weather": "cloud-sun",
+    "forecast": "thermometer-half",
+    "ha_1": "house",
+    "ha_2": "house",
+    "ha_3": "house",
+    "ha_4": "house",
+    "ha_5": "house",
+    "pin": "shield-lock",
+}
 
 
 # The actions a key can be bound to. status_field names must match the keys
@@ -239,8 +441,9 @@ ACTIONS: dict[str, ActionSpec] = {
         color="#b54708",
         kind="status",
         status_field="expiring",
+        target_path="ui/expiring",
         description="Count of items expired or expiring within the soon window. "
-        "Press to refresh now.",
+        "Press to open the expiring list and refresh.",
     ),
     "pending": ActionSpec(
         name="pending",
@@ -248,8 +451,9 @@ ACTIONS: dict[str, ActionSpec] = {
         color="#1d4ed8",
         kind="status",
         status_field="pending",
+        target_path="ui/pending",
         description="Count of scanned items waiting to be committed. "
-        "Press to refresh now.",
+        "Press to open the pending list and refresh.",
     ),
     "commit": ActionSpec(
         name="commit",
@@ -282,6 +486,38 @@ ACTIONS: dict[str, ActionSpec] = {
         target_path="ui/cook",
         description="Open the recipe suggestions page on the attached display.",
     ),
+    "recipes": ActionSpec(
+        name="recipes",
+        label="Recipes",
+        color="#7e22ce",
+        kind="nav",
+        target_path="ui/recipes",
+        description="Open the Recipes page.",
+    ),
+    "mealplan": ActionSpec(
+        name="mealplan",
+        label="Plan",
+        color="#7e22ce",
+        kind="nav",
+        target_path="ui/mealplan",
+        description="Open the Meal Plan page.",
+    ),
+    "shopping": ActionSpec(
+        name="shopping",
+        label="Shop",
+        color="#7e22ce",
+        kind="nav",
+        target_path="ui/shopping",
+        description="Open the Shopping list page.",
+    ),
+    "defaults": ActionSpec(
+        name="defaults",
+        label="Defaults",
+        color="#7e22ce",
+        kind="nav",
+        target_path="ui/defaults",
+        description="Open the storage Defaults page.",
+    ),
     "brightness": ActionSpec(
         name="brightness",
         label="Bright",
@@ -302,6 +538,14 @@ ACTIONS: dict[str, ActionSpec] = {
         color="#334155",
         kind="system",
         description="Show the previous page of keys.",
+    ),
+    "pin": ActionSpec(
+        name="pin",
+        label="Unlock",
+        color="#1d4ed8",
+        kind="pin",
+        description="Switch the deck into a numeric keypad to unlock the "
+        "PIN-locked app, then return to the normal layout.",
     ),
     "timer_1": ActionSpec(
         name="timer_1",
@@ -332,6 +576,14 @@ ACTIONS: dict[str, ActionSpec] = {
         description="Current weather from wttr.in. Configure location and units in config.toml. "
         "Press to refresh. No API key required.",
     ),
+    "forecast": ActionSpec(
+        name="forecast",
+        label="Forecast",
+        color="#0e7490",
+        kind="forecast",
+        description="Today's high/low from wttr.in. Shares the weather fetch. "
+        "Press to refresh. No API key required.",
+    ),
     "ha_1": ActionSpec(name="ha_1", label="HA 1", color=_HA_STATE_COLOR_OFF, kind="ha_entity",
                        description="Home Assistant entity slot 1. Configure in config.toml."),
     "ha_2": ActionSpec(name="ha_2", label="HA 2", color=_HA_STATE_COLOR_OFF, kind="ha_entity",
@@ -343,6 +595,21 @@ ACTIONS: dict[str, ActionSpec] = {
     "ha_5": ActionSpec(name="ha_5", label="HA 5", color=_HA_STATE_COLOR_OFF, kind="ha_entity",
                        description="Home Assistant entity slot 5. Configure in config.toml."),
 }
+
+# Stamp each spec with its glyph from the single-source-of-truth map above, so
+# the icon travels with the ActionSpec (and the web catalog) without repeating
+# the name in every literal.
+for _name, _glyph in ACTION_ICONS.items():
+    _spec = ACTIONS.get(_name)
+    if _spec is not None:
+        ACTIONS[_name] = replace(_spec, icon=_glyph)
+del _name, _glyph, _spec
+
+
+def icon_for(name: str) -> str:
+    """Return the Bootstrap Icons glyph name for an action, or "" if none."""
+    return ACTION_ICONS.get(name, "")
+
 
 # Order used when no explicit key list is configured. The controller trims or
 # paginates this to fit the connected deck.
@@ -357,9 +624,138 @@ DEFAULT_ORDER: list[str] = [
 ]
 
 
+_GROUP_BY_KIND = {
+    "status": "Status", "trigger": "Actions", "nav": "Navigation",
+    "system": "System", "timer": "Timers", "weather": "Weather",
+    "forecast": "Weather", "ha_entity": "Home Assistant",
+}
+
+
+def catalog() -> list[dict]:
+    """Describe every assignable action for the web grid editor."""
+    items = [{
+        "name": spec.name,
+        "label": spec.label,
+        "kind": spec.kind,
+        "group": _GROUP_BY_KIND.get(spec.kind, "Other"),
+        "color": spec.color,
+        "icon": spec.icon,
+        "description": getattr(spec, "description", ""),
+    } for spec in ACTIONS.values()]
+    items.append({"name": "blank", "label": "Empty", "kind": "blank",
+                  "group": "System", "color": "#1f2937",
+                  "description": "Leave this key blank."})
+    return items
+
+
 def resolve(name: str) -> Optional[ActionSpec]:
     """Look up an action by name, or None if it is not known."""
     return ACTIONS.get(name)
+
+
+# Override key types exposed in the setup UI, mapped to the ActionSpec kind the
+# controller already knows how to render and dispatch. "default" is a sentinel
+# that leaves the slot's stock action in place (used to clear an override).
+OVERRIDE_TYPES: tuple[str, ...] = ("ha_action", "timer", "weather", "default")
+
+_OVERRIDE_DEFAULT_COLORS = {
+    "ha_action": _HA_STATE_COLOR_OFF,
+    "timer": "#0d9488",
+    "weather": "#1e40af",
+}
+
+_OVERRIDE_DEFAULT_ICONS = {
+    "ha_action": "house",
+    "timer": "stopwatch",
+    "weather": "cloud-sun",
+}
+
+
+def override_to_spec(slot: int, override: dict) -> Optional[ActionSpec]:
+    """Build an ActionSpec from a single key-override entry, or None.
+
+    ``override`` is one user-configured slot from ``streamdeck_key_overrides``:
+    a dict with ``type`` (one of OVERRIDE_TYPES) and type-specific fields. The
+    returned spec carries a stable, slot-unique ``name`` so per-key timer and
+    HA state can be keyed off it without colliding with the static ACTIONS.
+    A ``default`` type, an unknown type, or a missing required field returns
+    None so the caller keeps the slot's stock action.
+    """
+    if not isinstance(override, dict):
+        return None
+    otype = override.get("type", "")
+    if otype not in OVERRIDE_TYPES or otype == "default":
+        return None
+
+    name = f"override_{int(slot)}"
+    label = str(override.get("label", "")).strip()
+    icon = str(override.get("icon", "")).strip() or _OVERRIDE_DEFAULT_ICONS.get(otype, "")
+    color = _OVERRIDE_DEFAULT_COLORS.get(otype, "#374151")
+
+    if otype == "ha_action":
+        # Either a bare entity_id (toggled via homeassistant.toggle) or an
+        # explicit service such as "script.goodnight". A service without a
+        # target entity is still valid (scripts and scenes take no entity_id).
+        entity_id = str(override.get("entity_id", "")).strip()
+        service = str(override.get("service", "")).strip()
+        if not entity_id and not service:
+            return None
+        if not service:
+            service = "homeassistant.toggle"
+        if not entity_id and "." in service:
+            # A bare service like "script.goodnight" implies its own entity.
+            entity_id = service
+        if not label:
+            label = (entity_id or service).split(".", 1)[-1].replace("_", " ").title()
+        return ActionSpec(
+            name=name, label=label, color=color, kind="ha_entity",
+            ha_entity_id=entity_id, ha_service=service, icon=icon,
+        )
+
+    if otype == "timer":
+        try:
+            minutes = max(0, int(override.get("minutes", 0)))
+        except (TypeError, ValueError):
+            minutes = 0
+        return ActionSpec(
+            name=name, label=label or "Timer", color=color, kind="timer",
+            timer_minutes=minutes, icon=icon,
+        )
+
+    if otype == "weather":
+        location = str(override.get("location", override.get("source", ""))).strip()
+        return ActionSpec(
+            name=name, label=label or "Weather", color=color, kind="weather",
+            weather_location=location, icon=icon,
+        )
+
+    return None
+
+
+def overrides_to_specs(overrides: list, key_count: int) -> dict:
+    """Parse a list of slot overrides into a ``{slot_index: ActionSpec}`` map.
+
+    Each override is a dict with a ``slot`` index and type-specific fields (see
+    ``override_to_spec``). Entries whose slot is outside ``[0, key_count)`` or
+    whose type cannot be built are skipped, so a malformed entry never displaces
+    a valid one. When two overrides target the same slot the last one wins.
+    """
+    out: dict[int, ActionSpec] = {}
+    if not isinstance(overrides, list) or key_count < 1:
+        return out
+    for entry in overrides:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            slot = int(entry.get("slot"))
+        except (TypeError, ValueError):
+            continue
+        if not (0 <= slot < key_count):
+            continue
+        spec = override_to_spec(slot, entry)
+        if spec is not None:
+            out[slot] = spec
+    return out
 
 
 async def poll_status(client: Any, base_url: str, soon_days: int = 7) -> dict[str, int]:
@@ -402,7 +798,7 @@ class ActionContext:
     cycle_brightness: Callable[[], int]           # returns the new percent
     page_next: Callable[[], None]
     page_prev: Callable[[], None]
-    timer_press: Callable[[str], None] = field(default=lambda _name: None)
+    timer_press: Callable[[str, bool], None] = field(default=lambda _name, _long=False: None)
     weather_refresh: Callable[[], Awaitable[None]] = field(
         default=lambda: __import__("asyncio").sleep(0)
     )
@@ -411,9 +807,15 @@ class ActionContext:
     ha_entity_refresh: Callable[[], Awaitable[None]] = field(
         default=lambda: __import__("asyncio").sleep(0)
     )
+    # Enter the on-deck PIN keypad (kind=="pin").
+    keypad_enter: Callable[[], None] = field(default=lambda: None)
+    # Handle a keypad key press (kind=="keypad"); arg is the keypad_key value.
+    keypad_press: Callable[[str], Awaitable[None]] = field(
+        default=lambda _k: __import__("asyncio").sleep(0)
+    )
 
 
-async def run_action(spec: ActionSpec, ctx: ActionContext) -> str:
+async def run_action(spec: ActionSpec, ctx: ActionContext, long_press: bool = False) -> str:
     """Perform the side effect for a pressed key. Returns a short status line.
 
     Handlers are intentionally forgiving: a failed HTTP call returns a readable
@@ -422,8 +824,15 @@ async def run_action(spec: ActionSpec, ctx: ActionContext) -> str:
     base = ctx.base_url.rstrip("/")
 
     if spec.kind == "status":
+        # A status key with a target view doubles as a deep link: glance at the
+        # live count, press, and the kiosk jumps to the matching list. Without a
+        # target view it stays a plain refresh, exactly as before. A missing or
+        # unreachable display just means no navigation happened, never an error.
+        opened = False
+        if spec.target_path:
+            opened = await ctx.navigate(spec.target_path)
         await ctx.refresh()
-        return "refreshed"
+        return "opened" if opened else "refreshed"
 
     if spec.kind == "trigger" and spec.name == "commit":
         try:
@@ -453,12 +862,24 @@ async def run_action(spec: ActionSpec, ctx: ActionContext) -> str:
         return "prev page"
 
     if spec.kind == "timer":
-        ctx.timer_press(spec.name)
-        return f"{spec.name} pressed"
+        ctx.timer_press(spec.name, long_press)
+        return f"{spec.name} {'reset' if long_press else '+1min'}"
+
+    if spec.kind == "pin":
+        ctx.keypad_enter()
+        return "keypad"
+
+    if spec.kind == "keypad":
+        await ctx.keypad_press(spec.keypad_key)
+        return f"keypad {spec.keypad_key}"
 
     if spec.kind == "weather":
         await ctx.weather_refresh()
         return "weather refreshed"
+
+    if spec.kind == "forecast":
+        await ctx.weather_refresh()
+        return "forecast refreshed"
 
     if spec.kind == "ha_entity":
         entity_id = spec.ha_entity_id

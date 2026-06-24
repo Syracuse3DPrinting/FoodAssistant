@@ -5,17 +5,25 @@ import time
 from anthropic import AsyncAnthropic
 
 from .base import VisionProvider, parse_json_response
-from .gemini import (_parse_item, _FOOD_PROMPT, _RECEIPT_PROMPT, _ENRICH_PROMPT,
-                     _RECIPE_PROMPT, _GENERATE_RECIPE_PROMPT, _SUGGEST_INVENTORY_PROMPT)
+from .gemini import (_parse_item, _parse_receipt, _FOOD_PROMPT, _RECEIPT_PROMPT,
+                     _ENRICH_PROMPT, _RECIPE_PROMPT, _GENERATE_RECIPE_PROMPT,
+                     _SUGGEST_INVENTORY_PROMPT)
 from ..models.food import AnalysisResult
 
 _HEALTH_CACHE_TTL = 3600  # seconds: avoid hammering the API on every /health poll
 
 
 class AnthropicProvider(VisionProvider):
-    def __init__(self, api_key: str, model: str = "claude-opus-4-8"):
+    def __init__(self, api_key: str, model: str = "claude-opus-4-8",
+                 extra_keys: list[str] | None = None):
+        self.api_key = api_key
         self.client = AsyncAnthropic(api_key=api_key)
         self.model = model
+        # Spare keys kept for fallback. The primary key drives every call today;
+        # rotation across these on an auth/rate-limit error is the one remaining
+        # step (the Anthropic SDK raises AuthenticationError / RateLimitError,
+        # which a wrapper around _generate could catch to rebuild self.client).
+        self.extra_keys = [k for k in (extra_keys or []) if k and k != api_key]
         self._health_ok: bool | None = None
         self._health_ts: float = 0.0
 
@@ -48,10 +56,7 @@ class AnthropicProvider(VisionProvider):
     async def analyze_receipt(self, image_data: bytes, mime_type: str) -> AnalysisResult:
         raw = await self._generate(_RECEIPT_PROMPT, image_data, mime_type, max_tokens=8192)
         data = parse_json_response(raw)
-        if isinstance(data, dict):
-            data = [data]
-        items = [_parse_item(d, default_confidence=0.85) for d in data]
-        return AnalysisResult(items=items, image_type="receipt", raw_response=raw)
+        return _parse_receipt(data, default_confidence=0.85, raw=raw)
 
     async def enrich_product(self, info: dict) -> dict | None:
         prompt = _ENRICH_PROMPT.format(info=json.dumps(info, ensure_ascii=False))

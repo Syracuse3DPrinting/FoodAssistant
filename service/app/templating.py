@@ -3,6 +3,7 @@ from fastapi import Request
 from fastapi.templating import Jinja2Templates
 
 from .config import settings, theme_info, ui_scale_factor
+from .hardware import is_raspberry_pi
 from .ingress import template_globals
 from .navigation import visible_tabs, auto_hidden_groups
 
@@ -17,6 +18,8 @@ def theme_context(request: Request) -> dict:
                         settings change applies on the next page load.
     ``theme_overlay``: a second CSS href loaded after the main stylesheet
                         (used by overlay themes like Synthwave), or None.
+    ``pin_readonly`` : True when the user is browsing in read-only mode because
+                        kiosk_readonly_when_locked is set and no PIN session exists.
     """
     info = theme_info(settings.ui_theme)
     return {
@@ -27,6 +30,10 @@ def theme_context(request: Request) -> dict:
         "ui_scale": settings.ui_scale,
         "ui_scale_factor": ui_scale_factor(settings.ui_scale),
         "display_rotation": settings.display_rotation,
+        "is_pi": is_raspberry_pi(),
+        "features": settings.features(),
+        "deployment_mode": settings.deployment_mode,
+        "pin_readonly": getattr(request.state, "pin_readonly", False),
     }
 
 
