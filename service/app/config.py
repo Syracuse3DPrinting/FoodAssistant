@@ -1,4 +1,5 @@
 import json
+import socket
 import secrets as _secrets
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -126,6 +127,22 @@ SECRET_SETTING_KEYS = [
 
 _DEFAULT_GROCY_URL = "http://grocy:80"
 
+_LOCALHOST_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+
+
+def _mdns_rewrite(url: str, port: int) -> str:
+    """If url points to localhost, rewrite it to use the mDNS hostname.
+
+    This makes browser-facing links work from other devices on the LAN without
+    requiring a static IP, since <hostname>.local is stable across DHCP changes.
+    """
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    if parsed.hostname in _LOCALHOST_HOSTS:
+        mdns = f"{socket.gethostname()}.local"
+        return f"http://{mdns}:{port}"
+    return url
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -178,8 +195,15 @@ class Settings(BaseSettings):
     grocy_public_url: str = ""
 
     def grocy_link_url(self) -> str:
-        """URL for browser-facing Grocy links (public address if set, else base)."""
-        return (self.grocy_public_url or self.grocy_base_url).rstrip("/")
+        """URL for browser-facing Grocy links (public address if set, else base).
+
+        When no public URL is set and the base URL is localhost, rewrites to the
+        mDNS hostname so links work from other devices on the LAN.
+        """
+        url = (self.grocy_public_url or self.grocy_base_url).rstrip("/")
+        if not self.grocy_public_url:
+            url = _mdns_rewrite(url, 9383)
+        return url
 
     # Mealie recipe manager (optional): enables the Recipes, Meal Plan and
     # Shopping List pages. base_url is for API calls (LAN/docker address);
@@ -192,8 +216,15 @@ class Settings(BaseSettings):
         return bool(self.mealie_base_url and self.mealie_api_key)
 
     def mealie_link_url(self) -> str:
-        """URL for browser-facing links (public address if set, else base)."""
-        return (self.mealie_public_url or self.mealie_base_url).rstrip("/")
+        """URL for browser-facing links (public address if set, else base).
+
+        When no public URL is set and the base URL is localhost, rewrites to the
+        mDNS hostname so links work from other devices on the LAN.
+        """
+        url = (self.mealie_public_url or self.mealie_base_url).rstrip("/")
+        if not self.mealie_public_url:
+            url = _mdns_rewrite(url, 9285)
+        return url
 
     # External recipe suggestions: themealdb | spoonacular | off.
     # TheMealDB's public test key "1" is free; a premium (supporter) key or
