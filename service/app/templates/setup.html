@@ -179,9 +179,16 @@
     <div class="section-card mb-3 d-none" id="wiz-remote-panel">
       <div class="mb-2">
         <label class="form-label">Main server URL <span class="badge bg-danger badge-req ms-1">Required</span></label>
-        <input type="url" class="form-control" id="remote_server_url"
-               placeholder="http://192.168.1.50:9284" value="{{ s.remote_server_url }}">
+        <div class="input-group">
+          <input type="url" class="form-control" id="remote_server_url"
+                 placeholder="http://192.168.1.50:9284" value="{{ s.remote_server_url }}">
+          <button class="btn btn-outline-secondary btn-sm" type="button"
+                  onclick="scanLanForServer('remote_server_url', 'wiz-scan-result')">
+            <i class="bi bi-search me-1"></i>Scan LAN
+          </button>
+        </div>
         <div class="form-text">Address of the main FoodAssistant server, no trailing slash.</div>
+        <div id="wiz-scan-result" class="small mt-1"></div>
       </div>
       <div class="mb-2">
         <label class="form-label">Server API key <span class="badge bg-danger badge-req ms-1">Required</span></label>
@@ -779,10 +786,17 @@
             <p class="text-secondary small">Enter the server's address and its API key. This device authenticates with that key, pulls the shared config, then talks to Grocy/Mealie/AI directly. Find the API key in the server's Settings under Security.</p>
             <div class="mb-3">
               <label class="form-label">Server URL</label>
-              <input type="url" class="form-control" id="remote_server_url"
-                     placeholder="http://192.168.1.10:9284"
-                     value="{{ s.remote_server_url or '' }}">
+              <div class="input-group">
+                <input type="url" class="form-control" id="remote_server_url"
+                       placeholder="http://192.168.1.10:9284"
+                       value="{{ s.remote_server_url or '' }}">
+                <button class="btn btn-outline-secondary btn-sm" type="button"
+                        onclick="scanLanForServer('remote_server_url', 'settings-scan-result')">
+                  <i class="bi bi-search me-1"></i>Scan LAN
+                </button>
+              </div>
               <div class="form-text">Full address of the main server, no trailing slash. Example: <code>http://192.168.1.10:9284</code></div>
+              <div id="settings-scan-result" class="small mt-1"></div>
             </div>
             <div class="mb-3">
               <label class="form-label">Server API Key</label>
@@ -2863,6 +2877,50 @@ function renderSyncStatus(ls) {
     '<div class="d-flex align-items-center mb-2">' + badge +
     '<span class="text-secondary small">Last sync: <span class="sync-time">' +
     esc(fmtSyncTime(ls.at)) + '</span></span></div>' + body;
+}
+
+// Satellite: scan the LAN for a FoodAssistant server and fill the URL field.
+async function scanLanForServer(inputId, resultId) {
+  const inp = document.getElementById(inputId);
+  const out = document.getElementById(resultId);
+  if (!out) return;
+  out.className = 'small mt-1 text-info';
+  out.textContent = 'Scanning LAN...';
+  try {
+    const r = await fetch('/api/devices/scan', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+    const d = await r.json();
+    if (!d.ok) {
+      out.className = 'small mt-1 text-danger';
+      out.textContent = 'Scan failed: ' + (d.error || 'unknown error');
+      return;
+    }
+    const servers = (d.found || []).filter(h => h.mode !== 'satellite');
+    if (!servers.length) {
+      out.className = 'small mt-1 text-warning';
+      out.textContent = 'No FoodAssistant servers found on this subnet.';
+      return;
+    }
+    if (servers.length === 1) {
+      inp.value = 'http://' + servers[0].ip + ':' + servers[0].port;
+      out.className = 'small mt-1 text-success';
+      out.textContent = 'Found: ' + inp.value;
+    } else {
+      // Multiple results: show a list the user can click.
+      out.className = 'small mt-1';
+      out.innerHTML = 'Found ' + servers.length + ' servers: ' +
+        servers.map(function(h) {
+          var url = 'http://' + h.ip + ':' + h.port;
+          return '<a href="#" class="me-2" onclick="(function(){' +
+            'document.getElementById(\'' + inputId + '\').value=\'' + url + '\';' +
+            'document.getElementById(\'' + resultId + '\').textContent=\'Selected: ' + url + '\';' +
+            '})();return false;">' + url + '</a>';
+        }).join(' ');
+    }
+  } catch(e) {
+    out.className = 'small mt-1 text-danger';
+    out.textContent = 'Scan error: ' + e;
+  }
 }
 
 // Satellite: save the upstream link, then pull backend config + defaults.
