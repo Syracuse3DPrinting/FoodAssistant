@@ -1009,9 +1009,16 @@ configure_touch() {
 # Returns 0 when a pointer device (mouse, trackball, touchpad) is attached now.
 # Touchscreens are NOT pointers for our purposes: a touch panel reports absolute
 # touch events, not a moving cursor, so a touch-only box has no pointer here.
-# FORCE_POINTER overrides for tests (1 = pretend a mouse is present, "" = none).
+# FORCE_POINTER overrides for tests. When the variable is set it is
+# authoritative: a non-empty value means a pointer is present, an empty value
+# means none. Leaving it unset falls through to real hardware detection, so
+# production is unaffected. (An empty value must force "absent" rather than
+# fall through, or the result depends on whatever input devices the test host
+# happens to expose.)
 has_pointer_device() {
-  [ -n "${FORCE_POINTER:-}" ] && return 0   # test hook
+  if [ -n "${FORCE_POINTER+set}" ]; then   # test hook: set means authoritative
+    [ -n "$FORCE_POINTER" ] && return 0 || return 1
+  fi
   # by-path symlinks libinput/udev create for relative pointing devices.
   local p
   for p in /dev/input/by-path/*event-mouse* /dev/input/by-id/*event-mouse*; do
