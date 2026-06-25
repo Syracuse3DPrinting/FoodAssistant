@@ -946,6 +946,7 @@
             <div class="test-result" id="grocy-result"></div>
           </div>
 
+          {% if not features.satellite %}
           <div class="section-card">
             <div class="section-title"><i class="bi bi-upc-scan text-success"></i> Barcode Scanner</div>
             <p class="text-secondary small">Choose how barcodes are read. USB and Bluetooth HID scanners work as keyboard
@@ -972,6 +973,7 @@
               <p class="text-secondary small">Camera scanning runs in the browser — make sure this site has camera permission.</p>
             </div>
           </div>
+          {% endif %}
 
           <div class="section-card">
             <div class="section-title"><i class="bi bi-grid-3x3-gap text-info"></i> Custom Storage Categories</div>
@@ -1314,6 +1316,34 @@
               </div>
             </div>
             <div class="form-text mt-2" id="display-hint">Changes apply on the kiosk display immediately.</div>
+          </div>
+          {% endif %}
+
+          {% if features.satellite %}
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-upc-scan text-success"></i> Barcode Scanner</div>
+            <p class="text-secondary small">Choose how barcodes are read on this device. USB and Bluetooth HID scanners work as keyboard wedges — no drivers needed. Camera scanning runs in the browser on the Add Food page.</p>
+            <div class="mb-3">
+              <label class="form-label">Scanner type</label>
+              <select class="form-select" id="scanner_type" onchange="scannerTypeChanged()">
+                <option value=""    {{ 'selected' if not s.scanner_type else '' }}>Not set (pick on Add Food page)</option>
+                <option value="usb" {{ 'selected' if s.scanner_type == 'usb' else '' }}>USB / Bluetooth HID (keyboard wedge)</option>
+                <option value="camera" {{ 'selected' if s.scanner_type == 'camera' else '' }}>Camera / built-in scan module</option>
+              </select>
+            </div>
+            <div id="scanner-usb-hint" class="{{ '' if s.scanner_type == 'usb' else 'd-none' }}">
+              <p class="text-secondary small mb-2">Plug in the scanner and test below — click the field and scan a barcode.</p>
+              <div class="input-group mb-2">
+                <span class="input-group-text"><i class="bi bi-upc"></i></span>
+                <input type="text" class="form-control font-monospace" id="scanner-test-input"
+                       placeholder="Scan a barcode here…" autocomplete="off" spellcheck="false"
+                       oninput="scannerTestInput(this.value)" onkeydown="if(event.key==='Enter'){scannerTestEnter(this.value);this.select();}">
+              </div>
+              <div class="test-result" id="scanner-test-result"></div>
+            </div>
+            <div id="scanner-camera-hint" class="{{ '' if s.scanner_type == 'camera' else 'd-none' }}">
+              <p class="text-secondary small">Camera scanning runs in the browser — make sure this site has camera permission.</p>
+            </div>
           </div>
           {% endif %}
 
