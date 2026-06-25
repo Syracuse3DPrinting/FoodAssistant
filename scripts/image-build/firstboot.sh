@@ -126,6 +126,14 @@ load_config() {
   # Leave empty to auto-derive from DISPLAY_ROTATION.
   TOUCH_DRIVER="${TOUCH_DRIVER:-auto}"
   TOUCH_CALIBRATION_MATRIX="${TOUCH_CALIBRATION_MATRIX:-}"
+  # Type of attached display (mirrors DISPLAY_TYPES in the app's config.py):
+  #   generic         - plain HDMI panel or USB HID touch monitor; no panel
+  #                     specific overlay (the default; touch via TOUCH_DRIVER).
+  #   waveshare_hdmi  - Waveshare HDMI touchscreen HAT. configure_touch then adds
+  #                     a Waveshare dtoverlay and a touch udev rule so the panel's
+  #                     controller is recognised as an input device.
+  # The web wizard writes this to settings.json; config.env can also set it.
+  DISPLAY_TYPE="${DISPLAY_TYPE:-generic}"
   FOODASSISTANT_TAG="${FOODASSISTANT_TAG:-latest}"
   INSTALL_DIR="${INSTALL_DIR:-/opt/foodassistant}"
 
@@ -171,17 +179,19 @@ load_config() {
 # True when this device is a thin remote control surface (no local stack).
 is_remote_mode() { [ "${DEPLOYMENT_MODE:-}" = "pi_remote" ]; }
 
-# Pull deployment_mode / remote_server_url from a settings.json the wizard may
-# have written, so a choice made in the UI survives a re-provision. Best effort:
-# a tiny grep-based read keeps us free of a python/jq dependency here.
+# Pull deployment_mode / remote_server_url / display_type from a settings.json
+# the wizard may have written, so a choice made in the UI survives a re-provision.
+# Best effort: a tiny grep-based read keeps us free of a python/jq dependency here.
 _load_mode_from_settings() {
   local sf="${SETTINGS_JSON:-$INSTALL_DIR/data/settings.json}"
   [ -r "$sf" ] || return 0
-  local mode url
+  local mode url dtype
   mode="$(grep -o '"deployment_mode"[[:space:]]*:[[:space:]]*"[^"]*"' "$sf" 2>/dev/null | sed 's/.*"\([^"]*\)"$/\1/' || true)"
   url="$(grep -o '"remote_server_url"[[:space:]]*:[[:space:]]*"[^"]*"' "$sf" 2>/dev/null | sed 's/.*"\([^"]*\)"$/\1/' || true)"
+  dtype="$(grep -o '"display_type"[[:space:]]*:[[:space:]]*"[^"]*"' "$sf" 2>/dev/null | sed 's/.*"\([^"]*\)"$/\1/' || true)"
   [ -n "$mode" ] && DEPLOYMENT_MODE="$mode"
   [ -n "$url" ] && REMOTE_SERVER_URL="$url"
+  [ -n "$dtype" ] && DISPLAY_TYPE="$dtype"
   return 0
 }
 
@@ -827,12 +837,97 @@ PYEOF
   log "Installed touch calibration helper: $dst"
 }
 
+# Waveshare HDMI touchscreen HAT support (DISPLAY_TYPE=waveshare_hdmi).
+# These panels output video over HDMI and report touch over a USB HID link. The
+# video side works with no extra config, but the touch controller often needs a
+# device tree overlay plus an evdev/libinput hint before it is registered as an
+# input device. This is gated entirely on DISPLAY_TYPE so it never runs for a
+# non-Waveshare device.
+#
+# NOTE: the exact dtoverlay name depends on the specific Waveshare panel model.
+# We apply the commonly documented "vc4-kms-v3d" KMS pipeline plus the generic
+# "waveshare-touch" hint below, which covers the USB-HID Goodix/ADS style panels
+# most of these HATs ship. If a particular panel needs a different overlay (some
+# Waveshare wikis list a model specific name), set WAVESHARE_TOUCH_OVERLAY in
+# config.env to override the overlay line written here.
+_configure_waveshare_hdmi_touch() {
+  local cfg
+  cfg="$(_pi_config_txt)"
+
+  # Boot overlay. KMS must be on for HDMI output (Pi OS Bookworm enables
+  # vc4-kms-v3d by default; we add it only if absent). The touch overlay name
+  # varies per panel; the default below is the common Waveshare HDMI-touch one
+  # and can be overridden with WAVESHARE_TOUCH_OVERLAY.
+  local touch_overlay="${WAVESHARE_TOUCH_OVERLAY:-waveshare-hdmi-touch}"
+  if [ -z "$cfg" ]; then
+    warn "No Pi boot config.txt found; cannot write Waveshare HDMI touch overlay"
+  elif grep -q "dtoverlay=${touch_overlay}" "$cfg" 2>/dev/null; then
+    log "Waveshare touch overlay (${touch_overlay}) already present in $cfg; leaving untouched"
+  elif [ "$DRY_RUN" = "1" ]; then
+    log "DRY_RUN would append Waveshare HDMI touch overlay to $cfg: dtoverlay=${touch_overlay}"
+  else
+    # The overlay name depends on the exact Waveshare panel model; adjust it
+    # (or set WAVESHARE_TOUCH_OVERLAY) if touch is still not detected. Many of
+    # these HATs are plain USB HID and work with no overlay at all, in which
+    # case the udev rule below is enough; the overlay line is harmless if the
+    # firmware has no matching overlay file (it is ignored at boot).
+    printf '\n# FoodAssistant: Waveshare HDMI touchscreen (overlay name varies by panel model)\ndtoverlay=%s\n' "$touch_overlay" >> "$cfg"
+    log "Appended Waveshare HDMI touch overlay (dtoverlay=${touch_overlay}) to $cfg (takes effect after reboot)"
+  fi
+
+  # udev / libinput rule. The Waveshare HDMI-touch controllers report as USB HID
+  # touchscreens but some do not get tagged for libinput automatically, so cage
+  # and Chromium never see touch events. Tag the input device as a touchscreen
+  # so libinput (and thus wlroots/Chromium) picks it up. Best-effort broad match
+  # on the vendor strings Waveshare panels report; harmless on other hardware.
+  local rules="/etc/udev/rules.d/98-foodassistant-waveshare-touch.rules"
+  if [ "$DRY_RUN" = "1" ]; then
+    log "DRY_RUN would write $rules (tag Waveshare HDMI touch controller for libinput)"
+  else
+    mkdir -p /etc/udev/rules.d
+    cat > "$rules" <<'EOF'
+# FoodAssistant: tag the Waveshare HDMI touchscreen controller so libinput (and
+# thus cage/wlroots and Chromium) treats it as a touchscreen input device. The
+# match is broad on purpose: Waveshare HDMI-touch HATs report a range of vendor
+# names (Goodix, ADS, "WaveShare"). Adjust the ATTRS{name} glob if a specific
+# panel reports a different name and its touch is still not registered.
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="*WaveShare*", ENV{ID_INPUT_TOUCHSCREEN}="1", ENV{LIBINPUT_DEVICE_GROUP}="waveshare-hdmi-touch"
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="*Waveshare*", ENV{ID_INPUT_TOUCHSCREEN}="1", ENV{LIBINPUT_DEVICE_GROUP}="waveshare-hdmi-touch"
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="*Goodix*", ENV{ID_INPUT_TOUCHSCREEN}="1"
+EOF
+    udevadm control --reload-rules 2>/dev/null || true
+    udevadm trigger --subsystem-match=input 2>/dev/null || true
+    log "Wrote Waveshare HDMI touch udev rule: $rules"
+  fi
+
+  # Apply a libinput calibration matrix matching the panel name so taps land
+  # correctly (identity by default; follows DISPLAY_ROTATION / an explicit
+  # TOUCH_CALIBRATION_MATRIX). Mirrors the USB HID touch path above.
+  _write_touch_calibration "*WaveShare*"
+}
+
 configure_touch() {
   local driver="${TOUCH_DRIVER:-auto}"
 
   # Explicit opt-out
   if [ "$driver" = "none" ]; then
     log "Touch driver set to none; skipping touch configuration"
+    return 0
+  fi
+
+  # A Waveshare HDMI touchscreen HAT needs its own overlay + udev rule for the
+  # touch controller to be registered. Apply that here, gated on the display
+  # type chosen in the wizard. The generic touch handling below still runs so
+  # the verification tools and calibration helper are installed too.
+  if [ "${DISPLAY_TYPE:-generic}" = "waveshare_hdmi" ]; then
+    log "Display type is waveshare_hdmi; configuring Waveshare HDMI touchscreen"
+    if [ "$DRY_RUN" = "1" ]; then
+      log "DRY_RUN would install touch verification tools: libinput-tools evtest"
+    else
+      apt_install libinput-tools evtest || warn "touch tools (libinput-tools/evtest) install failed; on-device calibration check unavailable"
+    fi
+    _install_touch_calibrate_helper
+    _configure_waveshare_hdmi_touch
     return 0
   fi
 
@@ -914,9 +1009,16 @@ configure_touch() {
 # Returns 0 when a pointer device (mouse, trackball, touchpad) is attached now.
 # Touchscreens are NOT pointers for our purposes: a touch panel reports absolute
 # touch events, not a moving cursor, so a touch-only box has no pointer here.
-# FORCE_POINTER overrides for tests (1 = pretend a mouse is present, "" = none).
+# FORCE_POINTER overrides for tests. When the variable is set it is
+# authoritative: a non-empty value means a pointer is present, an empty value
+# means none. Leaving it unset falls through to real hardware detection, so
+# production is unaffected. (An empty value must force "absent" rather than
+# fall through, or the result depends on whatever input devices the test host
+# happens to expose.)
 has_pointer_device() {
-  [ -n "${FORCE_POINTER:-}" ] && return 0   # test hook
+  if [ -n "${FORCE_POINTER+set}" ]; then   # test hook: set means authoritative
+    [ -n "$FORCE_POINTER" ] && return 0 || return 1
+  fi
   # by-path symlinks libinput/udev create for relative pointing devices.
   local p
   for p in /dev/input/by-path/*event-mouse* /dev/input/by-id/*event-mouse*; do
@@ -1092,6 +1194,7 @@ Environment=XDG_RUNTIME_DIR=/run/user/$kuid
 ${cursor_env:+$cursor_env
 }ExecStart=$cage_bin -- $chromium_bin --kiosk --noerrdialogs \\
   --disable-infobars --no-first-run --ozone-platform=wayland \\
+  --touch-events=enabled --use-gl=egl \\
   --remote-debugging-port=9222 --disable-restore-session-state $KIOSK_URL
 # Apply the saved display rotation once cage is up (cage ignores
 # WLR_OUTPUT_TRANSFORM; the helper drives wlr-randr and retries while the
@@ -1278,6 +1381,25 @@ install_rotation_helper() {
   fi
 }
 
+# Install the foodassistant-update helper to /usr/local/bin so the host bridge's
+# /update endpoint (the in-app "Check for updates" button) can pull new source,
+# refresh the venv, and restart the service. Idempotent: copies whenever a
+# source is found. Resolves it from the boot payload (ASSET_DIR) or cloned repo.
+install_update_helper() {
+  local src=""
+  for candidate in "$ASSET_DIR/foodassistant-update" \
+                   "$REPO_DIR/scripts/image-build/foodassistant-update"; do
+    [ -f "$candidate" ] && src="$candidate" && break
+  done
+  [ -z "$src" ] && { warn "foodassistant-update not found; in-app updates unavailable"; return 0; }
+  if [ "$DRY_RUN" = "1" ]; then
+    log "DRY_RUN would install $src to /usr/local/bin/foodassistant-update"
+    return 0
+  fi
+  install -m 755 "$src" /usr/local/bin/foodassistant-update
+  log "Installed /usr/local/bin/foodassistant-update"
+}
+
 # Step: host bridge (Pi Hosted / server modes only, not Pi Remote)
 # Installs a small localhost HTTP helper that lets the Docker container call
 # host-level operations (Wi-Fi, hostname, KMS rotation, service restarts)
@@ -1310,6 +1432,8 @@ install_host_bridge() {
   install -m 755 "$bridge_src" /usr/local/bin/foodassistant-host-bridge
   # The bridge's /display/rotation endpoint shells out to this helper.
   install_rotation_helper
+  # The bridge's /update endpoint shells out to the OTA update helper.
+  install_update_helper
   if [ -n "$svc_src" ]; then
     install -m 644 "$svc_src" /etc/systemd/system/foodassistant-host-bridge.service
     systemctl daemon-reload

@@ -8,6 +8,10 @@ on:
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
+    # The app creates its data dir at import time (database.py). The default
+    # /app/data is not writable on the runner, so point it at a writable path.
+    env:
+      DATA_DIR: /tmp/foodassistant-data
     steps:
       - uses: actions/checkout@v4
 

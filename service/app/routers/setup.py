@@ -1,7 +1,6 @@
 import asyncio
 import json
 import re
-import socket
 from pathlib import Path
 import httpx
 from fastapi import APIRouter, Request
@@ -13,7 +12,9 @@ from ..config import (
     settings, APP_VERSION, THEMES, _DEFAULT_THEME,
     UI_SCALES, _DEFAULT_UI_SCALE,
     DISPLAY_ROTATIONS, _DEFAULT_DISPLAY_ROTATION,
+    DISPLAY_TYPES, _DEFAULT_DISPLAY_TYPE,
     DEPLOYMENT_MODES, _DEFAULT_DEPLOYMENT_MODE,
+    browser_host, device_hostname,
 )
 from ..dependencies import reset_providers
 from ..hardware import is_raspberry_pi, board_model
@@ -101,6 +102,7 @@ class SetupPayload(BaseModel):
     grocy_base_url: str = ""
     grocy_api_key: str = ""
     grocy_public_url: str = ""
+    device_hostname: str = ""
     mealie_base_url: str = ""
     mealie_api_key: str = ""
     mealie_public_url: str = ""
@@ -116,6 +118,7 @@ class SetupPayload(BaseModel):
     ui_theme: str = _DEFAULT_THEME
     ui_scale: str = _DEFAULT_UI_SCALE
     display_rotation: int = _DEFAULT_DISPLAY_ROTATION
+    display_type: str = _DEFAULT_DISPLAY_TYPE
     deployment_mode: str = ""
     remote_server_url: str = ""
     upstream_api_key: str = ""
@@ -184,13 +187,21 @@ async def satellite_sync(payload: SatelliteSyncPayload):
 
     from ..services.satellite import sync_from_upstream
     result = await run_in_threadpool(sync_from_upstream)
+    # The recorded last-sync summary (timestamp, ok flag, applied fields) lets
+    # the page redraw its Sync Status panel without a full reload.
+    last = settings.satellite_last_sync if isinstance(settings.satellite_last_sync, dict) else {}
     if result.get("ok"):
         return {
             "ok": True,
             "message": f"Synced {len(result['applied'])} settings and "
                        f"{result['defaults']} expiry defaults from the server.",
+            "last_sync": last,
         }
-    return {"ok": False, "error": result.get("error", "Sync failed.")}
+    return {
+        "ok": False,
+        "error": result.get("error", "Sync failed."),
+        "last_sync": last,
+    }
 
 
 class TestProviderPayload(BaseModel):
@@ -226,21 +237,30 @@ async def _detect_local_grocy() -> str:
 
 
 def _pi_mdns_host() -> str:
-    """Return <hostname>.local for the current Pi, e.g. 'foodassistant.local'."""
-    return f"{socket.gethostname()}.local"
+    """Return the device's own browser host, e.g. '<hostname>.local'.
+
+    Uses the resolved device hostname (a user override, the real host hostname
+    from the host bridge, or socket.gethostname()), not a hardcoded name, so it
+    works when several appliances share a LAN. Falls back to the LAN IP if no
+    hostname is resolvable.
+    """
+    return browser_host()
 
 
-def _grocy_url_for_browser(request: Request, detected: str) -> str:
-    """Adjust a locally-detected Grocy URL for the browser making the request.
+def _grocy_url_for_api(request: Request, detected: str) -> str:
+    """The Grocy URL to pre-fill as the server-side API base.
 
-    On a Pi, use <hostname>.local so the link survives IP address changes.
-    When accessed from a non-Pi server, substitute the request hostname so the
-    pre-filled URL is usable from the browser making the request.
+    This is the address the app process (in a container on an appliance) uses to
+    call Grocy, so it must be reachable from there. On a Pi we keep the detected
+    loopback/Docker address rather than a <hostname>.local link, because mDNS may
+    not resolve inside the container. Off a Pi, when reached from another machine
+    we substitute the request hostname so the pre-filled value works there too.
+    The human "open in browser" link is computed separately (see grocy_link_url).
     """
     if not detected:
         return detected
     if is_raspberry_pi():
-        return f"http://{_pi_mdns_host()}:9383"
+        return detected
     client_host = (request.client.host if request.client else "") or ""
     if client_host in ("127.0.0.1", "::1", "localhost", ""):
         return detected
@@ -259,7 +279,8 @@ def _suggest_mealie_url(request: Request) -> str:
         return ""
     if settings.mealie_base_url:
         return ""
-    return f"http://{_pi_mdns_host()}:9285"
+    host = _pi_mdns_host()
+    return f"http://{host}:9285" if host else ""
 
 
 def available_modes() -> dict:
@@ -277,7 +298,10 @@ async def setup_page(request: Request):
     suggested_grocy_url = ""
     if not settings.grocy_base_url or settings.grocy_base_url == "http://grocy:80":
         raw = await _detect_local_grocy()
-        suggested_grocy_url = _grocy_url_for_browser(request, raw)
+        suggested_grocy_url = _grocy_url_for_api(request, raw)
+    # Human-facing link to open Grocy in a browser. Prefers the configured
+    # browser URL (public URL, else the base URL rewritten to <hostname>.local).
+    grocy_browser_link = settings.grocy_link_url()
     modes = available_modes()
     # Default the picker: keep the saved choice if still valid, else the only
     # mode that fits this host (or the generic default).
@@ -301,7 +325,9 @@ async def setup_page(request: Request):
         "themes": THEMES,
         "ui_scales": UI_SCALES,
         "display_rotations": DISPLAY_ROTATIONS,
+        "display_types": DISPLAY_TYPES,
         "suggested_grocy_url": suggested_grocy_url,
+        "grocy_browser_link": grocy_browser_link,
         "suggested_mealie_url": _suggest_mealie_url(request),
         "deployment_modes": modes,
         "current_mode": current_mode,
@@ -369,6 +395,10 @@ async def save_setup(payload: SetupPayload):
         data.pop("ai_extra_keys", None)   # absent = keep stored extras
     if data.get("display_rotation") not in DISPLAY_ROTATIONS:
         data["display_rotation"] = _DEFAULT_DISPLAY_ROTATION
+    # Drop an unknown display type rather than persisting a broken value; an
+    # absent value leaves the stored choice untouched.
+    if "display_type" in data and data["display_type"] not in DISPLAY_TYPES:
+        data.pop("display_type", None)
     # Drop an unknown deployment mode rather than persisting a broken value;
     # an empty/absent mode leaves the existing choice untouched.
     if data.get("deployment_mode") and data["deployment_mode"] not in DEPLOYMENT_MODES:
@@ -400,22 +430,86 @@ async def save_storage_categories(payload: StorageCategoriesPayload):
     return {"ok": True, "categories": clean}
 
 
+def _is_local_grocy_host(url: str) -> bool:
+    """True when url names this device (loopback, the Docker service, or the
+    device's own <hostname>.local / LAN address). Such an address may be entered
+    as a browser link the app container cannot itself reach, so the test is
+    allowed to fall back to loopback candidates. A genuinely remote Grocy is
+    tested only at the URL given, so we never mask its auth error with a
+    different, co-hosted Grocy."""
+    from urllib.parse import urlparse
+    host = (urlparse(url).hostname or "").lower()
+    if not host:
+        return False
+    if host in {"localhost", "127.0.0.1", "::1", "0.0.0.0", "grocy"}:
+        return True
+    own = (device_hostname() or "").lower()
+    if own and host in (own, f"{own}.local"):
+        return True
+    return False
+
+
+def _grocy_test_targets(entered: str) -> list[str]:
+    """Server-side URLs to try for a Grocy connection test, best first.
+
+    The user may enter a browser-facing address for a co-hosted Grocy (e.g.
+    http://<host>.local:9383 or http://127.0.0.1:9383) that the app container
+    cannot resolve or reach, even though Grocy is up. For such local addresses we
+    try the entered URL first, then fall back to the addresses the app process
+    can actually use (the Docker service name and loopback on the published
+    port). A remote Grocy URL is tested as-is, with no fallback. Duplicates are
+    dropped while preserving order.
+    """
+    entered = (entered or "").rstrip("/")
+    candidates = [entered]
+    if _is_local_grocy_host(entered):
+        candidates += _LOCAL_GROCY_CANDIDATES
+    targets: list[str] = []
+    for u in candidates:
+        u = (u or "").rstrip("/")
+        if u and u not in targets:
+            targets.append(u)
+    return targets
+
+
 @router.post("/test/grocy")
 async def test_grocy(payload: TestGrocyPayload):
-    url = (payload.grocy_base_url or settings.grocy_base_url).rstrip("/")
+    entered = (payload.grocy_base_url or settings.grocy_base_url).rstrip("/")
     key = payload.grocy_api_key or settings.grocy_api_key
-    if not url or not key:
+    if not entered or not key:
         return JSONResponse({"ok": False, "error": "URL and API key are both required."})
-    try:
-        async with httpx.AsyncClient(timeout=6.0) as client:
-            r = await client.get(f"{url}/api/system/info",
-                                 headers={"GROCY-API-KEY": key})
+
+    # Grocy's API needs the GROCY-API-KEY header; a bare browser hit returns 401.
+    # We always test the API endpoint with the key so "reachable" means "usable".
+    last_unreachable = ""
+    auth_failure = ""
+    for url in _grocy_test_targets(entered):
+        try:
+            async with httpx.AsyncClient(timeout=6.0) as client:
+                r = await client.get(f"{url}/api/system/info",
+                                     headers={"GROCY-API-KEY": key})
+        except Exception as e:
+            last_unreachable = _safe_error(e, key)
+            continue
         if r.status_code == 200:
             version = r.json().get("grocy_version", "?")
-            return {"ok": True, "message": f"Connected: Grocy {version}"}
-        return {"ok": False, "error": f"HTTP {r.status_code}: {_safe_error(r.text[:200], key)}"}
-    except Exception as e:
-        return {"ok": False, "error": _safe_error(e, key)}
+            note = "" if url == entered else f" (reached via {url})"
+            return {"ok": True, "message": f"Connected: Grocy {version}{note}"}
+        if r.status_code in (401, 403):
+            # Reached Grocy, but it rejected the key. Distinct from unreachable:
+            # the address is good, the API key is wrong or lacks permissions.
+            # Keep the first reachable URL's report (the one the user entered).
+            if not auth_failure:
+                auth_failure = (f"Grocy is reachable at {url} but rejected the API "
+                                f"key (HTTP {r.status_code}). Check the key under "
+                                f"Grocy, Profile, Manage API keys.")
+            continue
+        last_unreachable = f"HTTP {r.status_code}: {_safe_error(r.text[:200], key)}"
+
+    if auth_failure:
+        return {"ok": False, "error": auth_failure}
+    return {"ok": False,
+            "error": last_unreachable or f"Could not reach Grocy at {entered}."}
 
 
 @router.post("/test/mealie")
@@ -811,6 +905,29 @@ async def kiosk_install():
         return JSONResponse({"ok": False, "error": str(e)})
 
 
+@router.post("/update")
+async def update_software():
+    """Pull the latest source and restart the service, via the host bridge.
+
+    Only meaningful on a Pi Remote (satellite): that device runs the app from a
+    Python venv with no Docker image to re-pull, so the host bridge shells out
+    to foodassistant-update (git pull, venv pip when requirements changed, then
+    a service restart). The bridge runs the work synchronously and returns
+    {ok, before, after, restarted, log}; a failed pull leaves the running
+    version untouched and reports the error. The pull plus a pip install can
+    take a couple of minutes on a Pi, so the proxy timeout is generous.
+    """
+    if not settings.is_satellite():
+        return JSONResponse(
+            {"ok": False, "error": "Updates are only available on Pi Remote devices."})
+    try:
+        async with httpx.AsyncClient(timeout=620.0) as c:
+            r = await c.post(f"{_HOST_BRIDGE}/update")
+        return r.json()
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+
+
 @router.get("/streamdeck/config")
 async def streamdeck_config_get():
     """Proxy GET config from host bridge."""
@@ -922,7 +1039,7 @@ async def _evtest_sse(device: str):
         yield f"data: {json.dumps({'type': 'error', 'msg': 'evtest not found'})}\n\n"
         return
 
-    code_x = code_y = None
+    code_x = None
     ranges: dict = {}
     ranges_sent = False
     x = y = None
@@ -1002,6 +1119,47 @@ async def calibrate_touch_request():
 async def calibrate_touch_pending():
     """Polled by the kiosk page; true once a remote browser asks to calibrate."""
     return {"pending": _CAL_FLAG.exists()}
+
+
+# Kiosk navigate-to-dashboard
+# ---------------------------
+# When the setup wizard is finished from a remote browser, the Pi's attached
+# kiosk display is still sitting on the wizard page. It cannot navigate itself,
+# so the wizard sets this flag and the kiosk poller (in base.html) picks it up
+# and drives its own display to the dashboard. Same one-shot flag pattern as the
+# touch-calibration flow above.
+_KIOSK_NAV_FLAG = Path(settings.data_dir) / "kiosk_navigate.flag"
+
+
+@router.post("/kiosk/navigate/request")
+async def kiosk_navigate_request():
+    """Signal the kiosk to leave the wizard and load the dashboard.
+
+    Called by the wizard once setup saves successfully. Best effort: if the flag
+    cannot be written we report it but never block finishing setup.
+    """
+    try:
+        _KIOSK_NAV_FLAG.parent.mkdir(parents=True, exist_ok=True)
+        _KIOSK_NAV_FLAG.write_text("1")
+    except OSError as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+    return {"ok": True}
+
+
+@router.get("/kiosk/navigate/pending")
+async def kiosk_navigate_pending():
+    """Polled by the kiosk page; true once setup has finished. One-shot.
+
+    Clears the flag as it reports it so the kiosk navigates exactly once and the
+    poll does not loop the display back to the dashboard on every tick.
+    """
+    pending = _KIOSK_NAV_FLAG.exists()
+    if pending:
+        try:
+            _KIOSK_NAV_FLAG.unlink()
+        except OSError:
+            pass
+    return {"pending": pending}
 
 
 @router.get("/calibrate/touch/page", response_class=HTMLResponse)

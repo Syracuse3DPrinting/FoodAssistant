@@ -460,6 +460,52 @@ def test_touch_installs_tools_and_calibrate_helper(tmp_path):
     assert "foodassistant-touch-calibrate" in out
 
 
+# Waveshare HDMI touchscreen (FoodAssistant-qs5): DISPLAY_TYPE=waveshare_hdmi
+# installs the panel's touch overlay + a libinput udev rule so the controller is
+# registered. Gated on the display type so it never runs for other hardware.
+
+def test_waveshare_display_writes_overlay_and_udev(tmp_path):
+    rc, out = _touch_run(tmp_path, {"DISPLAY_TYPE": "waveshare_hdmi"})
+    assert rc == 0, out
+    assert "Display type is waveshare_hdmi" in out
+    assert "98-foodassistant-waveshare-touch.rules" in out
+    # The calibration rule still gets a Waveshare name match.
+    assert "name=*WaveShare*" in out
+
+
+def test_waveshare_overlay_name_overridable(tmp_path):
+    # A panel that needs a different overlay can set WAVESHARE_TOUCH_OVERLAY.
+    rc, out = _touch_run(tmp_path, {
+        "DISPLAY_TYPE": "waveshare_hdmi",
+        "WAVESHARE_TOUCH_OVERLAY": "waveshare-7inch-touch",
+    })
+    assert rc == 0, out
+    # No Pi boot config.txt in the test env, so the overlay is not appended; the
+    # Waveshare touch path still ran (udev rule written).
+    assert "98-foodassistant-waveshare-touch.rules" in out
+
+
+def test_generic_display_skips_waveshare_path(tmp_path):
+    # The default (generic) display must not touch the Waveshare overlay/udev.
+    rc, out = _touch_run(tmp_path, {"TOUCH_DRIVER": "usb",
+                                    "DISPLAY_TYPE": "generic"})
+    assert rc == 0, out
+    assert "Display type is waveshare_hdmi" not in out
+    assert "98-foodassistant-waveshare-touch.rules" not in out
+
+
+def test_waveshare_display_type_read_from_settings_json(tmp_path):
+    # display_type written by the web wizard to settings.json is honoured.
+    sf = tmp_path / "settings.json"
+    sf.write_text('{"display_type": "waveshare_hdmi"}')
+    rc, out = run_firstboot(
+        tmp_path, "HOSTNAME=foodassistant\n",
+        extra_env={"STEPS": "touch", "SETTINGS_JSON": str(sf)},
+    )
+    assert rc == 0, out
+    assert "Display type is waveshare_hdmi" in out
+
+
 def _load_calibrate_helper():
     """Extract the embedded foodassistant-touch-calibrate Python and import it."""
     import importlib.util
@@ -521,9 +567,7 @@ def test_read_minmax_ignores_pressure_axis():
         "      Max      255\n",
         "Testing ... (interrupt to abort)\n",
     ]
-    import io
     import subprocess as sp
-    import types, re
 
     # Patch subprocess.Popen to feed our banner lines
     class _FakeProc:

@@ -179,9 +179,16 @@
     <div class="section-card mb-3 d-none" id="wiz-remote-panel">
       <div class="mb-2">
         <label class="form-label">Main server URL <span class="badge bg-danger badge-req ms-1">Required</span></label>
-        <input type="url" class="form-control" id="remote_server_url"
-               placeholder="http://192.168.1.50:9284" value="{{ s.remote_server_url }}">
+        <div class="input-group">
+          <input type="url" class="form-control" id="remote_server_url"
+                 placeholder="http://192.168.1.50:9284" value="{{ s.remote_server_url }}">
+          <button class="btn btn-outline-secondary btn-sm" type="button"
+                  onclick="scanLanForServer('remote_server_url', 'wiz-scan-result')">
+            <i class="bi bi-search me-1"></i>Scan LAN
+          </button>
+        </div>
         <div class="form-text">Address of the main FoodAssistant server, no trailing slash.</div>
+        <div id="wiz-scan-result" class="small mt-1"></div>
       </div>
       <div class="mb-2">
         <label class="form-label">Server API key <span class="badge bg-danger badge-req ms-1">Required</span></label>
@@ -303,6 +310,15 @@
             <div class="form-text">Rotate if the display is mounted sideways or upside-down.</div>
           </div>
         </div>
+        <div class="mb-2">
+          <label class="form-label">Display type</label>
+          <select class="form-select form-select-sm" id="display_type_wiz" onchange="syncDisplayType()">
+            {% for key, dt in display_types.items() %}
+            <option value="{{ key }}" {{ 'selected' if (s.display_type or 'generic') == key else '' }}>{{ dt.label }}</option>
+            {% endfor %}
+          </select>
+          <div class="form-text">Pick "Waveshare HDMI touchscreen" for a Waveshare HDMI touch HAT so its touch overlay and input rules are installed at next provision.</div>
+        </div>
         <div class="form-check form-switch">
           <input class="form-check-input" type="checkbox" role="switch" id="display_touch"
                  {{ 'checked' if s.display_touch else '' }}>
@@ -340,6 +356,7 @@
         <div class="input-group">
           <input type="url" class="form-control" id="grocy_base_url"
                  placeholder="http://192.168.1.10:9383"
+                 oninput="_updateGrocyOpenLink()"
                  value="{{ s.grocy_base_url if (s.grocy_base_url and s.grocy_base_url != 'http://grocy:80') else suggested_grocy_url }}">
           <a class="btn btn-outline-secondary" id="grocy-open-link" href="#" target="_blank" title="Open Grocy in new tab">
             <i class="bi bi-box-arrow-up-right"></i>
@@ -769,10 +786,17 @@
             <p class="text-secondary small">Enter the server's address and its API key. This device authenticates with that key, pulls the shared config, then talks to Grocy/Mealie/AI directly. Find the API key in the server's Settings under Security.</p>
             <div class="mb-3">
               <label class="form-label">Server URL</label>
-              <input type="url" class="form-control" id="remote_server_url"
-                     placeholder="http://192.168.1.10:9284"
-                     value="{{ s.remote_server_url or '' }}">
+              <div class="input-group">
+                <input type="url" class="form-control" id="remote_server_url"
+                       placeholder="http://192.168.1.10:9284"
+                       value="{{ s.remote_server_url or '' }}">
+                <button class="btn btn-outline-secondary btn-sm" type="button"
+                        onclick="scanLanForServer('remote_server_url', 'settings-scan-result')">
+                  <i class="bi bi-search me-1"></i>Scan LAN
+                </button>
+              </div>
               <div class="form-text">Full address of the main server, no trailing slash. Example: <code>http://192.168.1.10:9284</code></div>
+              <div id="settings-scan-result" class="small mt-1"></div>
             </div>
             <div class="mb-3">
               <label class="form-label">Server API Key</label>
@@ -783,6 +807,38 @@
               <i class="bi bi-arrow-repeat me-1"></i>Sync from server
             </button>
             <div class="test-result" id="upstream-result"></div>
+          </div>
+
+          {% set _ls = s.satellite_last_sync or {} %}
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-activity text-info"></i> Sync Status</div>
+            <p class="text-secondary small">Health of the last pull from the main server. Use Sync Now to refresh on demand. The satellite also re-syncs on its own every {{ s.satellite_sync_minutes }} minutes.</p>
+            <div id="sync-status">
+              {% if _ls.get('at') %}
+              <div class="d-flex align-items-center mb-2">
+                {% if _ls.get('ok') %}
+                <span class="badge bg-success me-2"><i class="bi bi-check-circle me-1"></i>Succeeded</span>
+                {% else %}
+                <span class="badge bg-danger me-2"><i class="bi bi-x-circle me-1"></i>Failed</span>
+                {% endif %}
+                <span class="text-secondary small">Last sync: <span class="sync-time" data-iso="{{ _ls.get('at') }}">{{ _ls.get('at') }}</span></span>
+              </div>
+              {% if _ls.get('ok') %}
+              <div class="small mb-1">Applied {{ _ls.get('applied') | length }} setting(s){% if _ls.get('defaults') %}, {{ _ls.get('defaults') }} expiry default(s){% endif %}.</div>
+                {% if _ls.get('applied') %}
+                <div class="small text-secondary">Fields: <code>{{ _ls.get('applied') | join(', ') }}</code></div>
+                {% endif %}
+              {% else %}
+              <div class="small text-danger">{{ _ls.get('error') or 'Sync failed.' }}</div>
+              {% endif %}
+              {% else %}
+              <div class="text-secondary small">No sync has run yet on this device.</div>
+              {% endif %}
+            </div>
+            <button class="btn btn-outline-info btn-sm mt-3" onclick="syncFromUpstream()">
+              <i class="bi bi-arrow-repeat me-1"></i>Sync Now
+            </button>
+            <div class="test-result" id="sync-now-result"></div>
           </div>
 
           <div class="section-card">
@@ -802,6 +858,16 @@
               <div class="form-text">When enabled, visitors can browse inventory without entering the PIN. Write actions (adding or editing items) are blocked until they log in.</div>
             </div>
             <div class="form-text mt-1">Applies only to this device's screen. Use Settings here to change or clear it. It does not affect the main server.</div>
+          </div>
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-download text-info"></i> Software updates</div>
+            <p class="text-secondary small">This device runs from a local checkout. Check for updates to pull the latest FoodAssistant source, refresh dependencies if they changed, and restart the app. A failed pull leaves the running version untouched.</p>
+            <button class="btn btn-outline-primary btn-sm" id="update-btn" onclick="checkForUpdates()">
+              <i class="bi bi-arrow-repeat me-1"></i>Check for updates
+            </button>
+            <div class="test-result" id="update-result"></div>
+            <pre class="small text-secondary mt-2 d-none" id="update-log" style="white-space:pre-wrap; max-height:220px; overflow:auto;"></pre>
           </div>
 
           <div class="section-card">
@@ -840,6 +906,14 @@
                      placeholder="https://grocy.yourdomain.com"
                      value="{{ s.grocy_public_url }}">
               <div class="form-text">External address used when the UI links you to Grocy. Empty = internal URL.</div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Device hostname <span class="text-secondary small">(optional, for local browser links)</span></label>
+              <input type="text" class="form-control" id="device_hostname" name="device_hostname"
+                     placeholder="kitchen-pi"
+                     value="{{ s.device_hostname }}">
+              <div class="form-text">Used to build <span class="text-info">&lt;hostname&gt;.local</span> links to Grocy and Mealie on this device.
+                Empty = auto-detect. Set this when several FoodAssistant devices share one network.</div>
             </div>
             <button class="btn btn-outline-info btn-sm" onclick="testGrocy()">
               <i class="bi bi-plug me-1"></i>Test Connection
@@ -1521,6 +1595,15 @@ docker compose up -d</code></pre>
                 <div class="form-text">Larger for a small panel; smaller for a wide monitor.</div>
               </div>
             </div>
+            <div class="mb-3">
+              <label class="form-label" for="display_type">Display type</label>
+              <select class="form-select form-select-sm" style="max-width:320px" id="display_type">
+                {% for key, dt in display_types.items() %}
+                <option value="{{ key }}" {{ 'selected' if (s.display_type or 'generic') == key else '' }}>{{ dt.label }}</option>
+                {% endfor %}
+              </select>
+              <div class="form-text">Choose "Waveshare HDMI touchscreen" for a Waveshare HDMI touch HAT. Its touch overlay and input rules apply after the next reboot / re-provision.</div>
+            </div>
             <div class="form-check form-switch mb-2">
               <input class="form-check-input" type="checkbox" role="switch" id="display_touch"
                      {{ 'checked' if s.display_touch else '' }}>
@@ -1773,10 +1856,32 @@ docker compose up -d</code></pre>
 const TABS = {{ tabs | tojson }};
 const HAS_AUTH_PASSWORD = {{ 'true' if has.auth_password else 'false' }};
 const IS_CONFIGURED = {{ 'true' if configured else 'false' }};
-const PI_GROCY_DEFAULT = {{ (('http://' + pi_mdns_host + ':9383') if pi_mdns_host else 'http://localhost:9383') | tojson }};
+// Server-side API base for a co-hosted Grocy. Always loopback so the app
+// container can reach it (mDNS may not resolve inside the container). The
+// browser "Open Grocy" link is a separate, hostname-based URL (GROCY_BROWSER_LINK).
+const PI_GROCY_DEFAULT = 'http://localhost:9383';
+// Human-facing link to open Grocy in a browser (<hostname>.local or LAN IP).
+const GROCY_BROWSER_LINK = {{ (grocy_browser_link or '') | tojson }};
 
 // Shared helpers
 function val(id) { return document.getElementById(id)?.value.trim() || ''; }
+
+// Where the "Open Grocy" button should point. A localhost/Docker API base is
+// not reachable from the browser, so prefer the server-computed browser link
+// (<hostname>.local or LAN IP); otherwise use the entered URL as-is.
+function _grocyOpenHref() {
+  const entered = val('grocy_base_url');
+  const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|grocy)(:|\/|$)/i.test(entered);
+  if ((!entered || isLocal) && GROCY_BROWSER_LINK) return GROCY_BROWSER_LINK;
+  return entered;
+}
+function _updateGrocyOpenLink() {
+  const link = document.getElementById('grocy-open-link');
+  if (link) {
+    const href = _grocyOpenHref();
+    if (href) link.href = href;
+  }
+}
 function num(id, fallback) { const v = parseInt(val(id), 10); return isNaN(v) ? fallback : v; }
 
 function secretVal(id) {
@@ -2315,6 +2420,7 @@ function buildPayload() {
     grocy_base_url:  val('grocy_base_url'),
     grocy_api_key:   secretVal('grocy_api_key'),
     grocy_public_url: val('grocy_public_url'),
+    device_hostname: val('device_hostname'),
     mealie_base_url: val('mealie_base_url'),
     mealie_api_key:  secretVal('mealie_api_key'),
     mealie_public_url: val('mealie_public_url'),
@@ -2331,6 +2437,7 @@ function buildPayload() {
     ui_theme:        document.getElementById('ui_theme')?.value || 'dark',
     ui_scale:        document.getElementById('ui_scale_wiz')?.value || document.getElementById('ui_scale')?.value || 'normal',
     display_rotation: parseInt(document.getElementById('display_rotation_wiz')?.value ?? document.getElementById('display_rotation')?.value ?? '0', 10),
+    display_type:    document.getElementById('display_type_wiz')?.value || document.getElementById('display_type')?.value || 'generic',
     has_streamdeck:  document.getElementById('has_streamdeck')?.checked || false,
     streamdeck_key_count: parseInt(document.getElementById('streamdeck_key_count')?.value || '0', 10),
     streamdeck_idle_timeout: parseInt(document.getElementById('streamdeck_idle_timeout')?.value || '0', 10),
@@ -2693,9 +2800,7 @@ function wizNext() {
     _wizSaveMode();
   }
   if (_wizStep === 4) {
-    const url = val('grocy_base_url');
-    const link = document.getElementById('grocy-open-link');
-    if (link && url) link.href = url;
+    _updateGrocyOpenLink();
   }
   if (_wizStep === 5) wizUpdateAiKeyVisibility();
 
@@ -2731,10 +2836,100 @@ async function testRemote() {
   }
 }
 
+// Show an ISO-8601 UTC timestamp in the visitor's local time, e.g. for the
+// satellite Sync Status panel. Returns the raw string if it cannot be parsed.
+function fmtSyncTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleString();
+}
+
+// Render any sync-time stamps already on the page into local time.
+function _initSyncTimes() {
+  document.querySelectorAll('.sync-time[data-iso]').forEach((el) => {
+    el.textContent = fmtSyncTime(el.getAttribute('data-iso'));
+  });
+}
+
+// Redraw the Sync Status panel from a last_sync summary returned by the server.
+function renderSyncStatus(ls) {
+  const box = document.getElementById('sync-status');
+  if (!box || !ls || !ls.at) return;
+  const esc = (s) => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const badge = ls.ok
+    ? '<span class="badge bg-success me-2"><i class="bi bi-check-circle me-1"></i>Succeeded</span>'
+    : '<span class="badge bg-danger me-2"><i class="bi bi-x-circle me-1"></i>Failed</span>';
+  let body = '';
+  if (ls.ok) {
+    const applied = ls.applied || [];
+    let line = 'Applied ' + applied.length + ' setting(s)';
+    if (ls.defaults) line += ', ' + ls.defaults + ' expiry default(s)';
+    body = '<div class="small mb-1">' + line + '.</div>';
+    if (applied.length) {
+      body += '<div class="small text-secondary">Fields: <code>' + esc(applied.join(', ')) + '</code></div>';
+    }
+  } else {
+    body = '<div class="small text-danger">' + esc(ls.error || 'Sync failed.') + '</div>';
+  }
+  box.innerHTML =
+    '<div class="d-flex align-items-center mb-2">' + badge +
+    '<span class="text-secondary small">Last sync: <span class="sync-time">' +
+    esc(fmtSyncTime(ls.at)) + '</span></span></div>' + body;
+}
+
+// Satellite: scan the LAN for a FoodAssistant server and fill the URL field.
+async function scanLanForServer(inputId, resultId) {
+  const inp = document.getElementById(inputId);
+  const out = document.getElementById(resultId);
+  if (!out) return;
+  out.className = 'small mt-1 text-info';
+  out.textContent = 'Scanning LAN...';
+  try {
+    const r = await fetch('/api/devices/scan', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+    const d = await r.json();
+    if (!d.ok) {
+      out.className = 'small mt-1 text-danger';
+      out.textContent = 'Scan failed: ' + (d.error || 'unknown error');
+      return;
+    }
+    const servers = (d.found || []).filter(h => h.mode !== 'satellite');
+    if (!servers.length) {
+      out.className = 'small mt-1 text-warning';
+      out.textContent = 'No FoodAssistant servers found on this subnet.';
+      return;
+    }
+    if (servers.length === 1) {
+      inp.value = 'http://' + servers[0].ip + ':' + servers[0].port;
+      out.className = 'small mt-1 text-success';
+      out.textContent = 'Found: ' + inp.value;
+    } else {
+      // Multiple results: show a list the user can click.
+      out.className = 'small mt-1';
+      out.innerHTML = 'Found ' + servers.length + ' servers: ' +
+        servers.map(function(h) {
+          var url = 'http://' + h.ip + ':' + h.port;
+          return '<a href="#" class="me-2" onclick="(function(){' +
+            'document.getElementById(\'' + inputId + '\').value=\'' + url + '\';' +
+            'document.getElementById(\'' + resultId + '\').textContent=\'Selected: ' + url + '\';' +
+            '})();return false;">' + url + '</a>';
+        }).join(' ');
+    }
+  } catch(e) {
+    out.className = 'small mt-1 text-danger';
+    out.textContent = 'Scan error: ' + e;
+  }
+}
+
 // Satellite: save the upstream link, then pull backend config + defaults.
 async function syncFromUpstream() {
   const out = document.getElementById('upstream-result');
-  if (out) { out.className = 'test-result text-secondary'; out.textContent = 'Syncing…'; }
+  const now = document.getElementById('sync-now-result');
+  for (const el of [out, now]) {
+    if (el) { el.className = 'test-result text-secondary'; el.textContent = 'Syncing…'; }
+  }
   try {
     const r = await fetch('setup/satellite/sync', {
       method: 'POST',
@@ -2745,12 +2940,54 @@ async function syncFromUpstream() {
       }),
     });
     const d = await r.json();
+    const msg = d.ok ? d.message : (d.error || 'Sync failed.');
+    for (const el of [out, now]) {
+      if (el) {
+        el.className = 'test-result ' + (d.ok ? 'text-success' : 'text-danger');
+        el.textContent = msg;
+      }
+    }
+    if (d.last_sync) renderSyncStatus(d.last_sync);
+  } catch (e) {
+    for (const el of [out, now]) {
+      if (el) { el.className = 'test-result text-danger'; el.textContent = String(e); }
+    }
+  }
+}
+
+// Satellite: pull the latest source and restart the app via the host bridge.
+// The request can take a couple of minutes when dependencies change, so disable
+// the button and show progress. The result includes a short before/after commit
+// summary and the full update log.
+async function checkForUpdates() {
+  const out = document.getElementById('update-result');
+  const logEl = document.getElementById('update-log');
+  const btn = document.getElementById('update-btn');
+  if (out) { out.className = 'test-result text-secondary'; out.textContent = 'Checking for updates… this can take a minute.'; }
+  if (logEl) { logEl.classList.add('d-none'); logEl.textContent = ''; }
+  if (btn) { btn.disabled = true; }
+  try {
+    const r = await fetch('setup/update', { method: 'POST' });
+    const d = await r.json();
     if (out) {
       out.className = 'test-result ' + (d.ok ? 'text-success' : 'text-danger');
-      out.textContent = d.ok ? d.message : (d.error || 'Sync failed.');
+      if (d.ok) {
+        if (d.before && d.after && d.before === d.after) {
+          out.textContent = 'Already up to date (' + d.after + ').';
+        } else if (d.restarted) {
+          out.textContent = 'Updated ' + (d.before || '?') + ' → ' + (d.after || '?') + ' and restarted.';
+        } else {
+          out.textContent = 'Updated' + (d.after ? ' to ' + d.after : '') + '.';
+        }
+      } else {
+        out.textContent = d.error || 'Update failed.';
+      }
     }
+    if (logEl && d.log) { logEl.textContent = d.log; logEl.classList.remove('d-none'); }
   } catch (e) {
     if (out) { out.className = 'test-result text-danger'; out.textContent = String(e); }
+  } finally {
+    if (btn) { btn.disabled = false; }
   }
 }
 
@@ -2777,6 +3014,17 @@ function syncRotation() {
   if (settingsEl && wizVal) settingsEl.value = wizVal;
 }
 
+function syncDisplayType() {
+  const wizVal = document.getElementById('display_type_wiz')?.value;
+  const settingsEl = document.getElementById('display_type');
+  if (settingsEl && wizVal) settingsEl.value = wizVal;
+  // A Waveshare HDMI HAT is a touch panel, so tick the touch flag to match.
+  if (wizVal === 'waveshare_hdmi') {
+    const touch = document.getElementById('display_touch');
+    if (touch) touch.checked = true;
+  }
+}
+
 function wizUpdateAiKeyVisibility() {
   const p = document.getElementById('vision_provider')?.value;
   const noneNote = document.getElementById('wiz-ai-none-note');
@@ -2798,11 +3046,7 @@ function _wizApplyInstallMode() {
     if (applianceNote) applianceNote.classList.add('d-none');
   }
   // Update "Open Grocy" link
-  const link = document.getElementById('grocy-open-link');
-  if (link) {
-    const url = urlField?.value || '';
-    if (url) link.href = url;
-  }
+  _updateGrocyOpenLink();
 }
 
 // Build the Step 7 summary list
@@ -2971,6 +3215,12 @@ async function wizSaveAll() {
     });
     const d = await r.json();
     if (d.ok) {
+      // Setup ran in this (possibly remote) browser. If a Pi kiosk display is
+      // sitting on the wizard, it cannot navigate itself, so signal it to leave
+      // the wizard and load the dashboard. Best effort: never block finishing.
+      try {
+        await fetch('setup/kiosk/navigate/request', { method: 'POST' });
+      } catch (e) { /* kiosk hand-off is optional */ }
       // A satellite is a full local app (it pulled its config), so open its
       // own UI like any other mode.
       window.location.href = 'ui/';
@@ -3035,6 +3285,7 @@ async function saveDisplaySettings() {
     document.getElementById('kms_rotation')?.value
     ?? document.getElementById('display_rotation')?.value ?? '0', 10);
   const display_touch = document.getElementById('display_touch')?.checked || false;
+  const display_type = document.getElementById('display_type')?.value || 'generic';
   const display_idle_timeout = parseInt(document.getElementById('display_idle_timeout')?.value || '0', 10);
   try {
     await fetch('setup/scale', {
@@ -3043,7 +3294,7 @@ async function saveDisplaySettings() {
     });
     await fetch('setup/save', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({display_touch, display_idle_timeout}),
+      body: JSON.stringify({display_touch, display_type, display_idle_timeout}),
     });
     fetch('setup/kiosk/restart', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'}).catch(() => {});
     if (el) el.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Display settings saved.</span>';
@@ -3881,6 +4132,8 @@ async function loadHardwareDetect() {
 
 document.addEventListener('DOMContentLoaded', checkApStatus);
 document.addEventListener('DOMContentLoaded', loadHardwareDetect);
+document.addEventListener('DOMContentLoaded', _updateGrocyOpenLink);
+document.addEventListener('DOMContentLoaded', _initSyncTimes);
 </script>
 
 <script>
