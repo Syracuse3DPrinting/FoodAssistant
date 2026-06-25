@@ -130,6 +130,10 @@ class Controller:
         self._last_activity: float = time.monotonic()
         self._idle_blanked: bool = False
         self._wake_keys: set[int] = set()
+        # False when reinit() failed to recover the deck (e.g. it is physically
+        # unplugged and not yet back). The watchdog uses this to keep retrying
+        # even when the health probe passes on the closed handle.
+        self._deck_live: bool = True
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -213,9 +217,11 @@ class Controller:
             try:
                 self._open_deck()
                 self._draw_page()
+                self._deck_live = True
                 log.info("Stream Deck re-initialised (rotation=%d)", self.config.rotation)
                 return True
             except Exception as e:  # noqa: BLE001 - watchdog will retry
+                self._deck_live = False
                 log.error("Stream Deck re-init failed: %s", e)
                 return False
 
@@ -531,17 +537,24 @@ class Controller:
     def _deck_is_healthy(self) -> bool:
         """Cheap liveness probe for the deck.
 
-        Reads a property the StreamDeck library serves from the live HID handle.
-        A dead or unplugged deck raises here (the worker thread is gone or the
-        transport errored), which is exactly the unresponsive state a service
-        restart does not fix. While the deck is intentionally blanked for idle
-        we skip the probe so the watchdog does not fight the idle blanker.
+        Checks both the HID handle and the background read thread. A crashed or
+        wedged deck raises on key_count()/key_image_format(). A physically
+        unplugged deck does not raise (those are in-memory constants), but its
+        read thread dies; checking it catches the disconnect case. While the deck
+        is intentionally blanked for idle we skip the probe so the watchdog does
+        not fight the idle blanker.
         """
         if self._idle_blanked:
             return True
         try:
             self.deck.key_count()
             self.deck.key_image_format()
+            # key_count() and key_image_format() are class constants in the
+            # StreamDeck library and succeed even when the USB device is gone.
+            # The background read thread dies on physical disconnect, so check it.
+            read_thread = getattr(self.deck, '_read_thread', None)
+            if read_thread is not None and not read_thread.is_alive():
+                return False
             return True
         except Exception:  # noqa: BLE001 - any failure means re-init
             return False
@@ -560,7 +573,10 @@ class Controller:
             log.info("config file changed; re-initialising deck")
             await self.reinit(reload_config=True)
             return
-        if not self._deck_is_healthy():
+        # Also retry when _deck_live is False: a previous reinit() failed (the
+        # deck was unplugged and not yet back). The health probe alone won't
+        # catch this because the closed handle's constant properties still pass.
+        if not self._deck_live or not self._deck_is_healthy():
             log.warning("Stream Deck not responding; re-initialising")
             await self.reinit(reload_config=False)
 

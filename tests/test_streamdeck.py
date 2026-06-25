@@ -1080,6 +1080,16 @@ def test_ha_run_action_calls_service():
 # -- idle blank ----------------------------------------------------------------
 
 
+class _FakeThread:
+    """Stand-in for the StreamDeck library's background read thread."""
+
+    def __init__(self, alive: bool = True) -> None:
+        self.alive = alive
+
+    def is_alive(self) -> bool:
+        return self.alive
+
+
 class _FakeDeck:
     """Minimal stand-in for a StreamDeck device used in idle-blank tests."""
 
@@ -1093,6 +1103,11 @@ class _FakeDeck:
         # When True, the liveness probe and key writes raise, modelling a deck
         # whose worker thread has died or whose USB transport has errored.
         self.dead: bool = False
+        # When True, open() raises, modelling a deck that is physically absent
+        # (unplugged and not yet back).
+        self.open_raises: bool = False
+        # Fake background read thread; set alive=False to model a disconnect.
+        self._read_thread: _FakeThread = _FakeThread(alive=True)
 
     def key_count(self) -> int:
         if self.dead:
@@ -1109,8 +1124,11 @@ class _FakeDeck:
 
     def open(self) -> None:
         self.open_calls += 1
+        if self.open_raises:
+            raise OSError("USB device not found")
         # A successful re-open means the deck is answering again.
         self.dead = False
+        self._read_thread = _FakeThread(alive=True)
 
     def close(self) -> None:
         self.close_calls += 1
@@ -1313,4 +1331,38 @@ def test_watchdog_no_op_when_nothing_changed():
     loop.run_until_complete(ctrl._watchdog_once())
     # Healthy deck, no config change: the watchdog must not churn the device.
     assert deck.open_calls == before_open
+    loop.close()
+
+
+def test_health_check_detects_dead_read_thread():
+    # A physically disconnected deck leaves key_count() working (in-memory
+    # constant) but kills the read thread. The health probe must catch this.
+    ctrl, deck, loop = _make_controller()
+    assert ctrl._deck_is_healthy() is True
+    deck._read_thread.alive = False
+    assert ctrl._deck_is_healthy() is False
+    loop.close()
+
+
+def test_watchdog_retries_until_deck_replugged():
+    # When reinit() fails (deck absent), _deck_live goes False. The next
+    # watchdog tick must retry even though the health probe passes on the closed
+    # handle, so the deck recovers as soon as it is physically replugged.
+    ctrl, deck, loop = _make_controller()
+
+    # Simulate unplug: thread dies and the device cannot be opened yet.
+    deck._read_thread.alive = False
+    deck.open_raises = True
+
+    # First tick: detects dead thread, calls reinit, but open() raises.
+    loop.run_until_complete(ctrl._watchdog_once())
+    assert ctrl._deck_live is False
+
+    # Replug: the device is back; open() succeeds again.
+    deck.open_raises = False
+
+    # Second tick: _deck_live is False so the watchdog retries and recovers.
+    loop.run_until_complete(ctrl._watchdog_once())
+    assert ctrl._deck_live is True
+    assert deck.open_calls >= 2
     loop.close()
