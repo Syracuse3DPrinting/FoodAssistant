@@ -212,6 +212,7 @@ Check each project's release notes before a major bump - Mealie in particular ha
 - [docs/hardware/supported-hardware.md](docs/hardware/supported-hardware.md) - minimum specs and the board test matrix.
 - [docs/hardware/sd-image.md](docs/hardware/sd-image.md) - flashing the ready-made SD-card image.
 - [docs/api.md](docs/api.md) - REST endpoint reference.
+- [docs/AI_DECLARATIONS.md](docs/AI_DECLARATIONS.md) - how AI tools were used to build FoodAssistant.
 
 ## API
 
