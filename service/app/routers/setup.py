@@ -14,6 +14,7 @@ from ..config import (
     DISPLAY_ROTATIONS, _DEFAULT_DISPLAY_ROTATION,
     DISPLAY_TYPES, _DEFAULT_DISPLAY_TYPE,
     DEPLOYMENT_MODES, _DEFAULT_DEPLOYMENT_MODE,
+    AI_MODELS,
     browser_host, device_hostname,
 )
 from ..dependencies import reset_providers
@@ -367,6 +368,7 @@ async def setup_page(request: Request):
         # count of stored satellite extra keys (values never sent to the page)
         "extra_api_key_count": len([k for k in (settings.extra_api_keys if isinstance(settings.extra_api_keys, list) else []) if k]),
         "extra_api_key_names": (settings.extra_api_key_names if isinstance(settings.extra_api_key_names, list) else []),
+        "ai_models": AI_MODELS,
         "tabs": all_tabs(),
         "version": APP_VERSION,
         "custom_categories": custom_categories(),

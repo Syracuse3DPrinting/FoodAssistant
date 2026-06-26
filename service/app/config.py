@@ -82,6 +82,37 @@ DEPLOYMENT_MODES = {
 _DEFAULT_DEPLOYMENT_MODE = "server"
 
 
+# Curated, vision-capable model suggestions per provider, newest first. The
+# setup UI offers these in a dropdown with the note as guidance and always
+# keeps a free-text override for a model not listed here. Update as providers
+# ship new models; the override means an outdated list never blocks anyone.
+AI_MODELS = {
+    "gemini": [
+        {"id": "gemini-2.5-flash",       "note": "Fast, low cost, multimodal. Best default for photos and barcodes."},
+        {"id": "gemini-2.5-pro",         "note": "Highest accuracy, slower and pricier. For tricky receipts."},
+        {"id": "gemini-2.5-flash-lite",  "note": "Cheapest and fastest; fine for simple labels."},
+        {"id": "gemini-2.0-flash",       "note": "Previous generation, still capable."},
+    ],
+    "openai": [
+        {"id": "gpt-4o-mini", "note": "Fast, cheap, multimodal. Good default."},
+        {"id": "gpt-4o",      "note": "Higher accuracy multimodal; costs more."},
+        {"id": "gpt-4.1-mini","note": "Strong cost/quality balance."},
+        {"id": "gpt-4.1",     "note": "Most capable for hard images."},
+    ],
+    "anthropic": [
+        {"id": "claude-haiku-4-5-20251001", "note": "Fast, cheap, vision-capable. Good default."},
+        {"id": "claude-sonnet-4-6",         "note": "Balanced accuracy and cost."},
+        {"id": "claude-opus-4-8",           "note": "Most capable; for difficult receipts."},
+    ],
+    "ollama": [
+        {"id": "llava:7b",              "note": "Lightweight local vision. Low RAM."},
+        {"id": "llava:13b",             "note": "Better accuracy, needs more RAM."},
+        {"id": "llama3.2-vision:11b",   "note": "Newer local vision model."},
+        {"id": "moondream",             "note": "Tiny and fast; lower accuracy."},
+    ],
+}
+
+
 def theme_info(name: str) -> dict:
     """Resolve a theme name to its descriptor, falling back to the default."""
     return THEMES.get(name, THEMES[_DEFAULT_THEME])

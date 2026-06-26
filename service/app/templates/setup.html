@@ -117,6 +117,24 @@
 </div>
 {%- endmacro %}
 
+{# Provider-dependent model picker: a dropdown of curated vision-capable models
+   with capability notes, plus a free-text override (Custom) for anything not
+   listed. The text input keeps id="<provider>_model" so buildPayload reads the
+   effective value whether a listed model or a custom one is chosen. #}
+{% macro ai_model_field(provider, current) -%}
+<select class="form-select ai-model-select" id="{{ provider }}_model_sel"
+        data-provider="{{ provider }}" onchange="aiModelSelChanged('{{ provider }}')">
+  {% for m in ai_models.get(provider, []) %}
+  <option value="{{ m.id }}">{{ m.id }} — {{ m.note }}</option>
+  {% endfor %}
+  <option value="__custom__">Custom model…</option>
+</select>
+<input type="text" class="form-control font-monospace mt-2 d-none" id="{{ provider }}_model"
+       value="{{ current }}" placeholder="exact model id (e.g. {{ (ai_models.get(provider, [{'id':''}])[0]).id }})">
+<div class="form-text ai-model-note" id="{{ provider }}_model_note"></div>
+{%- endmacro %}
+
+
 {% macro satellite_keys() -%}
 <div class="mb-3" id="satellite-extra-keys-section">
   <label class="form-label">Additional satellite keys
@@ -458,7 +476,7 @@
         </div>
         <div class="mb-3">
           <label class="form-label">Model</label>
-          <input type="text" class="form-control" id="gemini_model" value="{{ s.gemini_model }}">
+          {{ ai_model_field('gemini', s.gemini_model) }}
         </div>
       </div>
 
@@ -470,7 +488,7 @@
         </div>
         <div class="mb-3">
           <label class="form-label">Model <span class="text-secondary small">(must be vision-capable)</span></label>
-          <input type="text" class="form-control" id="openai_model" value="{{ s.openai_model }}">
+          {{ ai_model_field('openai', s.openai_model) }}
         </div>
       </div>
 
@@ -482,8 +500,7 @@
         </div>
         <div class="mb-3">
           <label class="form-label">Model</label>
-          <input type="text" class="form-control" id="anthropic_model" value="{{ s.anthropic_model }}">
-          <div class="form-text">claude-opus-4-8 is the most capable; claude-haiku-4-5 the budget option.</div>
+          {{ ai_model_field('anthropic', s.anthropic_model) }}
         </div>
       </div>
 
@@ -497,7 +514,7 @@
         </div>
         <div class="mb-3">
           <label class="form-label">Model</label>
-          <input type="text" class="form-control" id="ollama_model" value="{{ s.ollama_model }}">
+          {{ ai_model_field('ollama', s.ollama_model) }}
         </div>
       </div>
 
@@ -1063,7 +1080,7 @@
               </div>
               <div class="mb-3">
                 <label class="form-label">Model</label>
-                <input type="text" class="form-control" id="gemini_model" value="{{ s.gemini_model }}">
+                {{ ai_model_field('gemini', s.gemini_model) }}
               </div>
               {{ extra_keys('gemini') }}
             </div>
@@ -1074,7 +1091,7 @@
               </div>
               <div class="mb-3">
                 <label class="form-label">Model <span class="text-secondary small">(must be vision-capable)</span></label>
-                <input type="text" class="form-control" id="openai_model" value="{{ s.openai_model }}">
+                {{ ai_model_field('openai', s.openai_model) }}
               </div>
               {{ extra_keys('openai') }}
             </div>
@@ -1085,8 +1102,7 @@
               </div>
               <div class="mb-3">
                 <label class="form-label">Model</label>
-                <input type="text" class="form-control" id="anthropic_model" value="{{ s.anthropic_model }}">
-                <div class="form-text">claude-opus-4-8 is the most capable; claude-haiku-4-5 the budget option.</div>
+                {{ ai_model_field('anthropic', s.anthropic_model) }}
               </div>
               {{ extra_keys('anthropic') }}
             </div>
@@ -1099,7 +1115,7 @@
               </div>
               <div class="mb-3">
                 <label class="form-label">Model</label>
-                <input type="text" class="form-control" id="ollama_model" value="{{ s.ollama_model }}">
+                {{ ai_model_field('ollama', s.ollama_model) }}
               </div>
             </div>
 
@@ -2235,6 +2251,45 @@ function showProvider() {
     target.style.display = '';
     target.classList.remove('d-none');
   }
+}
+
+// Provider-dependent model picker -------------------------------------------
+const AI_MODELS = {{ ai_models | tojson }};
+
+// Sync the note + custom-input visibility after the dropdown changes.
+function aiModelSelChanged(provider) {
+  const sel = document.getElementById(provider + '_model_sel');
+  const input = document.getElementById(provider + '_model');
+  const note = document.getElementById(provider + '_model_note');
+  if (!sel || !input) return;
+  if (sel.value === '__custom__') {
+    input.classList.remove('d-none');
+    if (note) note.textContent = 'Enter any vision-capable model id this provider accepts.';
+    if (!input.value) input.focus();
+  } else {
+    input.value = sel.value;            // the value buildPayload reads
+    input.classList.add('d-none');
+    const m = (AI_MODELS[provider] || []).find(x => x.id === sel.value);
+    if (note) note.textContent = m ? m.note : '';
+  }
+}
+
+// On load, point each provider's dropdown at the stored model (or Custom when
+// the stored model is not in the curated list), and show the matching note.
+function initAiModelPickers() {
+  Object.keys(AI_MODELS).forEach(provider => {
+    const sel = document.getElementById(provider + '_model_sel');
+    const input = document.getElementById(provider + '_model');
+    if (!sel || !input) return;
+    const current = (input.value || '').trim();
+    const known = (AI_MODELS[provider] || []).some(x => x.id === current);
+    if (current && !known) {
+      sel.value = '__custom__';
+    } else if (current) {
+      sel.value = current;
+    }
+    aiModelSelChanged(provider);
+  });
 }
 
 function showRecipeSource() {
@@ -4302,6 +4357,7 @@ async function loadHardwareDetect() {
   }
 }
 
+document.addEventListener('DOMContentLoaded', initAiModelPickers);
 document.addEventListener('DOMContentLoaded', checkApStatus);
 document.addEventListener('DOMContentLoaded', loadHardwareDetect);
 document.addEventListener('DOMContentLoaded', _updateGrocyOpenLink);
