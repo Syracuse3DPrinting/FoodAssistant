@@ -81,11 +81,13 @@ _HOST_BRIDGE = "http://127.0.0.1:9299"
 # theme that recolours the keys (gxl).
 _STREAMDECK_SYNCED_FIELDS = (
     "streamdeck_weather_location", "streamdeck_weather_units", "ui_theme",
+    "streamdeck_key_style", "streamdeck_icon_color",
 )
 
 
-def _merge_streamdeck_settings(config: dict, location: str, units: str, theme: str) -> dict:
-    """Return config with the synced weather and theme overlaid.
+def _merge_streamdeck_settings(config: dict, location: str, units: str, theme: str,
+                               key_style: str = "rich", icon_color: str = "full") -> dict:
+    """Return config with the synced weather, theme, and key style overlaid.
 
     The bridge rewrites the whole config.toml from the posted dict, so a caller
     must read the current config, overlay just these keys, and post the whole
@@ -95,6 +97,8 @@ def _merge_streamdeck_settings(config: dict, location: str, units: str, theme: s
     merged["weather_location"] = location
     merged["weather_units"] = units
     merged["theme"] = theme
+    merged["key_style"] = key_style
+    merged["icon_color"] = icon_color
     return merged
 
 
@@ -119,6 +123,8 @@ def _push_streamdeck_settings(timeout: float = 4.0) -> bool:
             settings.streamdeck_weather_location,
             settings.streamdeck_weather_units,
             settings.ui_theme,
+            settings.streamdeck_key_style,
+            settings.streamdeck_icon_color,
         )
         resp = httpx.post(
             f"{_HOST_BRIDGE}/streamdeck/config", json={"config": merged}, timeout=timeout

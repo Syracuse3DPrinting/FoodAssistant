@@ -1965,6 +1965,25 @@ docker compose up -d</code></pre>
                 <div class="form-text">Sets all keys to black after inactivity. Any key press restores them, and so does activity on the kiosk screen. The display has its own separate timeout.</div>
               </div>
 
+              <div class="row g-2 mb-3">
+                <div class="col-auto">
+                  <label class="form-label" for="streamdeck_key_style">Key style</label>
+                  <select class="form-select form-select-sm" id="streamdeck_key_style" style="max-width:200px">
+                    <option value="rich"    {{ 'selected' if s.streamdeck_key_style == 'rich' else '' }}>Rich (gradient)</option>
+                    <option value="glass"   {{ 'selected' if s.streamdeck_key_style == 'glass' else '' }}>Glass</option>
+                    <option value="minimal" {{ 'selected' if s.streamdeck_key_style == 'minimal' else '' }}>Minimalist (flat)</option>
+                  </select>
+                </div>
+                <div class="col-auto">
+                  <label class="form-label" for="streamdeck_icon_color">Icons</label>
+                  <select class="form-select form-select-sm" id="streamdeck_icon_color" style="max-width:200px">
+                    <option value="full" {{ 'selected' if s.streamdeck_icon_color == 'full' else '' }}>Full colour</option>
+                    <option value="mono" {{ 'selected' if s.streamdeck_icon_color == 'mono' else '' }}>Monochrome</option>
+                  </select>
+                </div>
+                <div class="form-text">How the keys are drawn. Rich and Glass look fuller than the flat minimalist style; full-colour icons tint each glyph with its action colour.</div>
+              </div>
+
               <div class="mb-3">
                 <label class="form-label">Saved Profiles</label>
                 <div class="form-text mb-1">Save the current key layout as a named profile. Profiles are stored on the main server and available on all devices with a matching deck size.</div>
@@ -4445,6 +4464,8 @@ async function saveStreamDeckSettings() {
   const keys = _sdCollectKeys();
   const weather_location = document.getElementById('streamdeck_weather_location')?.value || '';
   const weather_units = document.getElementById('streamdeck_weather_units')?.value || 'f';
+  const key_style = document.getElementById('streamdeck_key_style')?.value || 'rich';
+  const icon_color = document.getElementById('streamdeck_icon_color')?.value || 'full';
   const key_overrides = _sdCollectOverrides();
 
   try {
@@ -4453,7 +4474,9 @@ async function saveStreamDeckSettings() {
       body: JSON.stringify({has_streamdeck, streamdeck_key_count, streamdeck_idle_timeout,
                             streamdeck_key_overrides: key_overrides,
                             streamdeck_weather_location: weather_location,
-                            streamdeck_weather_units: weather_units}),
+                            streamdeck_weather_units: weather_units,
+                            streamdeck_key_style: key_style,
+                            streamdeck_icon_color: icon_color}),
     });
 
     if (has_streamdeck) {

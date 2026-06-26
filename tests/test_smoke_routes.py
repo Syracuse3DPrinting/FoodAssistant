@@ -176,6 +176,28 @@ def test_setup_save_persists_streamdeck_fields(client):
     ]
 
 
+def test_streamdeck_style_persists_and_validates(client):
+    """Stream Deck key style + icon colour round-trip; bad values are dropped
+    (FoodAssistant-fygv)."""
+    from app.config import settings
+
+    r = client.post("/setup/save", json={
+        "streamdeck_key_style": "glass",
+        "streamdeck_icon_color": "mono",
+    })
+    assert r.status_code == 200
+    assert settings.streamdeck_key_style == "glass"
+    assert settings.streamdeck_icon_color == "mono"
+
+    # Unknown values are dropped, leaving the stored ones untouched.
+    r = client.post("/setup/save", json={
+        "streamdeck_key_style": "neon", "streamdeck_icon_color": "rainbow",
+    })
+    assert r.status_code == 200
+    assert settings.streamdeck_key_style == "glass"
+    assert settings.streamdeck_icon_color == "mono"
+
+
 def test_setup_save_subset_leaves_others_untouched(client):
     # Per-section Save buttons post only their own fields. The server uses
     # model_dump(exclude_unset=True), so an unrelated stored setting must keep

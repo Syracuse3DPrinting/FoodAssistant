@@ -15,6 +15,7 @@ from ..config import (
     DISPLAY_TYPES, _DEFAULT_DISPLAY_TYPE,
     FLOATING_NAV_POSITIONS,
     FLOATING_NAV_ORIENTATIONS,
+    STREAMDECK_KEY_STYLES, STREAMDECK_ICON_COLORS,
     DEPLOYMENT_MODES, _DEFAULT_DEPLOYMENT_MODE,
     AI_MODELS,
     browser_host, device_hostname,
@@ -191,6 +192,8 @@ class SetupPayload(BaseModel):
     streamdeck_key_overrides: list = []
     streamdeck_weather_location: str = ""
     streamdeck_weather_units: str = "f"
+    streamdeck_key_style: str = ""
+    streamdeck_icon_color: str = ""
     floating_nav_position: str = ""
     floating_nav_orientation: str = ""
     floating_nav_autohide_streamdeck: bool = False
@@ -490,6 +493,11 @@ async def save_setup(payload: SetupPayload):
     # Same for an unknown floating-nav orientation.
     if "floating_nav_orientation" in data and data["floating_nav_orientation"] not in FLOATING_NAV_ORIENTATIONS:
         data.pop("floating_nav_orientation", None)
+    # Drop an unknown Stream Deck key style / icon colour (keeps the stored one).
+    if "streamdeck_key_style" in data and data["streamdeck_key_style"] not in STREAMDECK_KEY_STYLES:
+        data.pop("streamdeck_key_style", None)
+    if "streamdeck_icon_color" in data and data["streamdeck_icon_color"] not in STREAMDECK_ICON_COLORS:
+        data.pop("streamdeck_icon_color", None)
     # Drop an unknown deployment mode rather than persisting a broken value;
     # an empty/absent mode leaves the existing choice untouched.
     if data.get("deployment_mode") and data["deployment_mode"] not in DEPLOYMENT_MODES:
@@ -1178,8 +1186,11 @@ async def streamdeck_config_set(request: Request):
         try:
             payload = await request.json()
             if isinstance(payload.get("config"), dict):
-                # Stamp the active web UI theme so the deck follows it (gxl).
+                # Stamp the active web UI theme so the deck follows it (gxl), plus
+                # the key style + icon colour so the deck matches the app setting.
                 payload["config"]["theme"] = settings.ui_theme
+                payload["config"]["key_style"] = settings.streamdeck_key_style
+                payload["config"]["icon_color"] = settings.streamdeck_icon_color
                 if settings.is_satellite():
                     payload["config"]["weather_location"] = settings.streamdeck_weather_location
                     payload["config"]["weather_units"] = settings.streamdeck_weather_units

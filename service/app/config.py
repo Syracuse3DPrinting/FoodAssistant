@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.6.36"
+APP_VERSION = "0.6.37"
 
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
@@ -180,6 +180,7 @@ _SAVEABLE = [
     "has_streamdeck", "streamdeck_key_count", "display_touch",
     "display_idle_timeout", "streamdeck_idle_timeout", "streamdeck_key_overrides",
     "streamdeck_weather_location", "streamdeck_weather_units",
+    "streamdeck_key_style", "streamdeck_icon_color",
     "floating_nav_position", "floating_nav_orientation", "floating_nav_autohide_streamdeck",
     "deployment_mode", "remote_server_url", "upstream_api_key", "kiosk_pin", "kiosk_readonly_when_locked",
     "satellite_sync_minutes", "satellite_last_sync", "device_id",
@@ -208,7 +209,16 @@ SATELLITE_PULL_FIELDS = [
     # Stream Deck weather widget config, so a satellite's deck matches the
     # server's location/units without separate local setup (FoodAssistant-bra).
     "streamdeck_weather_location", "streamdeck_weather_units",
+    # Stream Deck key visual style, so a satellite's deck looks like the server's.
+    "streamdeck_key_style", "streamdeck_icon_color",
 ]
+
+# Stream Deck key rendering style (FoodAssistant-fygv). Pushed into the deck's
+# config.toml so the controller picks them up. "rich" is a subtle gradient,
+# "glass" a glassmorphism panel, "minimal" the flat legacy fill. icon_color
+# "full" tints glyphs with the action accent; "mono" keeps them monochrome.
+STREAMDECK_KEY_STYLES = ("rich", "minimal", "glass")
+STREAMDECK_ICON_COLORS = ("full", "mono")
 
 # Settings that hold credentials. These are redacted from backups unless the
 # user explicitly opts in, and never rendered back into the setup page.
@@ -537,6 +547,12 @@ class Settings(BaseSettings):
     # "f" or "c". Mirrored into config.toml when the deck config is written.
     streamdeck_weather_location: str = ""
     streamdeck_weather_units: str = "f"
+
+    # Stream Deck key visual style, pushed into the deck's config.toml
+    # (FoodAssistant-fygv). key_style: rich | minimal | glass. icon_color:
+    # full (accent-tinted glyphs) | mono (monochrome).
+    streamdeck_key_style: str = "rich"
+    streamdeck_icon_color: str = "full"
 
     # Advanced Stream Deck per-key overrides set in the setup page. A JSON list
     # where each entry is a dict with "slot" (grid index), "type" (ha_action |
