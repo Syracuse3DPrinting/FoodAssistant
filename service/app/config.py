@@ -97,7 +97,7 @@ _SAVEABLE = [
     "openai_api_key", "openai_model",
     "anthropic_api_key", "anthropic_model",
     "ai_extra_keys",
-    "scanner_type",
+    "scanner_type", "barcode_global_capture",
     "barcode_enrichment", "barcode_llm_fallback", "barcode_autocheck_shopping", "enrich_provider", "enrich_model",
     "grocy_base_url", "grocy_api_key", "grocy_public_url",
     "mealie_base_url", "mealie_api_key", "mealie_public_url",
@@ -279,6 +279,11 @@ class Settings(BaseSettings):
     # How barcodes are scanned: "usb" = USB/BT HID keyboard-wedge, "camera" =
     # Pi camera / scan engine, "" = not set (user picks on Add Food page).
     scanner_type: str = ""
+
+    # When True, a keyboard-wedge barcode scanned on ANY page is captured,
+    # saved to the pending list, and the browser jumps to the Add Food page.
+    # When False, wedge capture only happens on the Add Food page itself.
+    barcode_global_capture: bool = True
 
     # Barcode-scan enrichment: "llm" cleans up name/category/storage/shelf-life
     # via the LLM; "off" uses Open Food Facts heuristics only.

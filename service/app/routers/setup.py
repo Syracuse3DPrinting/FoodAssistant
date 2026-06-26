@@ -122,6 +122,7 @@ class SetupPayload(BaseModel):
     # absent the stored extras are left untouched (see save handler).
     ai_extra_keys: dict[str, list[str]] | None = None
     scanner_type: str = ""
+    barcode_global_capture: bool = True
     barcode_enrichment: str = "llm"
     enrich_provider: str = ""
     enrich_model: str = ""

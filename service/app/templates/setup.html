@@ -961,6 +961,12 @@
                 <option value="camera" {{ 'selected' if s.scanner_type == 'camera' else '' }}>Camera / built-in scan module</option>
               </select>
             </div>
+            <div class="form-check form-switch mb-3">
+              <input class="form-check-input" type="checkbox" role="switch" id="barcode_global_capture"
+                     {{ 'checked' if s.barcode_global_capture else '' }}>
+              <label class="form-check-label" for="barcode_global_capture">Scan from any page</label>
+              <div class="form-text">When on, a barcode scanned on any screen is saved to Pending and the app jumps to Add Food. When off, scanning only works on the Add Food page.</div>
+            </div>
             <div id="scanner-usb-hint" class="{{ '' if s.scanner_type == 'usb' else 'd-none' }}">
               <p class="text-secondary small mb-2">Plug in the scanner and test below — click the field and scan a barcode.</p>
               <div class="input-group mb-2">
@@ -1335,6 +1341,12 @@
                 <option value="usb" {{ 'selected' if s.scanner_type == 'usb' else '' }}>USB / Bluetooth HID (keyboard wedge)</option>
                 <option value="camera" {{ 'selected' if s.scanner_type == 'camera' else '' }}>Camera / built-in scan module</option>
               </select>
+            </div>
+            <div class="form-check form-switch mb-3">
+              <input class="form-check-input" type="checkbox" role="switch" id="barcode_global_capture"
+                     {{ 'checked' if s.barcode_global_capture else '' }}>
+              <label class="form-check-label" for="barcode_global_capture">Scan from any page</label>
+              <div class="form-text">When on, a barcode scanned on any screen is saved to Pending and the app jumps to Add Food. When off, scanning only works on the Add Food page.</div>
             </div>
             <div id="scanner-usb-hint" class="{{ '' if s.scanner_type == 'usb' else 'd-none' }}">
               <p class="text-secondary small mb-2">Plug in the scanner and test below — click the field and scan a barcode.</p>
@@ -2557,6 +2569,7 @@ function buildPayload() {
     ai_extra_keys: document.querySelector('.extra-keys') ? collectExtraKeys() : undefined,
     extra_api_keys: document.querySelector('.satellite-extra-keys') ? collectSatelliteKeys() : undefined,
     scanner_type:       val('scanner_type') || '',
+    barcode_global_capture: document.getElementById('barcode_global_capture') ? document.getElementById('barcode_global_capture').checked : true,
     barcode_enrichment: val('barcode_enrichment') || 'llm',
     barcode_llm_fallback: document.getElementById('barcode_llm_fallback')?.checked || false,
     barcode_autocheck_shopping: document.getElementById('barcode_autocheck_shopping')?.checked || false,

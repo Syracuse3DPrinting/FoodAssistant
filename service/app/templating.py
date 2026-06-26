@@ -33,6 +33,7 @@ def theme_context(request: Request) -> dict:
         "is_pi": is_raspberry_pi(),
         "features": settings.features(),
         "deployment_mode": settings.deployment_mode,
+        "barcode_global_capture": settings.barcode_global_capture,
         "pin_readonly": getattr(request.state, "pin_readonly", False),
     }
 
