@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.6.8"
+APP_VERSION = "0.6.9"
 
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
@@ -287,14 +287,19 @@ def _mdns_rewrite(url: str, port: int) -> str:
     """If url points to localhost, rewrite it to a LAN-reachable browser URL.
 
     This makes browser-facing links work from other devices on the LAN without
-    requiring a static IP: it prefers <hostname>.local (stable across DHCP
-    changes) and falls back to the current LAN IP. If no host can be resolved
-    the original URL is returned unchanged.
+    requiring a static IP. It prefers the current LAN IP, because that works even
+    on networks where mDNS (<hostname>.local) does not resolve (FoodAssistant-pmcu,
+    FoodAssistant-wjua), and falls back to the mDNS hostname when the IP cannot be
+    determined. These links are regenerated on every page render, so a DHCP IP
+    change is picked up the next time the page loads. If no host can be resolved
+    the original URL is returned unchanged. The loopback address is kept for the
+    behind-the-scenes API wiring (grocy_base_url / mealie_base_url); only the
+    browser-facing link is rewritten.
     """
     from urllib.parse import urlparse
     parsed = urlparse(url)
     if parsed.hostname in _LOCALHOST_HOSTS:
-        host = browser_host()
+        host = _lan_ip() or browser_host()
         if host:
             return f"http://{host}:{port}"
     return url

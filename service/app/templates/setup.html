@@ -1986,9 +1986,10 @@ const HAS_AUTH_PASSWORD = {{ 'true' if has.auth_password else 'false' }};
 const IS_CONFIGURED = {{ 'true' if configured else 'false' }};
 // Server-side API base for a co-hosted Grocy. Always loopback so the app
 // container can reach it (mDNS may not resolve inside the container). The
-// browser "Open Grocy" link is a separate, hostname-based URL (GROCY_BROWSER_LINK).
+// browser "Open Grocy" link is a separate, reachable URL (GROCY_BROWSER_LINK).
 const PI_GROCY_DEFAULT = 'http://localhost:9383';
-// Human-facing link to open Grocy in a browser (<hostname>.local or LAN IP).
+// Human-facing link to open Grocy in a browser (LAN IP, or <hostname>.local
+// when the IP cannot be determined).
 const GROCY_BROWSER_LINK = {{ (grocy_browser_link or '') | tojson }};
 
 // Shared helpers
