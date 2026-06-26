@@ -31,14 +31,22 @@ POST /streamdeck/install   provision the Stream Deck service (attached later)
 GET  /ap/status            whether the fallback AP is active {active: bool}
 POST /ap/disable           stop hostapd+dnsmasq and remove the AP flag file
 POST /update               git pull + venv pip + service restart (Pi Remote OTA)
+GET  /activity             shared activity/display state (polled by the deck)
+POST /activity             report user activity; wakes the display  {source?}
+POST /display/blank        blank the kiosk display now
+POST /display/wake         wake the kiosk display now
+POST /display/idle         set+persist the display idle timeout  {minutes}
 """
 import http.server
 import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
+import threading
+import time
 import urllib.error
 import urllib.request
 
@@ -77,6 +85,112 @@ _LOG_PATHS = {
 # Cap the bytes we read off the tail of a log so a long-running install cannot
 # return a multi-megabyte body to the polling UI.
 _LOG_TAIL_BYTES = 8192
+
+# --- Display + activity coordination (FoodAssistant-otiy) -----------------
+# The bridge is the one process both the kiosk browser and the Stream Deck
+# controller can reach, so it brokers "user activity" between them and owns the
+# physical display power. The kiosk display and the Stream Deck keep SEPARATE
+# idle timeouts (the deck times itself out locally), but activity on either
+# surface is reported here and wakes both: this loop wakes the display, and the
+# deck polls GET /activity to wake itself.
+#
+# The display idle timeout (minutes, 0 = off) is pushed by the app on settings
+# save and persisted here so it survives a bridge restart.
+_DISPLAY_IDLE_FILE = "/etc/foodassistant/display-idle"
+_activity_lock = threading.Lock()
+_activity_state = {
+    "last_activity": time.time(),
+    "display_blanked": False,
+    "idle_minutes": 0,
+}
+
+
+def _read_persisted_idle_minutes(path=_DISPLAY_IDLE_FILE):
+    """Read the persisted display idle timeout in minutes (0 if unset/bad)."""
+    try:
+        with open(path) as f:
+            return max(0, int((f.read().strip() or "0")))
+    except (OSError, ValueError):
+        return 0
+
+
+def _write_persisted_idle_minutes(minutes, path=_DISPLAY_IDLE_FILE):
+    """Persist the display idle timeout so a bridge restart keeps it."""
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(str(int(minutes)))
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _display_power_commands(on, which=shutil.which):
+    """Ordered candidate command vectors to switch the display on/off.
+
+    The caller tries each until one succeeds. Kept pure (the tool probe is
+    injected) so the selection is unit-testable. vcgencmd cuts HDMI power on a
+    Pi regardless of the compositor, so it is preferred; xset covers an X11
+    fallback.
+    """
+    cmds = []
+    if which("vcgencmd"):
+        cmds.append(["vcgencmd", "display_power", "1" if on else "0"])
+    if which("xset"):
+        cmds.append(["xset", "dpms", "force", "on" if on else "off"])
+    return cmds
+
+
+def _should_blank(now, last_activity, idle_minutes, already_blanked):
+    """True when the display has been idle long enough to blank.
+
+    Pure helper for the idle loop and its tests.
+    """
+    if idle_minutes <= 0 or already_blanked:
+        return False
+    return (now - last_activity) >= idle_minutes * 60
+
+
+def _set_display_power(on):
+    """Try each candidate command to power the display on/off. Returns True on
+    the first success, False if none worked (or none are available)."""
+    for cmd in _display_power_commands(on):
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, timeout=10)
+            return True
+        except (OSError, subprocess.SubprocessError):
+            continue
+    return False
+
+
+def _record_activity():
+    """Note user activity from either surface and wake the display if it was
+    blanked. Returns whether the display was woken."""
+    with _activity_lock:
+        was_blanked = _activity_state["display_blanked"]
+        _activity_state["last_activity"] = time.time()
+    if was_blanked:
+        _set_display_power(True)
+        with _activity_lock:
+            _activity_state["display_blanked"] = False
+    return was_blanked
+
+
+def _display_idle_loop():
+    """Background tick: blank the display once it has been idle long enough."""
+    while True:
+        try:
+            with _activity_lock:
+                idle = _activity_state["idle_minutes"]
+                last = _activity_state["last_activity"]
+                blanked = _activity_state["display_blanked"]
+            if _should_blank(time.time(), last, idle, blanked):
+                if _set_display_power(False):
+                    with _activity_lock:
+                        _activity_state["display_blanked"] = True
+        except Exception:
+            pass
+        time.sleep(10)
 
 
 def _tail_log(name, max_bytes=_LOG_TAIL_BYTES):
@@ -526,6 +640,52 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length", 0))
         return json.loads(self.rfile.read(n)) if n else {}
 
+    # --- Display + activity coordination (FoodAssistant-otiy) -------------
+
+    def _activity_get(self):
+        """Current activity/display state, polled by the Stream Deck controller
+        so a kiosk touch wakes the deck (shared activity, separate timeouts)."""
+        with _activity_lock:
+            self._send(200, {
+                "ok": True,
+                "last_activity": _activity_state["last_activity"],
+                "display_blanked": _activity_state["display_blanked"],
+                "idle_minutes": _activity_state["idle_minutes"],
+            })
+
+    def _activity_post(self):
+        """Report user activity from either surface; wakes the display."""
+        woke = _record_activity()
+        with _activity_lock:
+            last = _activity_state["last_activity"]
+        self._send(200, {"ok": True, "woke": woke, "last_activity": last})
+
+    def _display_blank(self):
+        ok = _set_display_power(False)
+        with _activity_lock:
+            _activity_state["display_blanked"] = ok
+        self._send(200, {"ok": ok})
+
+    def _display_wake(self):
+        ok = _set_display_power(True)
+        with _activity_lock:
+            _activity_state["display_blanked"] = False
+            _activity_state["last_activity"] = time.time()
+        self._send(200, {"ok": ok})
+
+    def _display_idle_set(self):
+        """Set (and persist) the display idle timeout in minutes."""
+        body = self._body()
+        try:
+            minutes = max(0, int(body.get("minutes", 0)))
+        except (TypeError, ValueError):
+            self._send(400, {"ok": False, "error": "minutes must be an integer"})
+            return
+        with _activity_lock:
+            _activity_state["idle_minutes"] = minutes
+        persisted = _write_persisted_idle_minutes(minutes)
+        self._send(200, {"ok": True, "minutes": minutes, "persisted": persisted})
+
     def do_GET(self):
         if self.path == "/wifi/status":
             self._wifi_status()
@@ -549,6 +709,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._streamdeck_actions()
         elif self.path == "/ap/status":
             self._ap_status()
+        elif self.path == "/activity":
+            self._activity_get()
         else:
             self._send(404, {"error": "not found"})
 
@@ -577,6 +739,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._ap_disable()
         elif self.path == "/update":
             self._update()
+        elif self.path == "/activity":
+            self._activity_post()
+        elif self.path == "/display/blank":
+            self._display_blank()
+        elif self.path == "/display/wake":
+            self._display_wake()
+        elif self.path == "/display/idle":
+            self._display_idle_set()
         else:
             self._send(404, {"error": "not found"})
 
@@ -1121,6 +1291,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    # Restore the persisted display idle timeout and start the blanking loop.
+    _activity_state["idle_minutes"] = _read_persisted_idle_minutes()
+    threading.Thread(target=_display_idle_loop, daemon=True).start()
     server = http.server.HTTPServer((LISTEN_HOST, LISTEN_PORT), _Handler)
     print(f"FoodAssistant host bridge listening on {LISTEN_HOST}:{LISTEN_PORT}", flush=True)
     try:

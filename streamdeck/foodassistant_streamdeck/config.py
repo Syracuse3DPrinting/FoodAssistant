@@ -68,6 +68,10 @@ class Config:
     # Idle timeout in minutes. 0 = disabled. After this many minutes without
     # a key press the deck is blanked; any key press wakes it.
     idle_timeout_minutes: int = 0
+    # Host bridge URL (Pi appliance only). The deck reports key presses here so
+    # the kiosk display wakes too, and polls it so a screen touch wakes the deck
+    # (shared activity, separate timeouts -- FoodAssistant-otiy). Empty disables.
+    host_bridge_url: str = "http://127.0.0.1:9299"
     # Advanced per-key overrides configured in the web setup page. Each entry is
     # a dict with "slot" (grid index), "type" (ha_action | timer | weather |
     # default) and type-specific fields. Overrides are applied on top of the
@@ -137,7 +141,7 @@ def load(path: str | os.PathLike | None = None) -> Config:
 
 def _apply(cfg: Config, data: dict) -> None:
     for name in ("base_url", "api_key", "kiosk_cdp_url", "weather_location", "weather_units",
-                 "theme", "ha_base_url", "ha_token"):
+                 "theme", "ha_base_url", "ha_token", "host_bridge_url"):
         if isinstance(data.get(name), str):
             setattr(cfg, name, data[name])
     for name in ("brightness", "poll_seconds", "soon_days", "rotation",

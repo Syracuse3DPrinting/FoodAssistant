@@ -1403,3 +1403,67 @@ def test_config_loads_theme(tmp_path):
     p.write_text('theme = "cyborg"\n')
     cfg = config.load(p)
     assert cfg.theme == "cyborg"
+
+
+# -- shared activity / cross-wake (FoodAssistant-otiy) ----------------------
+
+def test_external_activity_is_fresh():
+    from foodassistant_streamdeck.controller import _external_activity_is_fresh as fresh
+    now = 1000.0
+    assert fresh(now - 1, now) is True       # 1s ago: fresh
+    assert fresh(now - 11, now) is True      # within 12s window
+    assert fresh(now - 13, now) is False     # older than the window
+    assert fresh(None, now) is False         # no data
+    assert fresh(0, now) is False            # unset epoch
+    assert fresh("nope", now) is False       # wrong type
+    assert fresh(now + 5, now) is False      # future timestamp ignored
+
+
+def test_config_loads_host_bridge_url(tmp_path):
+    p = tmp_path / "config.toml"
+    p.write_text('host_bridge_url = "http://127.0.0.1:9299"\n')
+    cfg = config.load(p)
+    assert cfg.host_bridge_url == "http://127.0.0.1:9299"
+
+
+def test_poll_shared_activity_wakes_blanked_deck(monkeypatch):
+    import foodassistant_streamdeck.controller as controller_mod
+
+    class _Resp:
+        def json(self):
+            import time as _t
+            return {"last_activity": _t.time(), "display_blanked": False}
+
+    class _FakeClient:
+        def __init__(self, *a, **k):
+            pass
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            return False
+        async def get(self, url):
+            return _Resp()
+
+    monkeypatch.setattr(controller_mod.httpx, "AsyncClient", _FakeClient)
+    ctrl, deck, loop = _make_controller()
+    ctrl.config.host_bridge_url = "http://127.0.0.1:9299"
+    ctrl._idle_blanked = True
+    woke = {"v": False}
+    async def _fake_wake():
+        woke["v"] = True
+        ctrl._idle_blanked = False
+    ctrl._wake_from_idle = _fake_wake
+    loop.run_until_complete(ctrl._poll_shared_activity())
+    assert woke["v"] is True
+    assert ctrl._idle_blanked is False
+    loop.close()
+
+
+def test_poll_shared_activity_noop_without_bridge_url(monkeypatch):
+    ctrl, deck, loop = _make_controller()
+    ctrl.config.host_bridge_url = ""
+    ctrl._idle_blanked = True
+    # No bridge configured: must not touch state or raise.
+    loop.run_until_complete(ctrl._poll_shared_activity())
+    assert ctrl._idle_blanked is True
+    loop.close()

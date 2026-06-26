@@ -35,6 +35,20 @@ from .config import BRIGHTNESS_STEPS, Config
 
 log = logging.getLogger("foodassistant.streamdeck")
 
+# Activity on another surface (the kiosk screen) counts as fresh if it happened
+# within this many seconds, slightly longer than the idle-loop tick so a single
+# poll cannot miss it (FoodAssistant-otiy).
+_SHARED_ACTIVITY_WINDOW_SECS = 12
+
+
+def _external_activity_is_fresh(last_activity, now_epoch,
+                                window=_SHARED_ACTIVITY_WINDOW_SECS) -> bool:
+    """True when the bridge's shared last-activity epoch is recent enough to
+    treat as activity on this deck. Pure helper for the shared-activity poll."""
+    if not isinstance(last_activity, (int, float)) or last_activity <= 0:
+        return False
+    return 0 <= (now_epoch - last_activity) <= window
+
 
 class Controller:
     def __init__(self, deck, config: Config, config_path: Optional[str] = None) -> None:
@@ -367,6 +381,11 @@ class Controller:
             self._key_down_time[key] = time.monotonic()
             # Any press counts as activity, resetting the idle timer.
             self._last_activity = time.monotonic()
+            # Tell the host bridge so the kiosk display wakes too (shared
+            # activity across surfaces, FoodAssistant-otiy). Best-effort, and
+            # only when the loop is live (skipped in unit tests with no loop).
+            if self.loop.is_running():
+                asyncio.run_coroutine_threadsafe(self._report_activity(), self.loop)
             # If the deck is blanked, mark this key as a wake key and restore.
             if self._idle_blanked:
                 self._wake_keys.add(key)
@@ -521,10 +540,44 @@ class Controller:
             self.deck.set_brightness(0)
             self.deck.reset()
 
+    async def _report_activity(self) -> None:
+        """Tell the host bridge a key was pressed so the kiosk display wakes.
+
+        Best-effort: a missing bridge (dev box, non-Pi) is a no-op."""
+        url = getattr(self.config, "host_bridge_url", "")
+        if not url:
+            return
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as c:
+                await c.post(f"{url}/activity", json={"source": "streamdeck"})
+        except Exception:
+            pass
+
+    async def _poll_shared_activity(self) -> None:
+        """Wake the deck if another surface (the kiosk screen) saw activity.
+
+        Polls the host bridge's shared last-activity. When it is fresh, reset
+        the local idle timer and wake if blanked, so a screen touch wakes the
+        deck even though the two timeouts are independent."""
+        url = getattr(self.config, "host_bridge_url", "")
+        if not url:
+            return
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as c:
+                data = (await c.get(f"{url}/activity")).json()
+        except Exception:
+            return
+        if _external_activity_is_fresh(data.get("last_activity"), time.time()):
+            self._last_activity = time.monotonic()
+            if self._idle_blanked:
+                await self._wake_from_idle()
+
     async def _idle_loop(self) -> None:
         """Blank the deck after idle_timeout_minutes without a key press."""
         while True:
             await asyncio.sleep(10)
+            # Adopt activity from the other surface before deciding to blank.
+            await self._poll_shared_activity()
             await self._idle_loop_once()
 
     # -- watchdog / config watch -------------------------------------------

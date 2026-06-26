@@ -23,6 +23,13 @@ async def lifespan(app: FastAPI):
         seed_defaults(db)
     finally:
         db.close()
+    # Sync the kiosk display idle timeout to the host bridge on boot so a bridge
+    # restart picks up the current value (FoodAssistant-otiy). Best-effort.
+    try:
+        from .routers.setup import _push_display_idle
+        await _push_display_idle()
+    except Exception:
+        pass
     # A satellite mirrors its main server: pull backend config + defaults on
     # boot. Best-effort so an unreachable server never blocks startup.
     if settings.is_satellite():

@@ -1674,7 +1674,7 @@ docker compose up -d</code></pre>
               <input class="form-control form-control-sm" style="max-width:120px" type="number"
                      id="display_idle_timeout" min="0" max="120" step="5"
                      value="{{ s.display_idle_timeout }}">
-              <div class="form-text">Blanks the kiosk screen after inactivity. 0 disables.</div>
+              <div class="form-text">Blanks the kiosk screen after inactivity. A touch, key press, or a Stream Deck button press wakes it. The Stream Deck has its own separate timeout. 0 disables.</div>
             </div>
             <div class="d-flex gap-2 flex-wrap">
               <button class="btn btn-outline-info btn-sm" onclick="saveDisplaySettings()">
@@ -1801,7 +1801,7 @@ docker compose up -d</code></pre>
                 <input class="form-control form-control-sm" style="max-width:120px" type="number"
                        id="streamdeck_idle_timeout" min="0" max="120" step="5"
                        value="{{ s.streamdeck_idle_timeout }}">
-                <div class="form-text">Sets all keys to black after inactivity. Any key press restores the display.</div>
+                <div class="form-text">Sets all keys to black after inactivity. Any key press restores them, and so does activity on the kiosk screen. The display has its own separate timeout.</div>
               </div>
 
               <div class="mb-3">

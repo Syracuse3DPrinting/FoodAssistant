@@ -232,3 +232,26 @@ def test_streamdeck_profiles_validation(client):
 
     r = client.delete("/setup/streamdeck/profiles/nonexistent")
     assert r.status_code == 404
+
+
+def test_kiosk_activity_endpoints_off_pi(client):
+    """Off a Pi, the kiosk activity proxy is a graceful no-op (FoodAssistant-otiy)."""
+    r = client.post("/setup/kiosk/activity")
+    assert r.status_code == 200
+    assert r.json()["woke"] is False
+
+    r = client.get("/setup/kiosk/activity")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["display_blanked"] is False
+
+
+def test_display_blank_wake_off_pi(client):
+    """Display blank/wake report not-available off a Pi rather than erroring."""
+    r = client.post("/setup/display/blank")
+    assert r.status_code == 200
+    assert r.json()["ok"] is False
+    r = client.post("/setup/display/wake")
+    assert r.status_code == 200
+    assert r.json()["ok"] is False

@@ -482,6 +482,10 @@ async def save_setup(payload: SetupPayload):
     from ..services.mealie import reset_cache as reset_mealie_cache, reset_staple_cache
     reset_mealie_cache()
     reset_staple_cache()
+    # Mirror the kiosk display idle timeout to the host bridge, which owns the
+    # blanking loop (FoodAssistant-otiy). Best-effort and Pi-only.
+    if "display_idle_timeout" in data:
+        await _push_display_idle()
     return {"ok": True}
 
 
@@ -752,6 +756,77 @@ async def totp_disable():
 # On non-Pi or non-appliance installs the endpoints return a clear error.
 
 _HOST_BRIDGE = "http://127.0.0.1:9299"
+
+
+async def _push_display_idle() -> bool:
+    """Push the display idle timeout to the host bridge (Pi only, best-effort).
+
+    The bridge owns the kiosk display blanking loop and persists this value, so
+    the browser does not need its own timer (FoodAssistant-otiy)."""
+    if not is_raspberry_pi():
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as c:
+            r = await c.post(
+                f"{_HOST_BRIDGE}/display/idle",
+                json={"minutes": settings.display_idle_timeout},
+            )
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
+@router.post("/kiosk/activity")
+async def kiosk_activity():
+    """Report kiosk user activity to the host bridge so it wakes the display
+    (and the Stream Deck, which polls the bridge). No-op off a Pi."""
+    if not is_raspberry_pi():
+        return {"ok": True, "woke": False}
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as c:
+            r = await c.post(f"{_HOST_BRIDGE}/activity", json={"source": "kiosk"})
+        return r.json()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@router.get("/kiosk/activity")
+async def kiosk_activity_state():
+    """Current shared activity/display state from the host bridge."""
+    if not is_raspberry_pi():
+        return {"ok": True, "last_activity": 0, "display_blanked": False}
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as c:
+            r = await c.get(f"{_HOST_BRIDGE}/activity")
+        return r.json()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@router.post("/display/blank")
+async def display_blank():
+    """Manually blank the kiosk display (Pi only)."""
+    if not is_raspberry_pi():
+        return {"ok": False, "error": "Not available on this platform."}
+    try:
+        async with httpx.AsyncClient(timeout=6.0) as c:
+            r = await c.post(f"{_HOST_BRIDGE}/display/blank")
+        return r.json()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@router.post("/display/wake")
+async def display_wake():
+    """Manually wake the kiosk display (Pi only)."""
+    if not is_raspberry_pi():
+        return {"ok": False, "error": "Not available on this platform."}
+    try:
+        async with httpx.AsyncClient(timeout=6.0) as c:
+            r = await c.post(f"{_HOST_BRIDGE}/display/wake")
+        return r.json()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @router.get("/network/status")

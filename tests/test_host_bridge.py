@@ -435,3 +435,70 @@ def test_streamdeck_keycount_no_deck(monkeypatch):
         stdout = "Bus 001 Device 002: ID 1d6b:0002 Linux Foundation 2.0 root hub\n"
     monkeypatch.setattr(bridge.subprocess, "run", lambda *a, **k: FakeRun())
     assert bridge._streamdeck_keycount() is None
+
+
+# -- display + activity coordination (FoodAssistant-otiy) -------------------
+
+def test_should_blank_respects_disabled_and_blanked():
+    # idle_minutes 0 means the feature is off, never blank.
+    assert bridge._should_blank(1000.0, 0.0, 0, False) is False
+    # already blanked, do not re-blank.
+    assert bridge._should_blank(1000.0, 0.0, 5, True) is False
+
+
+def test_should_blank_threshold():
+    now = 1000.0
+    # 5 min timeout: not yet at 4m59s, yes at exactly 5m.
+    assert bridge._should_blank(now, now - 299, 5, False) is False
+    assert bridge._should_blank(now, now - 300, 5, False) is True
+    assert bridge._should_blank(now, now - 600, 5, False) is True
+
+
+def test_display_power_commands_prefers_vcgencmd():
+    # Only vcgencmd present.
+    cmds = bridge._display_power_commands(False, which=lambda n: n == "vcgencmd")
+    assert cmds == [["vcgencmd", "display_power", "0"]]
+    cmds_on = bridge._display_power_commands(True, which=lambda n: n == "vcgencmd")
+    assert cmds_on == [["vcgencmd", "display_power", "1"]]
+
+
+def test_display_power_commands_orders_vcgencmd_then_xset():
+    cmds = bridge._display_power_commands(False, which=lambda n: True)
+    assert cmds[0][0] == "vcgencmd"
+    assert ["xset", "dpms", "force", "off"] in cmds
+
+
+def test_display_power_commands_empty_when_no_tools():
+    assert bridge._display_power_commands(True, which=lambda n: False) == []
+
+
+def test_persist_idle_minutes_roundtrip(tmp_path):
+    p = tmp_path / "display-idle"
+    assert bridge._write_persisted_idle_minutes(15, path=str(p)) is True
+    assert bridge._read_persisted_idle_minutes(path=str(p)) == 15
+
+
+def test_read_persisted_idle_minutes_defaults_to_zero(tmp_path):
+    assert bridge._read_persisted_idle_minutes(path=str(tmp_path / "missing")) == 0
+
+
+def test_record_activity_wakes_when_blanked(monkeypatch):
+    calls = []
+    monkeypatch.setattr(bridge, "_set_display_power", lambda on: calls.append(on) or True)
+    with bridge._activity_lock:
+        bridge._activity_state["display_blanked"] = True
+    woke = bridge._record_activity()
+    assert woke is True
+    assert calls == [True]  # powered the display back on
+    with bridge._activity_lock:
+        assert bridge._activity_state["display_blanked"] is False
+
+
+def test_record_activity_noop_when_awake(monkeypatch):
+    calls = []
+    monkeypatch.setattr(bridge, "_set_display_power", lambda on: calls.append(on) or True)
+    with bridge._activity_lock:
+        bridge._activity_state["display_blanked"] = False
+    woke = bridge._record_activity()
+    assert woke is False
+    assert calls == []  # no power command when already awake
