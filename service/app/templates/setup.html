@@ -326,6 +326,7 @@
           <option value="15" {{ 'selected' if (s.streamdeck_key_count == 15 or not s.streamdeck_key_count) else '' }}>15 keys (Stream Deck MK.2 / Classic)</option>
           <option value="32" {{ 'selected' if s.streamdeck_key_count == 32 else '' }}>32 keys (Stream Deck XL)</option>
         </select>
+        <div class="form-text sd-autodetect-hint text-success d-none"><i class="bi bi-check-circle me-1"></i>Auto-detected from the attached deck.</div>
         <div class="form-text">Used to fill the key layout correctly. You can also set this in <code>config.toml</code>.</div>
       </div>
     </div>
@@ -1754,6 +1755,7 @@ docker compose up -d</code></pre>
                   <option value="15" {{ 'selected' if (s.streamdeck_key_count == 15 or not s.streamdeck_key_count) else '' }}>15 keys (Stream Deck MK.2 / Classic)</option>
                   <option value="32" {{ 'selected' if s.streamdeck_key_count == 32 else '' }}>32 keys (Stream Deck XL)</option>
                 </select>
+                <div class="form-text sd-autodetect-hint text-success d-none"><i class="bi bi-check-circle me-1"></i>Auto-detected from the attached deck.</div>
                 <div class="form-text">Used to fill the key layout. You can also set this in <code>config.toml</code>.</div>
               </div>
               <div class="row g-3 mb-3">
@@ -3949,10 +3951,7 @@ async function loadHardwareStatus() {
     _renderHwRow('streamdeck', r.streamdeck);
 
     // Auto-select model when the bridge can identify the attached deck.
-    if (r.streamdeck?.key_count) {
-      const kcEl = document.getElementById('streamdeck_key_count');
-      if (kcEl) kcEl.value = String(r.streamdeck.key_count);
-    }
+    _applyDeckAutodetect(r.streamdeck);
 
     // Load streamdeck config
     try {
@@ -4334,6 +4333,29 @@ async function loadHardwareDetect() {
       sEl.innerHTML = '<span class="badge bg-secondary">Not detected</span>';
     }
   }
+  _applyDeckAutodetect(sd);
+}
+
+// Prefill the deck size from the bridge's live detection (FoodAssistant-dcrh).
+// The bridge reports key_count for known Elgato product IDs; when present, set
+// the model dropdown, reveal the Stream Deck options, flip the "connected"
+// switch on, and show the auto-detected hint. Runs in both the wizard and the
+// settings pane (each has at most one of these elements in the DOM).
+function _applyDeckAutodetect(sd) {
+  if (!sd || !sd.present || !sd.key_count) return;
+  const kcEl = document.getElementById('streamdeck_key_count');
+  if (kcEl) {
+    kcEl.value = String(sd.key_count);
+    kcEl.dispatchEvent(new Event('change'));
+  }
+  const sw = document.getElementById('has_streamdeck');
+  if (sw && !sw.checked) {
+    sw.checked = true;
+    sw.dispatchEvent(new Event('change'));
+  }
+  document.querySelectorAll('.sd-autodetect-hint').forEach(function (el) {
+    el.classList.remove('d-none');
+  });
 }
 
 document.addEventListener('DOMContentLoaded', initAiModelPickers);

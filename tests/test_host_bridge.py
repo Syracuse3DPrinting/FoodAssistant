@@ -404,3 +404,34 @@ def test_system_health_unknown_throttle_is_not_false_clear(monkeypatch):
     health = bridge._system_health()
     assert health["throttled"] is None
     assert health["warnings"] == []
+
+
+# Stream Deck key-count detection (FoodAssistant-dcrh)
+# ---------------------------------------------------
+
+def test_streamdeck_keycount_xl(monkeypatch):
+    class FakeRun:
+        stdout = "Bus 001 Device 005: ID 0fd9:006c Elgato Systems Stream Deck XL\n"
+    monkeypatch.setattr(bridge.subprocess, "run", lambda *a, **k: FakeRun())
+    assert bridge._streamdeck_keycount() == 32
+
+
+def test_streamdeck_keycount_mini(monkeypatch):
+    class FakeRun:
+        stdout = "Bus 001 Device 004: ID 0fd9:0063 Elgato Systems Stream Deck Mini\n"
+    monkeypatch.setattr(bridge.subprocess, "run", lambda *a, **k: FakeRun())
+    assert bridge._streamdeck_keycount() == 6
+
+
+def test_streamdeck_keycount_unknown_product(monkeypatch):
+    class FakeRun:
+        stdout = "Bus 001 Device 004: ID 0fd9:ffff Elgato Systems Future Deck\n"
+    monkeypatch.setattr(bridge.subprocess, "run", lambda *a, **k: FakeRun())
+    assert bridge._streamdeck_keycount() is None
+
+
+def test_streamdeck_keycount_no_deck(monkeypatch):
+    class FakeRun:
+        stdout = "Bus 001 Device 002: ID 1d6b:0002 Linux Foundation 2.0 root hub\n"
+    monkeypatch.setattr(bridge.subprocess, "run", lambda *a, **k: FakeRun())
+    assert bridge._streamdeck_keycount() is None
