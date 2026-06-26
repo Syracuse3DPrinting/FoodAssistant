@@ -16,6 +16,7 @@ Interactive docs (Swagger UI) are available at `/docs` when the app is running.
 | `GET /ui/defaults` | Expiry defaults editor |
 | `GET /ui/cook` | Recipe suggestions ranked by inventory |
 | `GET /ui/recipes` | Browse and import recipes |
+| `GET /ui/current-recipe` | Active recipe view with timers |
 | `GET /ui/mealplan` | Week meal plan (requires Mealie) |
 | `GET /ui/shopping` | Shopping list (requires Mealie) |
 | `GET /ui/about` | About and credits |
@@ -27,10 +28,55 @@ Interactive docs (Swagger UI) are available at `/docs` when the app is running.
 | `GET /health` | Connectivity and service status |
 | `GET /expiring/summary` | Urgency counts for Home Assistant sensors |
 | `GET /inventory/dashboard` | Full stock grouped by storage location |
-| `GET /admin/backup` | Download app data as a zip archive |
 | `GET /admin/version` | Running version string |
 | `GET /admin/check-update` | Compare running version against latest GitHub tag |
+| `GET /admin/backup` | Download app data as a zip archive |
+| `POST /admin/restore` | Restore app data from an uploaded backup zip |
 | `POST /admin/backup/remote` | Push backup to configured rclone remote |
+| `POST /admin/backup/test-remote` | Test that rclone can reach the configured remote |
+
+## Current Recipe and Timers
+
+The active recipe and timers live in server memory so every surface (web UI,
+Stream Deck, satellites) shares one state.
+
+| Endpoint | Description |
+|---|---|
+| `GET /current-recipe` | Return the active recipe (or null) |
+| `POST /current-recipe` | Replace the active recipe |
+| `DELETE /current-recipe` | Clear the active recipe |
+| `POST /current-recipe/scale` | Set the servings-scale multiplier |
+| `GET /current-recipe/timer-suggestions` | Timer suggestions parsed from the recipe's step durations |
+| `POST /current-recipe/timers/start` | Start a real timer from a suggestion |
+| `POST /current-recipe/from-mealie` | Load a Mealie recipe (by slug) as the active recipe |
+| `GET /timers` | List every timer with fresh remaining/state |
+| `POST /timers` | Create and start a timer for `seconds` |
+| `GET /timers/{id}` | Return one timer's current state |
+| `DELETE /timers/{id}` | Cancel and remove a timer |
+
+## Recipe Import (requires Mealie)
+
+| Endpoint | Description |
+|---|---|
+| `POST /mealie/recipes/import-url` | Import a recipe from a webpage (Mealie scraper, then LLM fallback) |
+| `POST /mealie/recipes/import-file` | Import from a generic JSON / schema.org JSON-LD / Mealie export file |
+| `POST /mealie/recipes/import-external` | Save an external-source recipe into Mealie |
+| `POST /mealie/recipes/extract-photo` | Vision-LLM extraction from a photographed recipe |
+| `POST /mealie/recipes/generate` | Ask the LLM to write a full recipe for a dish name |
+
+## Appliance (Pi-only)
+
+These call the host bridge on a Pi appliance and return a clear error elsewhere.
+
+| Endpoint | Description |
+|---|---|
+| `POST /setup/restore` | Full Grocy + Mealie + app snapshot restore via the host bridge |
+
+`POST /setup/restore` is distinct from `POST /admin/restore`: the former restores
+the whole stack (Grocy, Mealie, app data) from a snapshot already on the device
+(an absolute `.tar.gz` path or `rclone:<remote-path>`), while `/admin/restore`
+rewrites only this app's data directory from an uploaded zip. The host bridge
+itself exposes a `POST /restore` it proxies to, but this file documents the app API.
 
 ## Query Parameters
 

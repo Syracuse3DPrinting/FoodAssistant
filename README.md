@@ -38,12 +38,15 @@ All AI features are optional. You can run FoodAssistant without any AI provider 
 - **Barcode lookup**: scan barcodes via camera, a USB/wireless scanner, or manual entry; backed by Open Food Facts with optional AI cleanup for messy product names
 - **Expiry defaults**: an editable rules table fills in best-by dates automatically based on product type; all values are overridable before import
 - **Recipe suggestions**: "What Can I Cook?" ranks your recipes by how much of them you already have in stock; items expiring soon float to the top
-- **Recipe import**: import from any webpage, photograph a recipe card or handwritten note, browse TheMealDB, or have the AI write a recipe from scratch
+- **Recipe import**: import from any webpage, photograph a recipe card or handwritten note, load a recipe file (generic recipe JSON, a schema.org Recipe JSON-LD file, or a Mealie export), browse TheMealDB, or have the AI write a recipe from scratch
+- **Current Recipe**: set any recipe (from Mealie, an import, or AI-generated) as the active one with a "Cook" button, and the app holds it server-side with servings scaling and step-by-step instructions; step durations like "simmer 20 minutes" become ready-to-start named timers shared across surfaces, surfaced in a floating timer window and on the Stream Deck's timer keys
 - **Meal planning and shopping lists**: optional [Mealie](https://mealie.io) integration with a week view, shopping list with check-off, and inventory-aware recipe suggestions
 - **Custom storage locations**: add buckets beyond the four built-ins (Wine Cellar, Garage Fridge, etc.) from the setup wizard
 - **Home Assistant integration**: REST sensors, notification automations, and a Lovelace dashboard with inventory panels
 - **Stream Deck kiosk**: kitchen control surface with large-text buttons, auto-rotation, and configurable layout
 - **UI scale setting**: adjustable zoom for small screens or kitchen monitors
+- **Themes**: built-in themes including Solarized, Midnight, and Forest, plus a custom theme builder to pick your own palette in Settings > Interface; Stream Deck key colours follow the theme with readable label contrast
+- **Small-screen kiosk**: on small screens the secondary nav tabs collapse into an overflow menu with larger touch targets and a single-column layout; on a Pi with a display attached, kiosk mode auto-enables
 - **Web setup wizard**: configure everything at `/setup` with live connection tests; no config file editing required
 - **Two-factor authentication**: optional TOTP (app-based 2FA) on top of password login; works offline with any authenticator app
 - **Localhost auth bypass**: kiosk installs on the local machine can skip the login screen entirely
@@ -153,11 +156,15 @@ Startup is fully self-contained - no internet access is required to start or res
 
 Download a zip of FoodAssistant's data at **Settings > Security > Download Backup**. API keys and passwords are stripped from the backup by default so it is safe to store off-box; tick "Include API keys & passwords" for a restore-complete copy you keep somewhere trusted.
 
+To restore that backup, use **Settings > Security > Restore** to rebuild the app's data (settings, database, staples) from a backup zip. Your current data is copied aside first, and a redacted backup keeps your existing API keys in place.
+
 For a full backup including Grocy and Mealie data, run on the host:
 
 ```bash
 ./scripts/backup.sh /path/to/backup-destination
 ```
+
+On a Pi appliance, a full Grocy and Mealie snapshot restore runs via the host bridge from a device path or an rclone remote (this is separate from the in-app app-data restore above).
 
 For automated cloud backup, configure an [rclone](https://rclone.org) remote in **Settings > Security**. Rclone supports S3, Backblaze B2, SFTP, Google Drive, Dropbox, and 40+ other backends.
 
@@ -186,6 +193,8 @@ Pin a specific version instead of latest by setting `FOODASSISTANT_TAG=v1.3.1` i
 git pull
 docker compose up -d --build service
 ```
+
+**Raspberry Pi appliance:** the Pi over-the-air update helper redeploys the Stream Deck controller alongside the app, and is safe to re-run after a manual `git pull`.
 
 ### Upgrading pinned images
 
@@ -216,7 +225,7 @@ Check each project's release notes before a major bump - Mealie in particular ha
 
 ## API
 
-See [docs/api.md](docs/api.md) for endpoint reference. Interactive docs are at `/docs` when the app is running.
+See [docs/api.md](docs/api.md) for endpoint reference, including the Current Recipe and timer endpoints, recipe file import, and app-data restore. Interactive docs are at `/docs` when the app is running.
 
 ## Changelog
 

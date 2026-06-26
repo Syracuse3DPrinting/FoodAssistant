@@ -99,9 +99,10 @@ profiles (`--profile with-grocy / with-mealie / with-ollama`).
 - `service/app/main.py` — FastAPI app; middleware order matters (setup-redirect → auth → session)
 - `service/app/config.py` — pydantic settings; env vars override `service/data/settings.json` (written by the `/setup` wizard); `_SAVEABLE` lists persistable keys
 - `service/app/providers/` — `VisionProvider` ABC (gemini/openai/anthropic/ollama); built via `dependencies._build_provider()`, cached with `lru_cache`, invalidated by `reset_providers()` on settings save
-- `service/app/services/` — `grocy.py` (inventory client), `mealie.py` (recipes/mealplan/shopping client + `suggest_recipes` inventory matcher), `barcode.py` (Open Food Facts + LLM enrichment), `defaults.py` (expiry rules)
-- `service/app/routers/` — REST + UI routes; `templates/` are Bootstrap 5 dark-theme Jinja2
+- `service/app/services/` — `grocy.py` (inventory client), `mealie.py` (recipes/mealplan/shopping client + `suggest_recipes` inventory matcher), `barcode.py` (Open Food Facts + LLM enrichment), `defaults.py` (expiry rules), `current_recipe.py` (in-memory active recipe + Mealie-detail normalizer), `timers.py` (shared server-side timer registry), `recipe_timers.py` (parses step durations into timer suggestions), `recipes_import.py` (parse a recipe file: generic JSON / schema.org JSON-LD / Mealie export)
+- `service/app/routers/` — REST + UI routes; `templates/` are Bootstrap 5 dark-theme Jinja2. `current_recipe.py` serves the Current Recipe + `/timers` API; `admin.py` has backup + `POST /admin/restore` (app data, zip-slip guarded, secret-preserve-on-blank). Browser-facing static JS lives in `static/js/` (`floating-nav.js`, `timer-window.js`, `kiosk-idle.js`, `kiosk-auto.js`)
 - `homeassistant/` — REST sensor config, automations (barcode scanner via keyboard_remote), Lovelace dashboard
+- `scripts/image-build/` — Pi provisioning: `firstboot.sh`, the `foodassistant-host-bridge` (host root helper at `127.0.0.1:9299`), and the OTA/restore helpers `foodassistant-update` (redeploys app + Stream Deck, re-runnable after a manual pull) and `foodassistant-restore` (full Grocy+Mealie snapshot restore from a path or `rclone:` source, driven by the bridge `POST /restore`)
 
 ## Conventions & Gotchas
 
@@ -110,6 +111,9 @@ profiles (`--profile with-grocy / with-mealie / with-ollama`).
 - Mealie client auto-detects v1 (`/api/groups/`) vs v2 (`/api/households/`) API paths.
 - HA template gotcha: compare `key_code` as integers (`key == 28`), never cast with `| string`.
 - LLM JSON replies may be fenced — always parse with `providers.base.parse_json_response`.
+- Current Recipe and timers are **in-memory and process-local** (no disk persistence); a restart clears them. Keep the normalization/scaling/parse logic pure so it stays testable.
+- Templates get an `ai_configured` flag from `templating.theme_context`; gate AI-only UI on it (`{% if ai_configured %}`) so the app never offers actions that cannot work without a provider.
+- `/setup/save` applies only the fields present in the request (`model_dump(exclude_unset=True)`), so the per-section Save buttons post just their own fields without clobbering others.
 
 ## Build & Test
 
