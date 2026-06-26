@@ -71,6 +71,58 @@ def _apply_config(config: dict) -> list[str]:
     return applied
 
 
+# The Pi host bridge, same address setup.py proxies to. Used to push synced
+# Stream Deck weather into the local config.toml (FoodAssistant-bra).
+_HOST_BRIDGE = "http://127.0.0.1:9299"
+
+# Settings fields that carry the Stream Deck weather config. A subset of
+# SATELLITE_PULL_FIELDS; when any of these are pulled we mirror them into the
+# controller's config.toml so the deck matches the server.
+_STREAMDECK_WEATHER_FIELDS = ("streamdeck_weather_location", "streamdeck_weather_units")
+
+
+def _merge_streamdeck_weather(config: dict, location: str, units: str) -> dict:
+    """Return config with the weather location/units overlaid.
+
+    The bridge rewrites the whole config.toml from the posted dict, so a caller
+    must read the current config, overlay just these two keys, and post the
+    whole thing back. Kept pure so the read-modify-write is unit-testable.
+    """
+    merged = dict(config)
+    merged["weather_location"] = location
+    merged["weather_units"] = units
+    return merged
+
+
+def _push_streamdeck_weather(timeout: float = 4.0) -> bool:
+    """Mirror the synced weather config into the local Stream Deck config.toml.
+
+    Best-effort and only meaningful on a Pi appliance with a deck: reads the
+    current bridge config, overlays the weather fields from settings, and posts
+    the merged config back so the running controller (which watches config.toml)
+    picks up the server's location/units without a manual save. Returns True on
+    a successful write, False on any error or when not applicable. Never raises.
+    """
+    try:
+        from ..hardware import is_raspberry_pi
+        if not (is_raspberry_pi() and settings.has_streamdeck):
+            return False
+        cur = httpx.get(f"{_HOST_BRIDGE}/streamdeck/config", timeout=timeout)
+        config = (cur.json() or {}).get("config", {}) if cur.status_code == 200 else {}
+        merged = _merge_streamdeck_weather(
+            config,
+            settings.streamdeck_weather_location,
+            settings.streamdeck_weather_units,
+        )
+        resp = httpx.post(
+            f"{_HOST_BRIDGE}/streamdeck/config", json={"config": merged}, timeout=timeout
+        )
+        return resp.status_code == 200
+    except Exception as exc:  # bridge down, not a Pi, etc.: leave the deck as-is
+        logger.warning("satellite sync: could not push Stream Deck weather: %s", exc)
+        return False
+
+
 def _apply_defaults(rows: list[dict]) -> int:
     """Replace the local expiry-defaults table with the server's copy.
 
@@ -162,6 +214,11 @@ def _do_sync_from_upstream(timeout: float = 8.0) -> dict:
         reset_providers()
     except Exception:
         pass
+
+    # If the pull changed the Stream Deck weather config, mirror it into the
+    # local controller config.toml so the deck matches the server (bra).
+    if any(f in applied for f in _STREAMDECK_WEATHER_FIELDS):
+        _push_streamdeck_weather()
 
     command = data.get("command")
     if command == "resync":

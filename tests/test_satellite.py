@@ -315,3 +315,72 @@ def test_sync_partial_payload_without_defaults_still_applies_config(satellite_mo
     # _apply_defaults is called with the empty default and must not error.
     mock_defaults.assert_called_once_with([])
     mock_reset.assert_called_once()
+
+
+# Stream Deck weather sync from the main server (FoodAssistant-bra)
+# ----------------------------------------------------------------
+
+def test_streamdeck_weather_fields_are_pulled():
+    """The weather location/units must be in the satellite pull set so a
+    satellite mirrors the server's Stream Deck weather config."""
+    assert "streamdeck_weather_location" in SATELLITE_PULL_FIELDS
+    assert "streamdeck_weather_units" in SATELLITE_PULL_FIELDS
+
+
+def test_merge_streamdeck_weather_overlays_only_weather():
+    from app.services import satellite as sat
+
+    base = {"rotation": 90, "brightness": 50, "keys": ["a", "b"],
+            "weather_location": "old", "weather_units": "c"}
+    merged = sat._merge_streamdeck_weather(base, "Boston", "f")
+    # Weather overlaid, everything else preserved, original not mutated.
+    assert merged["weather_location"] == "Boston"
+    assert merged["weather_units"] == "f"
+    assert merged["rotation"] == 90
+    assert merged["keys"] == ["a", "b"]
+    assert base["weather_location"] == "old"
+
+
+def test_push_streamdeck_weather_skipped_off_pi(monkeypatch):
+    from app.services import satellite as sat
+
+    # Off a Pi (or with no deck) the push is a no-op and never touches the
+    # bridge, so a sync on a server/phone does not error.
+    monkeypatch.setattr("app.hardware.is_raspberry_pi", lambda: False)
+    called = {"hit": False}
+
+    def _should_not_run(*a, **k):
+        called["hit"] = True
+        raise AssertionError("bridge must not be called off a Pi")
+
+    monkeypatch.setattr(sat.httpx, "get", _should_not_run)
+    monkeypatch.setattr(sat.httpx, "post", _should_not_run)
+    assert sat._push_streamdeck_weather() is False
+    assert called["hit"] is False
+
+
+def test_sync_pushes_weather_when_pulled(satellite_mode, monkeypatch):
+    """When a sync applies the weather fields, the controller config.toml push
+    runs; when it does not, the push is skipped."""
+    from app.services import satellite as sat
+
+    payload = {
+        "ok": True,
+        "config": {
+            "streamdeck_weather_location": "Seattle",
+            "streamdeck_weather_units": "c",
+        },
+        "expiry_defaults": [],
+        "command": None,
+    }
+    pushes = []
+    monkeypatch.setattr(sat, "_push_streamdeck_weather", lambda *a, **k: pushes.append(True) or True)
+    with patch.object(sat.httpx, "get", return_value=_FakeResponse(200, payload)), \
+            patch.object(sat, "_apply_defaults", return_value=0), \
+            patch("app.dependencies.reset_providers"):
+        out = sat.sync_from_upstream()
+
+    assert out["ok"] is True
+    assert settings.streamdeck_weather_location == "Seattle"
+    assert settings.streamdeck_weather_units == "c"
+    assert pushes == [True]

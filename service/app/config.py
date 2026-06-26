@@ -145,6 +145,7 @@ _SAVEABLE = [
     "display_type",
     "has_streamdeck", "streamdeck_key_count", "display_touch",
     "display_idle_timeout", "streamdeck_idle_timeout", "streamdeck_key_overrides",
+    "streamdeck_weather_location", "streamdeck_weather_units",
     "deployment_mode", "remote_server_url", "upstream_api_key", "kiosk_pin", "kiosk_readonly_when_locked",
     "satellite_sync_minutes", "satellite_last_sync", "device_id",
     "secret_key", "auth_password", "totp_secret", "api_key", "extra_api_keys", "auth_required",
@@ -169,6 +170,9 @@ SATELLITE_PULL_FIELDS = [
     "staple_items", "cook_ai_context",
     "perishable_days", "expiring_soon_days", "suggest_per_tier",
     "custom_storage_categories", "ui_theme",
+    # Stream Deck weather widget config, so a satellite's deck matches the
+    # server's location/units without separate local setup (FoodAssistant-bra).
+    "streamdeck_weather_location", "streamdeck_weather_units",
 ]
 
 # Settings that hold credentials. These are redacted from backups unless the
@@ -457,6 +461,14 @@ class Settings(BaseSettings):
     # a key press.
     display_idle_timeout: int = 0
     streamdeck_idle_timeout: int = 0
+
+    # Stream Deck weather widget. Held at the app level (not just in the
+    # controller's config.toml) so a satellite can pull them from the main
+    # server via the satellite config sync (FoodAssistant-bra). location is a
+    # city, zip, or "lat,lon" (empty = auto-detect from device IP); units is
+    # "f" or "c". Mirrored into config.toml when the deck config is written.
+    streamdeck_weather_location: str = ""
+    streamdeck_weather_units: str = "f"
 
     # Advanced Stream Deck per-key overrides set in the setup page. A JSON list
     # where each entry is a dict with "slot" (grid index), "type" (ha_action |

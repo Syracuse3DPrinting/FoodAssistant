@@ -149,3 +149,27 @@ def test_setup_save_round_trips(client):
     assert saved["perishable_days"] == 9
     assert saved["staple_items"] == "miso, nori"
     assert saved["gemini_api_key"] == "round-trip-key"
+
+
+def test_setup_save_persists_streamdeck_fields(client):
+    # Regression: these were dropped by SetupPayload (unknown fields ignored), so
+    # idle timeouts, key overrides, and Stream Deck weather never persisted
+    # through /save (FoodAssistant-bra).
+    from app.config import settings
+
+    payload = {
+        "streamdeck_idle_timeout": 12,
+        "display_idle_timeout": 6,
+        "streamdeck_weather_location": "Portland",
+        "streamdeck_weather_units": "c",
+        "streamdeck_key_overrides": [{"slot": 0, "type": "weather", "location": "Portland"}],
+    }
+    r = client.post("/setup/save", json=payload)
+    assert r.status_code == 200
+    assert settings.streamdeck_idle_timeout == 12
+    assert settings.display_idle_timeout == 6
+    assert settings.streamdeck_weather_location == "Portland"
+    assert settings.streamdeck_weather_units == "c"
+    assert settings.streamdeck_key_overrides == [
+        {"slot": 0, "type": "weather", "location": "Portland"}
+    ]

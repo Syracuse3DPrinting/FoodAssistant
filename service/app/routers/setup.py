@@ -171,6 +171,14 @@ class SetupPayload(BaseModel):
     cook_ai_context: str = ""
     has_streamdeck: bool = False
     streamdeck_key_count: int = 0
+    # These were previously sent by the setup page but dropped here (BaseModel
+    # ignores unknown fields), so idle timeouts, key overrides, and the Stream
+    # Deck weather never persisted through /save. Declared so they round-trip.
+    streamdeck_idle_timeout: int = 0
+    display_idle_timeout: int = 0
+    streamdeck_key_overrides: list = []
+    streamdeck_weather_location: str = ""
+    streamdeck_weather_units: str = "f"
     display_touch: bool = False
     auth_required: bool = True
     auth_password: str = ""
@@ -1004,12 +1012,22 @@ async def update_software():
 
 @router.get("/streamdeck/config")
 async def streamdeck_config_get():
-    """Proxy GET config from host bridge."""
+    """Proxy GET config from host bridge.
+
+    On a satellite the Stream Deck weather is owned by the main server, so the
+    returned config's weather fields are overlaid with the synced settings. That
+    keeps the setup UI showing the server's location/units (rendered read-only)
+    even if the local config.toml still holds older values.
+    """
     if _HOST_BRIDGE:
         try:
             async with httpx.AsyncClient(timeout=3.0) as c:
                 r = await c.get(f"{_HOST_BRIDGE}/streamdeck/config")
-                return JSONResponse(status_code=r.status_code, content=r.json())
+                content = r.json()
+                if r.status_code == 200 and settings.is_satellite() and isinstance(content.get("config"), dict):
+                    content["config"]["weather_location"] = settings.streamdeck_weather_location
+                    content["config"]["weather_units"] = settings.streamdeck_weather_units
+                return JSONResponse(status_code=r.status_code, content=content)
         except Exception as e:
             return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
     return JSONResponse(status_code=500, content={"ok": False, "error": "bridge unavailable"})
@@ -1017,10 +1035,18 @@ async def streamdeck_config_get():
 
 @router.post("/streamdeck/config")
 async def streamdeck_config_set(request: Request):
-    """Proxy POST config to host bridge."""
+    """Proxy POST config to host bridge.
+
+    On a satellite the weather config comes from the main server, so any weather
+    values in the posted config are replaced with the synced settings before the
+    write. This stops a local save from diverging the deck from the server.
+    """
     if _HOST_BRIDGE:
         try:
             payload = await request.json()
+            if settings.is_satellite() and isinstance(payload.get("config"), dict):
+                payload["config"]["weather_location"] = settings.streamdeck_weather_location
+                payload["config"]["weather_units"] = settings.streamdeck_weather_units
             async with httpx.AsyncClient(timeout=3.0) as c:
                 r = await c.post(f"{_HOST_BRIDGE}/streamdeck/config", json=payload)
                 return JSONResponse(status_code=r.status_code, content=r.json())

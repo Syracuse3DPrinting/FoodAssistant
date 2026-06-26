@@ -1782,15 +1782,19 @@ docker compose up -d</code></pre>
               <div class="row g-3 mb-3">
                 <div class="col-md-6">
                   <label class="form-label">Weather Location</label>
-                  <input type="text" class="form-control form-control-sm" id="streamdeck_weather_location" placeholder="Leave empty to auto-detect">
+                  <input type="text" class="form-control form-control-sm" id="streamdeck_weather_location" placeholder="Leave empty to auto-detect"
+                         {% if features.satellite %}value="{{ s.streamdeck_weather_location }}" readonly{% endif %}>
                 </div>
                 <div class="col-md-6">
                   <label class="form-label">Weather Units</label>
-                  <select class="form-select form-select-sm" id="streamdeck_weather_units">
-                    <option value="f">Fahrenheit (°F)</option>
-                    <option value="c">Celsius (°C)</option>
+                  <select class="form-select form-select-sm" id="streamdeck_weather_units" {% if features.satellite %}disabled{% endif %}>
+                    <option value="f" {{ 'selected' if s.streamdeck_weather_units == 'f' else '' }}>Fahrenheit (°F)</option>
+                    <option value="c" {{ 'selected' if s.streamdeck_weather_units == 'c' else '' }}>Celsius (°C)</option>
                   </select>
                 </div>
+                {% if features.satellite %}
+                <div class="form-text"><i class="bi bi-hdd-network me-1"></i>Weather comes from the main server and syncs automatically. Change it there.</div>
+                {% endif %}
               </div>
               <div class="mb-3">
                 <label class="form-label" for="streamdeck_idle_timeout">Blank deck after N minutes idle (0 = off)</label>
@@ -3882,7 +3886,9 @@ async function saveStreamDeckSettings() {
     await fetch('setup/save', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({has_streamdeck, streamdeck_key_count, streamdeck_idle_timeout,
-                            streamdeck_key_overrides: key_overrides}),
+                            streamdeck_key_overrides: key_overrides,
+                            streamdeck_weather_location: weather_location,
+                            streamdeck_weather_units: weather_units}),
     });
 
     if (has_streamdeck) {
