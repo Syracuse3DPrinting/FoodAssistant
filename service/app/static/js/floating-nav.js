@@ -73,12 +73,18 @@
     clearPadding();
     var rect = nav.getBoundingClientRect();
     var body = document.body;
+    var root = document.documentElement;
+    // Publish the dock size as a CSS variable too, so other fixed widgets (the
+    // floating timer window) can offset themselves and not sit under the bar.
     if (edge === 'bottom') {
       body.style.setProperty('padding-bottom', Math.ceil(rect.height) + 'px', 'important');
+      root.style.setProperty('--float-nav-bottom', Math.ceil(rect.height) + 'px');
     } else if (edge === 'left') {
       body.style.setProperty('padding-left', Math.ceil(rect.width) + 'px', 'important');
+      root.style.setProperty('--float-nav-left', Math.ceil(rect.width) + 'px');
     } else if (edge === 'right') {
       body.style.setProperty('padding-right', Math.ceil(rect.width) + 'px', 'important');
+      root.style.setProperty('--float-nav-right', Math.ceil(rect.width) + 'px');
     }
   }
 
@@ -86,6 +92,10 @@
     var body = document.body;
     ['padding-bottom', 'padding-left', 'padding-right'].forEach(function (p) {
       body.style.removeProperty(p);
+    });
+    var root = document.documentElement;
+    ['--float-nav-bottom', '--float-nav-left', '--float-nav-right'].forEach(function (v) {
+      root.style.removeProperty(v);
     });
   }
 

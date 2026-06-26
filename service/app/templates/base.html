@@ -192,8 +192,10 @@
     .timer-window {
       position: fixed;
       z-index: 1030;
-      bottom: 0.75rem;
-      right: 0.75rem;
+      /* Offset clear of a docked nav bar (floating-nav.js publishes its size as
+         these CSS vars) so the timer window never sits on top of it. */
+      bottom: calc(0.75rem + var(--float-nav-bottom, 0px));
+      right: calc(0.75rem + var(--float-nav-right, 0px));
       min-width: 9rem;
       max-width: 16rem;
       padding: 0.35rem 0.5rem;
