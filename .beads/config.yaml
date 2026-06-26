@@ -66,3 +66,9 @@
 # - github.token    → use GITHUB_TOKEN env var instead
 
 sync.remote: "git+http://local_proxy@127.0.0.1:42317/git/Syracuse3DPrinting/FoodAssistant"
+
+export.auto: true
+
+export.path: "issues.jsonl"
+
+export.git-add: true
