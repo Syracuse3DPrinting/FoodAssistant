@@ -534,6 +534,75 @@ def test_rotated_index_270_xl_bijection():
     assert len(set(physicals)) == 32, "rotated_index(270) is not injective"
 
 
+# -- 6-key orientation (FoodAssistant-na7) ---------------------------------
+#
+# The Mini's native grid is 2 rows by 3 cols (phys 0..2 top row, 3..5 bottom):
+#     0 1 2
+#     3 4 5
+# Rotating the deck is a rigid clockwise turn of the whole page, the same turn
+# `_draw_page` applies to each key face via `image.rotate(-rotation)`. The old
+# code turned the index the wrong way (it had 90 and 270 swapped), so a face
+# drawn upright landed on the key for the opposite rotation. These tables are
+# the geometrically correct slot -> physical-key maps per rotation.
+
+
+def test_rotated_index_6key_each_rotation():
+    # slot indices are row-major over the *displayed* grid: 0 native (3x2), and
+    # the portrait 2x3 grid for 90/270.
+    expected = {
+        0: list(range(6)),               # identity
+        90: [2, 5, 1, 4, 0, 3],
+        180: [5, 4, 3, 2, 1, 0],
+        270: [3, 0, 4, 1, 5, 2],
+    }
+    for rotation, table in expected.items():
+        got = [layout.rotated_index(s, 6, rotation) for s in range(6)]
+        assert got == table, f"rotation={rotation}: {got} != {table}"
+
+
+def test_rotated_index_6key_90_corner_sanity():
+    # The reported bug: at 90 the displayed bottom-right and top-right slots
+    # landed on the wrong physical keys. Displayed grid at 90 is 2 cols x 3 rows,
+    # so top-right is slot 1 and bottom-right is slot 5.
+    assert layout.rotated_index(1, 6, 90) == 5   # top-right -> phys bottom-right
+    assert layout.rotated_index(5, 6, 90) == 3   # bottom-right -> phys bottom-left
+
+
+def test_rotated_index_6key_round_trips_every_rotation():
+    for rotation in (0, 90, 180, 270):
+        d_cols, d_rows = layout.display_dims(6, rotation)
+        for slot in range(d_cols * d_rows):
+            phys = layout.rotated_index(slot, 6, rotation)
+            assert 0 <= phys < 6
+            assert layout.slot_for_physical(phys, 6, rotation) == slot
+
+
+def test_rotated_index_larger_decks_unchanged():
+    # Guard against regressing the 15- and 32-key transforms while fixing the
+    # Mini. These are the same geometrically correct rigid-turn maps the fix
+    # produces, pinned so a future change to either size is caught.
+    assert [layout.rotated_index(s, 15, 90) for s in range(15)] == [
+        4, 9, 14, 3, 8, 13, 2, 7, 12, 1, 6, 11, 0, 5, 10
+    ]
+    assert [layout.rotated_index(s, 15, 270) for s in range(15)] == [
+        10, 5, 0, 11, 6, 1, 12, 7, 2, 13, 8, 3, 14, 9, 4
+    ]
+    assert [layout.rotated_index(s, 15, 180) for s in range(15)] == list(
+        range(14, -1, -1)
+    )
+    assert [layout.rotated_index(s, 32, 90) for s in range(32)] == [
+        7, 15, 23, 31, 6, 14, 22, 30, 5, 13, 21, 29, 4, 12, 20, 28,
+        3, 11, 19, 27, 2, 10, 18, 26, 1, 9, 17, 25, 0, 8, 16, 24,
+    ]
+    assert [layout.rotated_index(s, 32, 270) for s in range(32)] == [
+        24, 16, 8, 0, 25, 17, 9, 1, 26, 18, 10, 2, 27, 19, 11, 3,
+        28, 20, 12, 4, 29, 21, 13, 5, 30, 22, 14, 6, 31, 23, 15, 7,
+    ]
+    assert [layout.rotated_index(s, 32, 180) for s in range(32)] == list(
+        range(31, -1, -1)
+    )
+
+
 # -- timer widget ----------------------------------------------------------
 
 

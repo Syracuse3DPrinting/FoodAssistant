@@ -48,9 +48,11 @@ def rotated_index(index: int, key_count: int, rotation: int) -> int:
 
     ``index`` is a slot in row-major order of the *displayed* grid (the grid the
     web editor draws, with columns and rows swapped for 90/270). We recover its
-    (row, col) using the displayed dimensions, rotate the coordinate into the
-    deck's native grid, and flatten to a physical key. The map is an exact
-    bijection for all four rotations, so every slot lands on a distinct key.
+    (row, col) using the displayed dimensions, rigidly turn that coordinate
+    clockwise by ``rotation`` into the deck's native grid (the same clockwise
+    turn ``_draw_page`` applies to each key face image), and flatten to a
+    physical key. The map is an exact bijection for all four rotations, so every
+    slot lands on a distinct key.
     """
     if rotation == 0 or key_count not in GRID:
         return index
@@ -62,9 +64,9 @@ def rotated_index(index: int, key_count: int, rotation: int) -> int:
     if rotation == 180:
         pr, pc = p_rows - 1 - vr, p_cols - 1 - vc
     elif rotation == 90:
-        pr, pc = p_rows - 1 - vc, vr
+        pr, pc = vc, d_rows - 1 - vr
     else:  # 270
-        pr, pc = vc, p_cols - 1 - vr
+        pr, pc = d_cols - 1 - vc, vr
     return pr * p_cols + pc
 
 
@@ -84,9 +86,9 @@ def slot_for_physical(phys: int, key_count: int, rotation: int) -> int:
     if rotation == 180:
         vr, vc = p_rows - 1 - pr, p_cols - 1 - pc
     elif rotation == 90:
-        vr, vc = pc, p_rows - 1 - pr
+        vr, vc = d_rows - 1 - pc, pr
     else:  # 270
-        vr, vc = p_cols - 1 - pc, pr
+        vr, vc = pc, d_cols - 1 - pr
     return vr * d_cols + vc
 
 
