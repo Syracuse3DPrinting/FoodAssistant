@@ -181,6 +181,9 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <button class="btn btn-outline-primary" id="aipv-cook" disabled onclick="cookAiRecipe(this)">
+          <i class="bi bi-fire me-1"></i>Cook this
+        </button>
         <button class="btn btn-info" id="aipv-save" disabled onclick="saveAiRecipe(this)">
           <i class="bi bi-download me-1"></i>Save to Mealie
         </button>
@@ -606,6 +609,8 @@ function actions(s, tier) {
         title="Save this recipe into Mealie"><i class="bi bi-download me-1"></i>Save</button>`);
     }
   } else {
+    btns.push(`<button class="btn btn-sm btn-outline-primary" onclick="cookThis('${s.slug}', this)"
+      title="Make this the Current Recipe"><i class="bi bi-fire me-1"></i>Cook</button>`);
     btns.push(`<button class="btn btn-sm btn-outline-primary" onclick="openPlan('${s.id}', '${(s.name || '').replace(/'/g, '&#39;')}')"
       title="Add to meal plan"><i class="bi bi-calendar-plus me-1"></i>Plan</button>`);
     btns.push(`<button class="btn btn-sm btn-outline-success" onclick="cookedRecipe('${s.slug}', ${s.matched_ingredients.length}, this)"
@@ -705,6 +710,51 @@ async function loadSuggestions() {
   } catch (e) {
     el.innerHTML = `<div class="col-12"><div class="alert alert-danger">Could not load suggestions: ${e.message}</div></div>`;
     meta.textContent = '';
+  }
+}
+
+// Make a Mealie suggestion the active Current Recipe, then open that page
+// (FoodAssistant-1g4l). The backend fetches and normalizes the recipe by slug.
+async function cookThis(slug, btn) {
+  const orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>'; }
+  try {
+    const r = await fetch('current-recipe/from-mealie', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({slug}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    window.location.href = 'ui/current-recipe';
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+    alert('Could not set the current recipe: ' + e.message);
+  }
+}
+
+// Load the AI-generated recipe (already in memory client-side) as the active
+// Current Recipe via the generic set endpoint, then open that page.
+async function cookAiRecipe(btn) {
+  if (!aiGeneratedRecipe) return;
+  const d = aiGeneratedRecipe;
+  const orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>'; }
+  try {
+    const r = await fetch('current-recipe', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        title: d.name || 'AI recipe',
+        source: 'ai',
+        servings: parseInt(d.servings, 10) || 1,
+        ingredients: (d.ingredients || []).map(i => ({name: i})),
+        steps: d.instructions || [],
+      }),
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || r.statusText); }
+    window.location.href = 'ui/current-recipe';
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+    alert('Could not set the current recipe: ' + e.message);
   }
 }
 
@@ -885,6 +935,7 @@ async function openAiPreview(name) {
     document.getElementById('aipv-loading').classList.add('d-none');
     document.getElementById('aipv-body').classList.remove('d-none');
     document.getElementById('aipv-save').disabled = false;
+    document.getElementById('aipv-cook').disabled = false;
   } catch (e) {
     document.getElementById('aipv-loading').classList.add('d-none');
     const err = document.getElementById('aipv-error');

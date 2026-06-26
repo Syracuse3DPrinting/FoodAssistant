@@ -142,6 +142,61 @@ def clear_active() -> None:
         _active = None
 
 
+def _mealie_ingredient(raw: dict) -> dict:
+    """Map one Mealie recipeIngredient entry to the {name, quantity, unit} shape.
+
+    A structured entry has food.name plus quantity and unit.name. An
+    unstructured one only carries a free-text note/display, which becomes the
+    whole name with no quantity."""
+    food = raw.get("food") or {}
+    unit = raw.get("unit") or {}
+    name = str(food.get("name") or "").strip()
+    if not name:
+        name = str(raw.get("note") or raw.get("display") or "").strip()
+        return {"name": name}
+    return {
+        "name": name,
+        "quantity": raw.get("quantity"),
+        "unit": (str(unit.get("name")).strip() or None) if unit.get("name") else None,
+    }
+
+
+def _mealie_servings(recipe_yield) -> int:
+    """Parse a Mealie recipeYield ('4 servings', '4', 4) into an int >= 1."""
+    if isinstance(recipe_yield, (int, float)):
+        n = int(recipe_yield)
+    else:
+        import re as _re
+        m = _re.search(r"\d+", str(recipe_yield or ""))
+        n = int(m.group()) if m else 1
+    return n if n >= 1 else 1
+
+
+def from_mealie_detail(detail: dict, slug: str = "") -> dict:
+    """Convert a Mealie recipe detail object into the set_active() input shape.
+
+    Tolerant of Mealie's nested ingredient/instruction objects so a recipe can
+    be made the Current Recipe straight from its Mealie slug (FoodAssistant-1g4l)."""
+    d = detail or {}
+    ings = [_mealie_ingredient(i) for i in (d.get("recipeIngredient") or []) if isinstance(i, dict)]
+    ings = [i for i in ings if i.get("name")]
+    steps = []
+    for s in d.get("recipeInstructions") or []:
+        text = (s.get("text") if isinstance(s, dict) else str(s)) or ""
+        text = text.strip()
+        if text:
+            steps.append(text)
+    return {
+        "title": str(d.get("name") or "").strip(),
+        "source": "mealie",
+        "id": slug or d.get("slug") or "",
+        "servings": _mealie_servings(d.get("recipeYield")),
+        "ingredients": ings,
+        "steps": steps,
+        "notes": str(d.get("description") or "").strip(),
+    }
+
+
 def scale_servings(factor: float) -> dict | None:
     """Set the servings-scale multiplier on the active recipe and return the
     serialized form. Returns None when no recipe is loaded. A non-positive or

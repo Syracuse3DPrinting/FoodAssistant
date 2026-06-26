@@ -70,6 +70,33 @@ def set_current_recipe(payload: RecipeIn):
     return {"recipe": recipe}
 
 
+class FromMealieIn(BaseModel):
+    slug: str
+
+
+@recipe_router.post("/from-mealie")
+async def set_current_from_mealie(payload: FromMealieIn):
+    """Load a Mealie recipe (by slug) as the active recipe (FoodAssistant-1g4l).
+
+    Fetches the full recipe from Mealie, normalizes its ingredients/steps/yield
+    into the active-recipe shape, and makes it current. This is what the Recipes
+    and Cook page 'Cook this' buttons call so a recipe can be launched without
+    leaving the app."""
+    slug = (payload.slug or "").strip()
+    if not slug:
+        return JSONResponse({"detail": "A recipe slug is required."}, status_code=400)
+    from ..services.mealie import MealieClient, MealieError
+    try:
+        detail = await MealieClient().get_recipe(slug)
+    except MealieError as e:
+        return JSONResponse({"detail": f"Could not load the recipe from Mealie: {e}"},
+                            status_code=502)
+    if not detail:
+        return JSONResponse({"detail": "Recipe not found in Mealie."}, status_code=404)
+    recipe = current_recipe.set_active(current_recipe.from_mealie_detail(detail, slug))
+    return {"recipe": recipe}
+
+
 @recipe_router.delete("")
 def clear_current_recipe():
     """Clear the active recipe."""

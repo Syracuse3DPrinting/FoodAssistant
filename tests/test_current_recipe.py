@@ -100,3 +100,50 @@ def test_scale_with_no_active_returns_none():
 def test_servings_floor_is_one():
     out = current_recipe.set_active({"title": "x", "servings": 0})
     assert out["servings"] == 1
+
+
+# -- Mealie detail -> active recipe (FoodAssistant-1g4l) --------------------
+
+
+def test_from_mealie_detail_maps_structured_fields():
+    detail = {
+        "name": "Pasta Pomodoro",
+        "slug": "pasta-pomodoro",
+        "recipeYield": "4 servings",
+        "description": "Quick weeknight pasta.",
+        "recipeIngredient": [
+            {"quantity": 2, "unit": {"name": "cup"}, "food": {"name": "pasta"}, "note": "dry"},
+            {"note": "Salt to taste"},
+        ],
+        "recipeInstructions": [
+            {"text": "Boil the pasta."},
+            {"text": "Add the sauce."},
+        ],
+    }
+    out = current_recipe.set_active(current_recipe.from_mealie_detail(detail, "pasta-pomodoro"))
+    assert out["title"] == "Pasta Pomodoro"
+    assert out["source"] == "mealie"
+    assert out["id"] == "pasta-pomodoro"
+    assert out["servings"] == 4
+    # Structured ingredient keeps name/quantity/unit; unstructured one is name-only.
+    assert out["ingredients"][0]["name"] == "pasta"
+    assert out["ingredients"][0]["quantity"] == 2
+    assert out["ingredients"][0]["unit"] == "cup"
+    assert out["ingredients"][1]["name"] == "Salt to taste"
+    assert out["steps"] == ["Boil the pasta.", "Add the sauce."]
+
+
+def test_from_mealie_detail_tolerates_sparse_recipe():
+    out = current_recipe.from_mealie_detail({"name": "Bare"}, "bare")
+    assert out["title"] == "Bare"
+    assert out["servings"] == 1
+    assert out["ingredients"] == []
+    assert out["steps"] == []
+
+
+def test_mealie_servings_parsing():
+    assert current_recipe._mealie_servings("4 servings") == 4
+    assert current_recipe._mealie_servings(6) == 6
+    assert current_recipe._mealie_servings("") == 1
+    assert current_recipe._mealie_servings("serves a crowd") == 1
+    assert current_recipe._mealie_servings(0) == 1

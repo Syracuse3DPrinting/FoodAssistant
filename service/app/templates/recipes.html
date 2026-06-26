@@ -216,7 +216,13 @@ function recipeRow(r) {
             <a href="${MEALIE_URL}/g/home/r/${r.slug}" target="_blank" class="fw-semibold">${r.name}</a>
             ${r.description ? `<div class="small text-secondary text-truncate">${r.description}</div>` : ''}
           </div>
-          ${r.total_time ? `<span class="badge bg-secondary flex-shrink-0"><i class="bi bi-clock me-1"></i>${r.total_time}</span>` : ''}
+          <div class="d-flex align-items-center gap-2 flex-shrink-0">
+            ${r.total_time ? `<span class="badge bg-secondary"><i class="bi bi-clock me-1"></i>${r.total_time}</span>` : ''}
+            <button class="btn btn-sm btn-outline-primary" title="Make this the Current Recipe"
+                    onclick="setCurrentFromMealie('${r.slug}', this)">
+              <i class="bi bi-fire me-1"></i>Cook
+            </button>
+          </div>
         </div>
       </div>`;
   }
@@ -244,6 +250,26 @@ function recipeRow(r) {
         </div>
       </div>
     </div>`;
+}
+
+// Make a Mealie recipe the active Current Recipe, then open the Current Recipe
+// page (FoodAssistant-1g4l). The backend fetches the full recipe and normalizes
+// it, so we only need the slug here.
+async function setCurrentFromMealie(slug, btn) {
+  const orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>'; }
+  try {
+    const r = await fetch('current-recipe/from-mealie', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({slug}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    window.location.href = 'ui/current-recipe';
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+    alert('Could not set the current recipe: ' + e.message);
+  }
 }
 
 async function loadRecipes(search = '') {
