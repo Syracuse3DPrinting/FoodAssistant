@@ -13,6 +13,7 @@ All notable changes to FoodAssistant are recorded here. The format is based on
 ### Added
 - **Version bump tooling.** `scripts/bump-version.sh [patch|minor|major]` edits the single source-of-truth `APP_VERSION`, and `scripts/install-git-hooks.sh` installs a pre-commit hook that auto-bumps the patch on each commit so every commit changes at least the patch number. The hook stays out of the way during rebases, merges, beads-only commits, and explicit minor/major bumps.
 - **Kiosk display sleep with shared wake.** The kiosk screen now blanks after its idle timeout (previously a stored but unused setting) and wakes on a touch, key press, mouse move, or a Stream Deck button press. The display and the Stream Deck keep separate timeouts, but activity on either surface wakes both: the host bridge owns the display blanking and brokers activity between the screen and the deck. Manual blank/wake and the idle timeout are exposed through the bridge.
+- **On-screen floating navigation menu.** An optional column of nav icons docked to a screen corner, handy on touch screens. Drag its handle to reposition it; it snaps to the nearest corner and remembers the spot per-device. A setting in Interface picks the default corner (or off), and it can auto-hide when a Stream Deck is connected, since the deck already provides navigation.
 
 ## [0.6.0] - 2026-06-26
 

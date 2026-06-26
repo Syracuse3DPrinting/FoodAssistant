@@ -13,6 +13,7 @@ from ..config import (
     UI_SCALES, _DEFAULT_UI_SCALE,
     DISPLAY_ROTATIONS, _DEFAULT_DISPLAY_ROTATION,
     DISPLAY_TYPES, _DEFAULT_DISPLAY_TYPE,
+    FLOATING_NAV_POSITIONS,
     DEPLOYMENT_MODES, _DEFAULT_DEPLOYMENT_MODE,
     AI_MODELS,
     browser_host, device_hostname,
@@ -181,6 +182,8 @@ class SetupPayload(BaseModel):
     streamdeck_key_overrides: list = []
     streamdeck_weather_location: str = ""
     streamdeck_weather_units: str = "f"
+    floating_nav_position: str = ""
+    floating_nav_autohide_streamdeck: bool = False
     display_touch: bool = False
     auth_required: bool = True
     auth_password: str = ""
@@ -471,6 +474,9 @@ async def save_setup(payload: SetupPayload):
     # absent value leaves the stored choice untouched.
     if "display_type" in data and data["display_type"] not in DISPLAY_TYPES:
         data.pop("display_type", None)
+    # Drop an unknown floating-nav position (empty/invalid keeps the stored one).
+    if "floating_nav_position" in data and data["floating_nav_position"] not in FLOATING_NAV_POSITIONS:
+        data.pop("floating_nav_position", None)
     # Drop an unknown deployment mode rather than persisting a broken value;
     # an empty/absent mode leaves the existing choice untouched.
     if data.get("deployment_mode") and data["deployment_mode"] not in DEPLOYMENT_MODES:

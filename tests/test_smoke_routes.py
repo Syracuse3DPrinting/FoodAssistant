@@ -255,3 +255,33 @@ def test_display_blank_wake_off_pi(client):
     r = client.post("/setup/display/wake")
     assert r.status_code == 200
     assert r.json()["ok"] is False
+
+
+def test_floating_nav_settings_persist_and_validate(client):
+    """Floating nav position + autohide round-trip; bad position is rejected
+    (FoodAssistant-bzuu)."""
+    from app.config import settings
+
+    r = client.post("/setup/save", json={
+        "floating_nav_position": "bottom-right",
+        "floating_nav_autohide_streamdeck": True,
+    })
+    assert r.status_code == 200
+    assert settings.floating_nav_position == "bottom-right"
+    assert settings.floating_nav_autohide_streamdeck is True
+
+    # An invalid position is dropped, leaving the stored value untouched.
+    r = client.post("/setup/save", json={"floating_nav_position": "middle"})
+    assert r.status_code == 200
+    assert settings.floating_nav_position == "bottom-right"
+
+
+def test_floating_nav_renders_on_page(client):
+    """The floating nav container renders with its data attributes so the JS
+    can place it."""
+    from app.config import settings
+    settings.floating_nav_position = "top-right"
+    r = client.get("/ui/")
+    assert r.status_code == 200
+    assert 'id="floatNav"' in r.text
+    assert 'data-position="top-right"' in r.text
