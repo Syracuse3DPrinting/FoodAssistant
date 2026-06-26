@@ -33,6 +33,9 @@ def is_staple(text: str) -> bool:
     "garlic", "onion", "potatoes", "lemons", "limes",
     "dried oregano", "smoked paprika", "cayenne pepper", "ground cumin",
     "bay leaves", "rice", "breadcrumbs", "pasta", "parmesan",
+    # Descriptor words a recipe tacks on must not defeat a file staple:
+    "parmesan cheese", "grated parmesan", "freshly grated parmesan",
+    "fresh garlic", "chopped onions", "sliced onion", "fresh lemons",
 ])
 def test_staples_match(ingredient):
     assert is_staple(ingredient), f"{ingredient!r} should be a staple"
@@ -48,6 +51,11 @@ def test_staples_match(ingredient):
     "heavy cream",
     "salmon fillet",
     "tofu",
+    # A descriptor token must not turn a non-staple food into a staple just
+    # because part of the phrase looks like one:
+    "blue cheese",        # "cheese" descriptor, but "blue" is not a staple
+    "cream cheese",
+    "coconut milk",       # "milk" is a staple word, "coconut" is not a descriptor
 ])
 def test_non_staples_rejected(ingredient):
     assert not is_staple(ingredient), f"{ingredient!r} should NOT be a staple"

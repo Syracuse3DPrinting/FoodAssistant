@@ -353,6 +353,23 @@ _PHRASE_MODIFIERS = {
 }
 
 
+# Generic descriptor words a recipe may tack onto a staple without changing
+# what it is: "parmesan cheese" is still the Parmesan staple, "grated parmesan"
+# and "fresh garlic" likewise. These are allowed as EXTRA ingredient tokens
+# beyond a staple phrase's core. A distinct food word (e.g. "coconut" in
+# "coconut milk") is deliberately NOT here, so "coconut milk" stays non-staple.
+_STAPLE_DESCRIPTORS = (
+    _PHRASE_MODIFIERS
+    | _STAPLE_GLUE_TOKENS
+    | {
+        "cheese", "fresh", "chopped", "diced", "sliced", "minced", "grated",
+        "shredded", "freshly", "fine", "finely", "coarse", "coarsely", "good",
+        "quality", "best", "pure", "raw", "flaky", "fillet", "fillets",
+        "leaf", "leave", "stick", "stalk", "head", "bunch",
+    }
+)
+
+
 def _phrase_core(phrase: frozenset[str]) -> frozenset[str]:
     """Return phrase tokens with modifier-only tokens removed."""
     core = phrase - _PHRASE_MODIFIERS
@@ -365,20 +382,28 @@ def _is_staple_ingredient(ing_toks: set[str]) -> bool:
     Two pathways:
     1. Fuzzy token check: all ingredient tokens are staple/glue/freebie tokens
        (handles loose pantry items like "flour", "unsalted butter", "table salt").
-    2. Phrase core match: the ingredient's token set equals the core tokens of a
-       staple phrase after stripping modifier words.  "chickpeas" matches
-       "canned chickpeas" but bare "chicken" does NOT match "chicken stock".
+    2. Phrase core match: a staple phrase's core tokens are contained in the
+       ingredient's tokens, and any leftover ingredient tokens are benign
+       descriptors. "chickpeas" matches "canned chickpeas" and "parmesan cheese"
+       matches "Parmesan", but bare "chicken" does NOT match "chicken stock"
+       (the phrase carries an extra token the ingredient lacks) and "coconut
+       milk" does NOT match "Milk" ("coconut" is not a descriptor).
     """
     staple_toks = _active_staple_tokens()
     # Pathway 1: original fuzzy check
     if (ing_toks & staple_toks
             and ing_toks <= (staple_toks | _STAPLE_GLUE_TOKENS | _FREEBIE_TOKENS)):
         return True
-    # Pathway 2: phrase core match (requires file to be present).
-    # Strip modifier tokens from BOTH sides so "canned chickpeas" ingredient
-    # matches "Canned chickpeas" phrase, while bare "chicken" still does NOT
-    # match "chicken stock" (neither side has modifier tokens to strip).
-    # Skipped when the settings field is set: that list replaces the file.
+    # Pathway 2: phrase containment match (requires file to be present).
+    # A staple phrase matches when its core tokens are all present in the
+    # ingredient AND every leftover ingredient token is a benign descriptor
+    # (prep words, packaging, "cheese", etc.). This lets real recipe ingredients
+    # carry descriptors the file phrase omits ("parmesan cheese" -> "Parmesan",
+    # "grated parmesan" -> "Parmesan") while still rejecting "chicken" against
+    # "chicken stock" (the phrase has the extra token "stock", not the
+    # ingredient) and "coconut milk" against "Milk" ("coconut" is not a
+    # descriptor). Skipped when the settings field is set: that list replaces
+    # the file.
     if settings.staple_items.strip():
         return False
     phrases = _active_staple_phrases()
@@ -386,7 +411,8 @@ def _is_staple_ingredient(ing_toks: set[str]) -> bool:
         ing_core = ing_toks - _PHRASE_MODIFIERS
         if ing_core:
             for phrase in phrases:
-                if ing_core == _phrase_core(phrase):
+                phrase_core = _phrase_core(phrase)
+                if phrase_core <= ing_core and (ing_core - phrase_core) <= _STAPLE_DESCRIPTORS:
                     return True
     return False
 

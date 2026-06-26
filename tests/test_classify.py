@@ -83,6 +83,33 @@ def test_expiring_items_listed_and_boost_score():
     assert use_chicken["expiring_items_used"] == ["Chicken"]
 
 
+def test_descriptor_bearing_staple_keeps_recipe_in_staples_tier():
+    # Regression: a recipe fully covered by stock plus a file staple that the
+    # recipe writes with a descriptor word ("parmesan cheese", not bare
+    # "Parmesan") must land in the staples tier. Before the containment fix the
+    # exact-equality phrase match failed on the extra "cheese" token, dropping
+    # the recipe into shopping (or out entirely) and leaving ready/staples empty.
+    tiers = classify_recipes(
+        [recipe("Pasta al Parmigiano",
+                ["spaghetti", "parmesan cheese", "olive oil", "garlic"])],
+        [stock("Spaghetti", days=400, bucket="pantry")])
+    assert [r["name"] for r in tiers["staples"]] == ["Pasta al Parmigiano"]
+    assert not tiers["shopping"]
+    r = tiers["staples"][0]
+    assert "parmesan cheese" in r["staple_ingredients"]
+    assert not r["unmatched_ingredients"]
+
+
+def test_descriptor_bearing_staple_keeps_recipe_ready():
+    # Same fix on the ready tier: every ingredient is either in stock or a
+    # descriptor-bearing file staple, so nothing is unmatched.
+    tiers = classify_recipes(
+        [recipe("Cacio e Pepe", ["spaghetti", "grated parmesan"])],
+        [stock("Spaghetti", days=400, bucket="pantry")])
+    assert [r["name"] for r in tiers["staples"]] == ["Cacio e Pepe"]
+    assert not tiers["ready"] and not tiers["shopping"]
+
+
 def test_top_per_tier_caps_results():
     recipes = [recipe(f"R{i}", ["chicken"]) for i in range(10)]
     tiers = classify_recipes(recipes, [stock("Chicken")], top_per_tier=3)
