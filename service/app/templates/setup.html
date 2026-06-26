@@ -546,6 +546,9 @@
                    oninput="scannerTestInput(this.value)" onkeydown="if(event.key==='Enter'){scannerTestEnter(this.value);this.select();}">
           </div>
           <div class="test-result" id="scanner-test-result"></div>
+          <p class="form-text mt-2">Running a Waveshare scan-engine module on a kiosk? See the
+            <a href="https://github.com/Syracuse3DPrinting/FoodAssistant/blob/main/docs/hardware/waveshare-barcode-scanner.md" target="_blank" rel="noopener">hands-free setup codes</a>
+            to make it scan on sight without the button.</p>
         </div>
         <div id="scanner-camera-hint" class="d-none">
           <p class="text-secondary small">Camera scanning runs in the browser on the Add Food page — no server-side setup needed.
@@ -967,6 +970,9 @@
                        oninput="scannerTestInput(this.value)" onkeydown="if(event.key==='Enter'){scannerTestEnter(this.value);this.select();}">
               </div>
               <div class="test-result" id="scanner-test-result"></div>
+              <p class="form-text mt-2">Running a Waveshare scan-engine module on a kiosk? See the
+                <a href="https://github.com/Syracuse3DPrinting/FoodAssistant/blob/main/docs/hardware/waveshare-barcode-scanner.md" target="_blank" rel="noopener">hands-free setup codes</a>
+                to make it scan on sight without the button.</p>
             </div>
             <div id="scanner-camera-hint" class="{{ '' if s.scanner_type == 'camera' else 'd-none' }}">
               <p class="text-secondary small">Camera scanning runs in the browser — make sure this site has camera permission.</p>
@@ -1339,6 +1345,9 @@
                        oninput="scannerTestInput(this.value)" onkeydown="if(event.key==='Enter'){scannerTestEnter(this.value);this.select();}">
               </div>
               <div class="test-result" id="scanner-test-result"></div>
+              <p class="form-text mt-2">Running a Waveshare scan-engine module on a kiosk? See the
+                <a href="https://github.com/Syracuse3DPrinting/FoodAssistant/blob/main/docs/hardware/waveshare-barcode-scanner.md" target="_blank" rel="noopener">hands-free setup codes</a>
+                to make it scan on sight without the button.</p>
             </div>
             <div id="scanner-camera-hint" class="{{ '' if s.scanner_type == 'camera' else 'd-none' }}">
               <p class="text-secondary small">Camera scanning runs in the browser — make sure this site has camera permission.</p>

@@ -48,6 +48,10 @@ types the scanned code into the focused field. This covers most wired and wirele
 scanners, including compact OEM scan-engine modules. 1D (UPC/EAN) and 2D (QR/DataMatrix)
 are both supported as long as the scanner reads them.
 
+For a fixed kiosk you can run a scan-engine module **hands-free** (scan on sight, no
+button). The [Waveshare Barcode Scanner Module guide](waveshare-barcode-scanner.md) has
+the ready-to-scan configuration codes for that.
+
 The camera-based scanner in the web UI also works on any device with a camera (e.g. your
 phone), no dedicated hardware required.
 
