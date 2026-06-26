@@ -153,8 +153,17 @@ class _FakeResponse:
 
 
 @pytest.fixture
-def satellite_mode(monkeypatch):
-    """Put settings into a fully configured satellite state for sync tests."""
+def satellite_mode(monkeypatch, tmp_path):
+    """Put settings into a fully configured satellite state for sync tests.
+
+    Point data_dir at a fresh temp dir so settings.save() (called via
+    _record_last_sync during a sync) writes to an empty settings.json instead
+    of the real one. Otherwise apply() re-overlays whatever _SAVEABLE fields
+    happen to be persisted on disk and clobbers the values the pull just set,
+    which made these tests pass only when an earlier test had left the expected
+    values in the shared file.
+    """
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
     monkeypatch.setattr(settings, "deployment_mode", "pi_remote")
     monkeypatch.setattr(settings, "remote_server_url", "http://server:9284")
     monkeypatch.setattr(settings, "upstream_api_key", "upstream-secret")
