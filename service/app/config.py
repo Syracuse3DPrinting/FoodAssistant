@@ -97,7 +97,7 @@ _SAVEABLE = [
     "openai_api_key", "openai_model",
     "anthropic_api_key", "anthropic_model",
     "ai_extra_keys",
-    "scanner_type", "barcode_global_capture",
+    "scanner_type", "barcode_global_capture", "extra_api_key_names",
     "barcode_enrichment", "barcode_llm_fallback", "barcode_autocheck_shopping", "enrich_provider", "enrich_model",
     "grocy_base_url", "grocy_api_key", "grocy_public_url",
     "mealie_base_url", "mealie_api_key", "mealie_public_url",
@@ -521,6 +521,10 @@ class Settings(BaseSettings):
     totp_secret: str = ""   # base32 secret; empty = TOTP disabled
     api_key: str = ""
     extra_api_keys: list[str] = []   # additional keys; each satellite can use its own
+    # Optional human labels for the extra keys above, aligned by index (so
+    # extra_api_key_names[2] names extra_api_keys[2]). Lets the admin tell keys
+    # apart (e.g. "kitchen pi", "pantry scanner"). Missing/short = unnamed.
+    extra_api_key_names: list[str] = []
     rclone_remote: str = ""          # e.g. "s3:mybucket/foodassistant"
     rclone_schedule_hours: int = 0   # 0 = disabled; 24 = daily
 

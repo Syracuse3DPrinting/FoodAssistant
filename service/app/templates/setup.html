@@ -124,6 +124,9 @@
   <div class="satellite-extra-keys">
     {% for i in range(extra_api_key_count) %}
     <div class="input-group mb-2 satellite-key-row">
+      <input type="text" class="form-control satellite-key-name" style="max-width:11rem"
+             value="{{ extra_api_key_names[i] if i < extra_api_key_names|length else '' }}"
+             placeholder="name (optional)">
       <input type="text" class="form-control font-monospace satellite-key-input"
              value="__KEEP__:{{ i }}" data-keep="1" readonly
              placeholder="•••• saved satellite key">
@@ -1990,19 +1993,27 @@ function addSatelliteKey() {
   const row = document.createElement('div');
   row.className = 'input-group mb-2 satellite-key-row';
   row.innerHTML =
+    '<input type="text" class="form-control satellite-key-name" style="max-width:11rem" placeholder="name (optional)">' +
     '<input type="text" class="form-control font-monospace satellite-key-input" value="' + hex + '">' +
     '<button class="btn btn-outline-secondary" type="button" title="Copy this key">' +
     '<i class="bi bi-clipboard"></i></button>' +
     '<button class="btn btn-outline-danger" type="button" title="Remove this key" ' +
     'onclick="this.closest(\'.satellite-key-row\').remove()"><i class="bi bi-trash3"></i></button>';
-  const copyBtn = row.querySelector('button');
+  const copyBtn = row.querySelector('button.btn-outline-secondary');
   copyBtn.onclick = function () { copyText(hex, this); };
   box.appendChild(row);
 }
 
+// Each row becomes {key, name}; the merge resolves __KEEP__ placeholders and
+// pairs the (possibly edited) name with its key.
 function collectSatelliteKeys() {
-  return [...document.querySelectorAll('.satellite-key-input')]
-    .map(i => i.value.trim()).filter(Boolean);
+  return [...document.querySelectorAll('.satellite-key-row')]
+    .map(row => {
+      const key = (row.querySelector('.satellite-key-input')?.value || '').trim();
+      const name = (row.querySelector('.satellite-key-name')?.value || '').trim();
+      return { key, name };
+    })
+    .filter(r => r.key);
 }
 
 // Build {provider: [keys]} from the additional-key rows. Untouched saved rows
