@@ -1150,7 +1150,7 @@
             </div>
             <div class="mb-3">
               <label class="form-label">Provider Override <span class="text-secondary small">(optional)</span></label>
-              <select class="form-select" id="enrich_provider">
+              <select class="form-select" id="enrich_provider" onchange="onEnrichProviderChange()">
                 <option value="" {{ 'selected' if not s.enrich_provider else '' }}>Same as vision provider</option>
                 <option value="gemini" {{ 'selected' if s.enrich_provider == 'gemini' else '' }}>Google Gemini</option>
                 <option value="openai" {{ 'selected' if s.enrich_provider == 'openai' else '' }}>OpenAI</option>
@@ -1161,9 +1161,14 @@
             </div>
             <div class="mb-3">
               <label class="form-label">Model Override <span class="text-secondary small">(optional)</span></label>
-              <input type="text" class="form-control" id="enrich_model"
-                     placeholder="empty = the provider's model above" value="{{ s.enrich_model }}">
-              <div class="form-text">Text-only, so a small model works well (claude-haiku-4-5, gpt-4o-mini, llama3.2:3b).</div>
+              {# Same curated-dropdown component as the main AI model picker, driven by the
+                 selected enrichment provider (FoodAssistant-r4nz). The empty option keeps the
+                 provider's default; Custom reveals the free-text override. The text input keeps
+                 id="enrich_model" so the save path reads the effective value either way. #}
+              <select class="form-select ai-model-select" id="enrich_model_sel" onchange="enrichModelSelChanged()"></select>
+              <input type="text" class="form-control font-monospace mt-2 d-none" id="enrich_model"
+                     placeholder="exact model id (e.g. claude-haiku-4-5)" value="{{ s.enrich_model }}">
+              <div class="form-text ai-model-note" id="enrich_model_note">Text-only, so a small model works well (claude-haiku-4-5, gpt-4o-mini, llama3.2:3b).</div>
             </div>
             <button class="btn btn-outline-info btn-sm" onclick="testEnrich()">
               <i class="bi bi-plug me-1"></i>Test Connection
@@ -2375,6 +2380,89 @@ function initAiModelPickers() {
     }
     aiModelSelChanged(provider);
   });
+}
+
+// Barcode enrichment model picker (FoodAssistant-r4nz). Mirrors the main AI
+// model dropdown but its options follow the enrichment provider (or the vision
+// provider when "Same as vision provider" is chosen). The hidden #enrich_model
+// input holds the effective value the save path reads: empty (use the
+// provider's default), a curated id, or a custom id.
+function _enrichEffectiveProvider() {
+  return (document.getElementById('enrich_provider')?.value)
+    || document.getElementById('vision_provider')?.value
+    || 'gemini';
+}
+
+function populateEnrichModelOptions() {
+  const sel = document.getElementById('enrich_model_sel');
+  if (!sel) return;
+  const provider = _enrichEffectiveProvider();
+  const models = AI_MODELS[provider] || [];
+  let html = '<option value="">Same as the provider\'s model</option>';
+  models.forEach(m => { html += `<option value="${m.id}">${m.id} — ${m.note}</option>`; });
+  html += '<option value="__custom__">Custom model…</option>';
+  sel.innerHTML = html;
+}
+
+// Reflect the dropdown choice into the hidden #enrich_model input + note.
+function enrichModelSelChanged() {
+  const sel = document.getElementById('enrich_model_sel');
+  const input = document.getElementById('enrich_model');
+  const note = document.getElementById('enrich_model_note');
+  if (!sel || !input) return;
+  if (sel.value === '__custom__') {
+    input.classList.remove('d-none');
+    if (note) note.textContent = 'Enter any model id this provider accepts (text-only, so a small model is fine).';
+    if (!input.value) input.focus();
+  } else if (sel.value === '') {
+    input.value = '';
+    input.classList.add('d-none');
+    if (note) note.textContent = 'Empty uses the enrichment provider\'s default model above.';
+  } else {
+    input.value = sel.value;
+    input.classList.add('d-none');
+    const m = (AI_MODELS[_enrichEffectiveProvider()] || []).find(x => x.id === sel.value);
+    if (note) note.textContent = m ? m.note : '';
+  }
+}
+
+// Point the dropdown at the stored enrich_model (Custom when it is not in the
+// curated list for the effective provider), and show the matching note.
+function initEnrichModelPicker() {
+  const sel = document.getElementById('enrich_model_sel');
+  const input = document.getElementById('enrich_model');
+  if (!sel || !input) return;
+  populateEnrichModelOptions();
+  const current = (input.value || '').trim();
+  const known = (AI_MODELS[_enrichEffectiveProvider()] || []).some(x => x.id === current);
+  if (!current) {
+    sel.value = '';
+  } else if (known) {
+    sel.value = current;
+  } else {
+    sel.value = '__custom__';
+  }
+  enrichModelSelChanged();
+}
+
+// When the enrichment provider changes, rebuild the option list. Keep the
+// stored model if it is still valid for the new provider; otherwise fall back
+// to the provider default (empty) so we never show a model from another vendor.
+function onEnrichProviderChange() {
+  const sel = document.getElementById('enrich_model_sel');
+  const input = document.getElementById('enrich_model');
+  if (!sel || !input) return;
+  const current = (input.value || '').trim();
+  populateEnrichModelOptions();
+  const known = (AI_MODELS[_enrichEffectiveProvider()] || []).some(x => x.id === current);
+  if (current && known) {
+    sel.value = current;
+  } else if (current) {
+    sel.value = '__custom__';
+  } else {
+    sel.value = '';
+  }
+  enrichModelSelChanged();
 }
 
 function showRecipeSource() {
