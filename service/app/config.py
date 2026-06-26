@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.6.34"
+APP_VERSION = "0.6.35"
 
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
@@ -80,10 +80,13 @@ DISPLAY_TYPES = {
 }
 _DEFAULT_DISPLAY_TYPE = "generic"
 
-# Anchors for the on-screen floating navigation menu (FoodAssistant-bzuu).
-# "off" hides it; the others dock it to a screen corner. A per-device drag
-# overrides this default via localStorage.
-FLOATING_NAV_POSITIONS = ("off", "top-left", "top-right", "bottom-left", "bottom-right")
+# Placement for the on-screen navigation bar (FoodAssistant-bzuu, -i181).
+# "off" hides it; the others dock a FIXED bar to that screen edge, reserving
+# layout space so it never overlaps content. A per-device choice overrides this
+# default via localStorage. Legacy corner values from the older draggable
+# floating menu are still accepted and mapped to an edge by the client.
+FLOATING_NAV_POSITIONS = ("off", "bottom", "left", "right")
+_LEGACY_NAV_POSITIONS = ("top-left", "top-right", "bottom-left", "bottom-right")
 FLOATING_NAV_ORIENTATIONS = ("vertical", "horizontal")
 
 # Deployment modes chosen on the first wizard step. They steer the rest of

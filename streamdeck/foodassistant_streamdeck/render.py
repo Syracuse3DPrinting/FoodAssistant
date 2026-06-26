@@ -13,7 +13,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-from .theme import text_color_for
+from .theme import relative_luminance, text_color_for
 
 _FONT_CANDIDATES = (
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
@@ -119,6 +119,154 @@ def _rgb_to_hex(rgb: tuple[int, int, int]) -> str:
     return "#%02x%02x%02x" % rgb
 
 
+# -- colour / style helpers (pure, unit-testable) --------------------------
+#
+# These power the richer key styles ("rich", "glass") and the full-colour icon
+# mode. They take and return plain (r, g, b) tuples so they can be exercised in
+# tests without a deck or even a rendered image.
+
+
+def _clamp_channel(value: float) -> int:
+    """Round and clamp a single colour channel into 0..255."""
+    return max(0, min(255, int(round(value))))
+
+
+def _lighten(rgb: tuple[int, int, int], amount: float) -> tuple[int, int, int]:
+    """Move ``rgb`` toward white by ``amount`` (0..1). 0 returns it unchanged."""
+    amount = max(0.0, min(1.0, amount))
+    return tuple(_clamp_channel(c + (255 - c) * amount) for c in rgb)  # type: ignore[return-value]
+
+
+def _darken(rgb: tuple[int, int, int], amount: float) -> tuple[int, int, int]:
+    """Move ``rgb`` toward black by ``amount`` (0..1). 0 returns it unchanged."""
+    amount = max(0.0, min(1.0, amount))
+    return tuple(_clamp_channel(c * (1.0 - amount)) for c in rgb)  # type: ignore[return-value]
+
+
+def _mix(a: tuple[int, int, int], b: tuple[int, int, int], t: float) -> tuple[int, int, int]:
+    """Linear blend from ``a`` (t=0) to ``b`` (t=1)."""
+    t = max(0.0, min(1.0, t))
+    return tuple(_clamp_channel(a[i] + (b[i] - a[i]) * t) for i in range(3))  # type: ignore[return-value]
+
+
+def _vertical_gradient(
+    size: tuple[int, int],
+    top_rgb: tuple[int, int, int],
+    bottom_rgb: tuple[int, int, int],
+) -> Image.Image:
+    """An RGB image filled with a top-to-bottom blend of two colours.
+
+    Row 0 is ``top_rgb`` and the last row is ``bottom_rgb``, every row in
+    between a linear mix. Returns an image of exactly ``size`` (width, height).
+    """
+    width, height = size
+    img = Image.new("RGB", (width, height), top_rgb)
+    if height <= 1 or width <= 0:
+        return img
+    draw = ImageDraw.Draw(img)
+    last = height - 1
+    for y in range(height):
+        draw.line([(0, y), (width, y)], fill=_mix(top_rgb, bottom_rgb, y / last))
+    return img
+
+
+def _rounded_mask(size: tuple[int, int], radius: int) -> Image.Image:
+    """An "L" mode mask (255 inside a rounded rectangle, 0 outside)."""
+    width, height = size
+    mask = Image.new("L", (width, height), 0)
+    d = ImageDraw.Draw(mask)
+    r = max(0, min(radius, min(width, height) // 2))
+    d.rounded_rectangle([0, 0, width - 1, height - 1], radius=r, fill=255)
+    return mask
+
+
+def _glass_panel(
+    size: tuple[int, int],
+    base_rgb: tuple[int, int, int],
+) -> Image.Image:
+    """Render a glassmorphism key face for ``base_rgb`` at ``size``.
+
+    A darkened base, an inset rounded panel filled with a translucent lighter
+    tint of the key colour, a brighter top-edge highlight, and a soft light
+    inner stroke. Returns an opaque RGB image of exactly ``size`` so it can drop
+    straight into ``render_key``.
+    """
+    width, height = size
+    # Darkened opaque base so the translucent panel reads as floating glass.
+    base = _darken(base_rgb, 0.55)
+    img = Image.new("RGBA", (width, height), base + (255,))
+
+    inset = max(1, min(width, height) // 12)
+    radius = max(2, min(width, height) // 6)
+    left, top = inset, inset
+    right, bottom = width - 1 - inset, height - 1 - inset
+    if right <= left or bottom <= top:
+        return img.convert("RGB")
+
+    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    od = ImageDraw.Draw(overlay)
+    # Translucent lighter tint of the key colour for the panel body.
+    tint = _lighten(base_rgb, 0.25)
+    od.rounded_rectangle(
+        [left, top, right, bottom], radius=radius, fill=tint + (140,)
+    )
+    # Brighter top-edge highlight: a thin near-white band along the panel top.
+    highlight_h = max(1, (bottom - top) // 5)
+    od.rounded_rectangle(
+        [left, top, right, top + highlight_h],
+        radius=radius,
+        fill=_lighten(base_rgb, 0.55) + (90,),
+    )
+    # Soft 1px light inner stroke around the panel edge for definition.
+    od.rounded_rectangle(
+        [left, top, right, bottom], radius=radius, outline=(255, 255, 255, 70), width=1
+    )
+    img = Image.alpha_composite(img, overlay)
+    return img.convert("RGB")
+
+
+def _mid_color(style: str, bg: tuple[int, int, int]) -> tuple[int, int, int]:
+    """The representative colour text/icon contrast is judged against.
+
+    For the gradient and glass styles the visible mid-tone differs from the raw
+    key colour, so contrast helpers use this rather than ``bg`` directly.
+    """
+    if style == "rich":
+        # Gradient runs from a lightened top to the base; the mid row sits about
+        # a tenth above the base, which is what most of the label overlaps.
+        return _lighten(bg, 0.10)
+    if style == "glass":
+        # The panel tint over a darkened base reads close to a light mix.
+        return _mix(_darken(bg, 0.55), _lighten(bg, 0.25), 0.55)
+    return bg
+
+
+def _icon_fill(
+    icon_color: str,
+    action_name: str,
+    mid_rgb: tuple[int, int, int],
+    text_fill: tuple[int, int, int],
+) -> tuple[int, int, int]:
+    """Resolve the glyph colour for the requested icon mode.
+
+    "mono" keeps the luminance-adapted ``text_fill`` (today's behaviour). "full"
+    paints the glyph in the action's vivid accent, but only when that accent is
+    far enough from the key's mid-tone luminance to stay legible; otherwise it
+    falls back to ``text_fill`` so a glyph never washes into its background.
+    """
+    if icon_color != "full":
+        return text_fill
+    from .theme import role_accent  # local import keeps theme/render decoupled
+
+    accent = _hex_to_rgb(role_accent(action_name))
+    lum_accent = relative_luminance(_rgb_to_hex(accent))
+    lum_mid = relative_luminance(_rgb_to_hex(mid_rgb))
+    # Too close in luminance to the background: fall back to the contrast colour.
+    if abs(lum_accent - lum_mid) < 0.18:
+        return text_fill
+    return accent
+
+
 def _text_width(draw: ImageDraw.ImageDraw, text: str, font) -> int:
     box = draw.textbbox((0, 0), text, font=font)
     return box[2] - box[0]
@@ -184,6 +332,31 @@ def _wrap_single_word(
     return lines or [word]
 
 
+def _styled_background(
+    width: int, height: int, bg: tuple[int, int, int], style: str
+) -> Image.Image:
+    """Build the key-face background image for the chosen style.
+
+    "minimal" is a flat fill (the old behaviour). "rich" is a vertical gradient
+    from a lightened top to the base colour with a thin darker inner border for
+    definition. "glass" is a glassmorphism inset panel. Always returns an opaque
+    RGB image of exactly (width, height).
+    """
+    if style == "glass":
+        return _glass_panel((width, height), bg)
+    if style == "rich":
+        top = _lighten(bg, 0.28)
+        img = _vertical_gradient((width, height), top, bg)
+        # Thin darker inner border so the face reads as a distinct tile.
+        border = _darken(bg, 0.45)
+        ImageDraw.Draw(img).rectangle(
+            [0, 0, width - 1, height - 1], outline=border, width=1
+        )
+        return img
+    # "minimal": the original flat solid fill.
+    return Image.new("RGB", (width, height), bg)
+
+
 def render_key(
     width: int,
     height: int,
@@ -194,6 +367,9 @@ def render_key(
     *,
     icon: str = "",
     reference_px: int = _REFERENCE_PX,
+    key_style: str = "minimal",
+    icon_color: str = "mono",
+    action_name: str = "",
 ) -> Image.Image:
     """Render one key.
 
@@ -213,17 +389,29 @@ def render_key(
     physical size across deck models (see the module comment). It is a keyword
     argument with a default, so the controller's existing positional call keeps
     working unchanged.
+
+    ``key_style`` selects the face treatment: "minimal" (the old flat fill,
+    the safe default for legacy callers), "rich" (a subtle vertical gradient
+    with a thin inner border), or "glass" (a glassmorphism inset panel).
+    ``icon_color`` is "mono" (the luminance-adapted text colour, default) or
+    "full" (the action's vivid accent, guarded for legibility). ``action_name``
+    feeds the full-colour accent lookup; it is optional so positional callers
+    keep working.
     """
     bg = _hex_to_rgb(color)
     if count and alert:
         bg = tuple(min(255, int(c * 1.35) + 25) for c in bg)  # type: ignore[assignment]
 
-    img = Image.new("RGB", (width, height), bg)
+    style = key_style if key_style in ("minimal", "rich", "glass") else "minimal"
+    img = _styled_background(width, height, bg, style)
     draw = ImageDraw.Draw(img)
 
-    # Text (label, count, and icon) colour adapts to the resolved key background
+    # Text (label, count, and icon) colour adapts to the key's mid-tone
     # luminance, so a light key gets dark text and a dark key gets light text.
-    text_fill = _hex_to_rgb(text_color_for(_rgb_to_hex(bg)))
+    # The mid-tone differs from the raw colour for the gradient/glass styles.
+    mid = _mid_color(style, bg)
+    text_fill = _hex_to_rgb(text_color_for(_rgb_to_hex(mid)))
+    glyph_fill = _icon_fill(icon_color, action_name, mid, text_fill)
 
     density = _density_factor(min(width, height), reference_px)
     max_label_width = int(width * _FIT_FRACTION)
@@ -261,7 +449,7 @@ def render_key(
         gw = box[2] - box[0]
         gx = (width - gw) / 2 - box[0]
         gy = height * 0.12 - box[1]
-        draw.text((gx, gy), glyph, font=icon_font, fill=text_fill)
+        draw.text((gx, gy), glyph, font=icon_font, fill=glyph_fill)
         label_px = _font_px(
             height, _STATUS_LABEL_FRACTION, density=density, floor=_MIN_FONT_PX
         )

@@ -1906,3 +1906,149 @@ def test_poll_shared_activity_noop_without_bridge_url(monkeypatch):
     loop.run_until_complete(ctrl._poll_shared_activity())
     assert ctrl._idle_blanked is True
     loop.close()
+
+
+# -- default key set (FoodAssistant-fygv) ----------------------------------
+
+
+def test_default_order_includes_new_feature_actions():
+    # The fuller default fills a 15/32 key deck with real actions instead of
+    # leaving most faces blank. Every entry must resolve in ACTIONS.
+    expected = {
+        "expiring", "pending", "commit", "add", "inventory", "cook",
+        "recipes", "mealplan", "shopping",
+        "timer_1", "timer_2", "timer_3",
+        "weather", "forecast", "brightness",
+    }
+    assert expected.issubset(set(actions.DEFAULT_ORDER))
+    for name in actions.DEFAULT_ORDER:
+        assert actions.resolve(name) is not None, f"{name} missing from ACTIONS"
+
+
+def test_default_order_fills_a_15_key_deck_with_real_actions():
+    # A 15-key Original now fills entirely with bound actions (no padded blanks)
+    # and needs no paging key because the default list is sized to fit.
+    pages = layout.build_pages(list(actions.DEFAULT_ORDER), 15)
+    assert len(pages) == 1
+    names = [s.name for s in pages[0] if s is not None]
+    assert len(names) == 15
+    assert "page_next" not in names
+
+
+def test_default_order_still_paginates_on_a_6_key_mini():
+    # The Mini cannot hold the full default set, so it paginates with a wrapping
+    # page-cycle key on each page, exactly as before.
+    pages = layout.build_pages(list(actions.DEFAULT_ORDER), 6)
+    assert len(pages) > 1
+    for page in pages:
+        assert len(page) == 6
+        assert page[-1].name == "page_next"
+
+
+# -- style config (FoodAssistant-fygv) -------------------------------------
+
+
+def test_key_style_and_icon_color_defaults():
+    cfg = config.Config().validated()
+    assert cfg.key_style == "rich"
+    assert cfg.icon_color == "full"
+
+
+def test_unknown_key_style_falls_back_to_default(tmp_path):
+    f = tmp_path / "config.toml"
+    f.write_text('key_style = "bogus"\nicon_color = "nope"\n')
+    cfg = config.load(f)
+    assert cfg.key_style == config.DEFAULT_KEY_STYLE
+    assert cfg.icon_color == config.DEFAULT_ICON_COLOR
+
+
+def test_valid_key_style_and_icon_color_loaded(tmp_path):
+    f = tmp_path / "config.toml"
+    f.write_text('key_style = "glass"\nicon_color = "mono"\n')
+    cfg = config.load(f)
+    assert cfg.key_style == "glass"
+    assert cfg.icon_color == "mono"
+
+
+# -- render style helpers (FoodAssistant-fygv) -----------------------------
+
+
+def test_lighten_and_darken_move_luminance():
+    base = (40, 90, 140)
+    base_hex = render._rgb_to_hex(base)
+    lighter = render._lighten(base, 0.4)
+    darker = render._darken(base, 0.4)
+    assert theme.relative_luminance(render._rgb_to_hex(lighter)) > \
+        theme.relative_luminance(base_hex)
+    assert theme.relative_luminance(render._rgb_to_hex(darker)) < \
+        theme.relative_luminance(base_hex)
+    # Zero amount is the identity for both.
+    assert render._lighten(base, 0.0) == base
+    assert render._darken(base, 0.0) == base
+
+
+def test_lighten_darken_stay_in_range():
+    for c in ((0, 0, 0), (255, 255, 255), (200, 10, 60)):
+        for amt in (0.0, 0.5, 1.0):
+            for out in (render._lighten(c, amt), render._darken(c, amt)):
+                assert all(0 <= ch <= 255 for ch in out)
+
+
+def test_vertical_gradient_size_and_endpoints():
+    top = (240, 240, 240)
+    bottom = (10, 10, 10)
+    img = render._vertical_gradient((20, 30), top, bottom)
+    assert img.size == (20, 30)
+    assert img.mode == "RGB"
+    # Top row is the top colour, bottom row the bottom colour.
+    assert img.getpixel((0, 0)) == top
+    assert img.getpixel((0, 29)) == bottom
+
+
+def test_glass_panel_size_and_mode():
+    img = render._glass_panel((72, 72), (30, 100, 160))
+    assert img.size == (72, 72)
+    assert img.mode == "RGB"
+
+
+@pytest.mark.parametrize("style", ["minimal", "rich", "glass"])
+@pytest.mark.parametrize("color", ["#7e22ce", "#15803d", "#ffffff", "#000000"])
+def test_render_key_each_style_returns_correct_image(style, color):
+    img = render.render_key(
+        96, 96, label="Cook", color=color, key_style=style, icon="fire",
+        action_name="cook",
+    )
+    assert img.size == (96, 96)
+    assert img.mode == "RGB"
+
+
+def test_render_key_unknown_style_does_not_crash():
+    # An unrecognised style must degrade to the flat minimal fill, not raise.
+    img = render.render_key(72, 72, label="Cook", color="#7e22ce", key_style="bogus")
+    plain = render.render_key(72, 72, label="Cook", color="#7e22ce", key_style="minimal")
+    assert img.tobytes() == plain.tobytes()
+
+
+def test_render_key_defaults_preserve_legacy_minimal_behaviour():
+    # The positional/default call (no style args) must render exactly as the old
+    # flat minimal fill, so existing callers and pinned tests are unaffected.
+    legacy = render.render_key(72, 72, label="Cook", color="#7e22ce")
+    minimal = render.render_key(
+        72, 72, label="Cook", color="#7e22ce", key_style="minimal", icon_color="mono"
+    )
+    assert legacy.tobytes() == minimal.tobytes()
+
+
+def test_full_icon_color_falls_back_when_too_close_to_background():
+    # When the accent luminance sits within the guard band of the mid colour,
+    # the glyph fill drops back to the contrast text colour for legibility.
+    text_fill = (235, 235, 235)
+    mid = render._hex_to_rgb(theme.role_accent("commit"))
+    out = render._icon_fill("full", "commit", mid, text_fill)
+    assert out == text_fill
+
+
+def test_mono_icon_color_keeps_text_fill():
+    text_fill = (235, 235, 235)
+    out = render._icon_fill("mono", "cook", (20, 20, 20), text_fill)
+    assert out == text_fill

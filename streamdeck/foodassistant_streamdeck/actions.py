@@ -824,7 +824,15 @@ def icon_for(name: str) -> str:
 
 
 # Order used when no explicit key list is configured. The controller trims or
-# paginates this to fit the connected deck.
+# paginates this to fit the connected deck, so a longer list simply fills a 15
+# or 32 key deck with real actions and still paginates a 6 key Mini.
+#
+# Ordering is by usefulness, most-glanced first: the two live status counts,
+# then the common inventory actions, then the cook/recipe navigation, the meal
+# planning pages, the kitchen timers, the weather widgets, and finally the
+# brightness control (paging is appended automatically by the layout when the
+# list overflows the deck, so it is not listed here). Every name below must
+# resolve in ACTIONS.
 DEFAULT_ORDER: list[str] = [
     "expiring",
     "pending",
@@ -832,6 +840,14 @@ DEFAULT_ORDER: list[str] = [
     "add",
     "inventory",
     "cook",
+    "recipes",
+    "mealplan",
+    "shopping",
+    "timer_1",
+    "timer_2",
+    "timer_3",
+    "weather",
+    "forecast",
     "brightness",
 ]
 

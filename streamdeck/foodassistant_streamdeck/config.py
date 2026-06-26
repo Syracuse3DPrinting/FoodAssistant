@@ -24,6 +24,17 @@ BRIGHTNESS_STEPS: tuple[int, ...] = (20, 40, 60, 80, 100)
 # The only rotations we support, in degrees clockwise.
 ALLOWED_ROTATIONS: tuple[int, ...] = (0, 90, 180, 270)
 
+# Key face rendering style. "rich" (the default) draws a subtle vertical
+# gradient with an inner border; "glass" draws a glassmorphism panel; "minimal"
+# keeps the old flat fill.
+ALLOWED_KEY_STYLES: tuple[str, ...] = ("rich", "minimal", "glass")
+DEFAULT_KEY_STYLE = "rich"
+
+# Glyph colouring. "full" tints the icon in the action's vivid accent colour;
+# "mono" keeps the luminance-adapted text colour.
+ALLOWED_ICON_COLORS: tuple[str, ...] = ("full", "mono")
+DEFAULT_ICON_COLOR = "full"
+
 
 @dataclass
 class Config:
@@ -43,6 +54,12 @@ class Config:
     # match the app theme; empty or "dark" keeps the default per-action colours.
     # Stamped into config.toml by the app, so the deck follows the server theme.
     theme: str = "dark"
+    # Key face rendering style and glyph colouring. Defaults make the richer,
+    # less washed-out look land immediately, even before the app-side toggle
+    # that pushes these into config.toml is wired up. See ALLOWED_KEY_STYLES /
+    # ALLOWED_ICON_COLORS; validated() clamps an unknown value to the default.
+    key_style: str = DEFAULT_KEY_STYLE
+    icon_color: str = DEFAULT_ICON_COLOR
     # Weather widget. Uses wttr.in (no API key needed).
     # location: city name, zip, or "lat,lon". Empty = auto-detect from device IP.
     # units: "f" (Fahrenheit) or "c" (Celsius).
@@ -91,6 +108,10 @@ class Config:
         self.ha_base_url = self.ha_base_url.rstrip("/")
         self.ha_poll_seconds = max(0, int(self.ha_poll_seconds))
         self.idle_timeout_minutes = max(0, int(self.idle_timeout_minutes))
+        if self.key_style not in ALLOWED_KEY_STYLES:
+            self.key_style = DEFAULT_KEY_STYLE
+        if self.icon_color not in ALLOWED_ICON_COLORS:
+            self.icon_color = DEFAULT_ICON_COLOR
         return self
 
 
@@ -141,7 +162,8 @@ def load(path: str | os.PathLike | None = None) -> Config:
 
 def _apply(cfg: Config, data: dict) -> None:
     for name in ("base_url", "api_key", "kiosk_cdp_url", "weather_location", "weather_units",
-                 "theme", "ha_base_url", "ha_token", "host_bridge_url"):
+                 "theme", "ha_base_url", "ha_token", "host_bridge_url",
+                 "key_style", "icon_color"):
         if isinstance(data.get(name), str):
             setattr(cfg, name, data[name])
     for name in ("brightness", "poll_seconds", "soon_days", "rotation",

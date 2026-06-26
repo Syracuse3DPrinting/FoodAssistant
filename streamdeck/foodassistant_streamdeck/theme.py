@@ -149,6 +149,40 @@ def text_color_for(bg_hex: str) -> str:
     return _DARK_TEXT if relative_luminance(bg_hex) > 0.5 else _LIGHT_TEXT
 
 
+# Vivid accent colour per semantic role, used when a key is drawn with full
+# colour icons (render.icon_color == "full"). These are deliberately brighter
+# and more saturated than the key backgrounds so a glyph painted in the role's
+# accent pops against the (darker) key face. role_accent() falls back to a
+# bright neutral for any role not listed here.
+_ROLE_ACCENT: dict[str, str] = {
+    "warn": "#fb923c",
+    "primary": "#60a5fa",
+    "success": "#4ade80",
+    "danger": "#f87171",
+    "info": "#38bdf8",
+    "accent": "#c084fc",
+    "timer": "#2dd4bf",
+    "muted": "#cbd5e1",
+}
+
+# A bright neutral for any glyph whose role has no specific accent.
+_ACCENT_FALLBACK = "#e2e8f0"
+
+
+def role_accent(action_name: str, fallback: str = _ACCENT_FALLBACK) -> str:
+    """Vivid icon-accent colour for an action, or ``fallback`` if it has none.
+
+    Pure lookup used by the renderer's full-colour icon mode. The colour is the
+    role's accent, not the key background, so the glyph reads as a brighter tint
+    of the same colour family. Callers still guard legibility against the key
+    background luminance before using it.
+    """
+    role = role_of(action_name)
+    if role is None:
+        return fallback
+    return _ROLE_ACCENT.get(role, fallback)
+
+
 def role_of(action_name: str) -> str | None:
     """Semantic role for an action name, or None if it has no themed role."""
     if action_name in ROLE_BY_ACTION:

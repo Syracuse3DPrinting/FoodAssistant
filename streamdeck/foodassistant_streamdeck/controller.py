@@ -354,6 +354,9 @@ class Controller:
                     count=count,
                     alert=alert,
                     icon=spec.icon,
+                    key_style=self.config.key_style,
+                    icon_color=self.config.icon_color,
+                    action_name=spec.name,
                 )
             if rotation:
                 # PIL rotates counter-clockwise, so negate to turn the face
