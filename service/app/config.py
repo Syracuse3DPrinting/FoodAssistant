@@ -4,6 +4,12 @@ import secrets as _secrets
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# is_raspberry_pi() is lru_cached and reads no files until first called, so a
+# module-level import has no import-time cost or side-effects. Importing the
+# name here (rather than inside features()) keeps it off the per-render hot path
+# and, as in routers.setup, lets tests monkeypatch it.
+from .hardware import is_raspberry_pi
+
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
 APP_VERSION = "1.6.0"
@@ -515,10 +521,10 @@ class Settings(BaseSettings):
         """Which capability groups are active for this deployment_mode.
 
         Templates and routers use these flags to show or hide sections.
-        The method does NOT import at module level (hardware detection reads
-        /proc/device-tree, which is unavailable in tests and CI).
+        is_raspberry_pi() is lru_cached (one /proc read for the process life)
+        and degrades to False off-Pi, so this stays a cheap dict build even on
+        the per-render hot path.
         """
-        from .hardware import is_raspberry_pi  # deferred to avoid import-time side-effects
         is_pi = is_raspberry_pi()
         satellite = self.is_satellite()
         return {
