@@ -1972,17 +1972,19 @@ function addExtraKey(provider) {
 // Generate a new satellite key and add it as a plaintext row so the user can
 // immediately copy it before saving.
 function addSatelliteKey() {
-  const arr = new Uint8Array(24);
-  crypto.getRandomValues(arr);
-  const hex = Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
+  const hex = randomHex(24);
   const box = document.querySelector('.satellite-extra-keys');
   if (!box) return;
   const row = document.createElement('div');
   row.className = 'input-group mb-2 satellite-key-row';
   row.innerHTML =
     '<input type="text" class="form-control font-monospace satellite-key-input" value="' + hex + '">' +
+    '<button class="btn btn-outline-secondary" type="button" title="Copy this key">' +
+    '<i class="bi bi-clipboard"></i></button>' +
     '<button class="btn btn-outline-danger" type="button" title="Remove this key" ' +
     'onclick="this.closest(\'.satellite-key-row\').remove()"><i class="bi bi-trash3"></i></button>';
+  const copyBtn = row.querySelector('button');
+  copyBtn.onclick = function () { copyText(hex, this); };
   box.appendChild(row);
 }
 
@@ -2109,19 +2111,67 @@ async function checkUpdate(btn) {
   btn.innerHTML = orig;
 }
 
-function generateApiKey() {
-  const arr = new Uint8Array(24);
+function randomHex(n) {
+  const arr = new Uint8Array(n);
   crypto.getRandomValues(arr);
-  const hex = Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
-  // Set value in every api_key input on the page (wizard + settings share the same ID).
-  ['api_key'].forEach(id => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.value = hex;
-    el.type = 'text';
-    el.dataset.clear = '';
-    el.disabled = false;
-  });
+  return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Copy text to the clipboard with a non-secure-context fallback (the kiosk and
+// LAN browsers run over plain HTTP, where navigator.clipboard is unavailable).
+async function copyText(text, btn) {
+  let ok = false;
+  try {
+    await navigator.clipboard.writeText(text);
+    ok = true;
+  } catch (e) {
+    const t = document.createElement('textarea');
+    t.value = text;
+    t.style.position = 'fixed';
+    t.style.opacity = '0';
+    document.body.appendChild(t);
+    t.select();
+    try { ok = document.execCommand('copy'); } catch (_) {}
+    t.remove();
+  }
+  if (btn) {
+    const old = btn.innerHTML;
+    btn.innerHTML = ok ? '<i class="bi bi-check-lg"></i>' : '<i class="bi bi-x-lg"></i>';
+    setTimeout(() => { btn.innerHTML = old; }, 1200);
+  }
+  return ok;
+}
+
+// Show a "copy it now" note with a Copy button right under a freshly generated
+// secret. The note is rebuilt idempotently so repeated Generate clicks update it.
+function showGeneratedSecret(id, value) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const group = el.closest('.input-group') || el.parentElement;
+  let note = document.getElementById(id + '-gennote');
+  if (!note) {
+    note = document.createElement('div');
+    note.id = id + '-gennote';
+    note.className = 'alert alert-warning d-flex align-items-center gap-2 py-2 mt-2 mb-0 small';
+    group.parentElement.insertBefore(note, group.nextSibling);
+  }
+  note.innerHTML =
+    '<i class="bi bi-exclamation-triangle-fill"></i>' +
+    '<span class="flex-grow-1">New key generated. <strong>Copy it now</strong> — it is hidden once you save.</span>' +
+    '<button class="btn btn-sm btn-outline-dark" type="button" title="Copy key"><i class="bi bi-clipboard me-1"></i>Copy</button>';
+  note.querySelector('button').onclick = function () { copyText(value, this); };
+}
+
+function generateApiKey() {
+  const hex = randomHex(24);
+  // Wizard and settings share the same input id; only one is rendered at a time.
+  const el = document.getElementById('api_key');
+  if (!el) return;
+  el.value = hex;
+  el.type = 'text';
+  el.dataset.clear = '';
+  el.disabled = false;
+  showGeneratedSecret('api_key', hex);
 }
 
 function clearSecret(id) {
