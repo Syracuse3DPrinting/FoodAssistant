@@ -70,7 +70,7 @@
       </button>
       <div class="collapse navbar-collapse" id="nav">
         <ul class="navbar-nav me-auto">
-          {% for tab in nav_tabs() %}
+          {% for tab in nav_tabs() if tab.key not in ['about', 'defaults'] %}
           <li class="nav-item">
             <a class="nav-link {% if active == tab.key %}active{% endif %}" href="{{ tab.href }}">
               <i class="bi {{ tab.icon }} me-1"></i>{{ tab.label }}
@@ -80,19 +80,8 @@
             </a>
           </li>
           {% endfor %}
-          <li class="nav-item kiosk-hide">
-            <a class="nav-link" href="docs" target="_blank">
-              <i class="bi bi-code-square me-1"></i>API
-            </a>
-          </li>
         </ul>
         <ul class="navbar-nav">
-          <li class="nav-item kiosk-hide">
-            <a class="nav-link" href="#" title="Keyboard shortcuts (press ?)"
-               onclick="if(window.__kbdNavHelp){window.__kbdNavHelp();}return false;">
-              <i class="bi bi-keyboard"></i>
-            </a>
-          </li>
           <li class="nav-item">
             <button class="nav-link btn btn-link" data-bs-toggle="modal" data-bs-target="#qrModal" title="Phone QR code">
               <i class="bi bi-qr-code"></i>
@@ -113,10 +102,21 @@
             </a>
           </li>
           {% endfor %}
-          <li class="nav-item">
-            <a class="nav-link {% if active == 'setup' %}active{% endif %}" href="setup" title="Settings">
-              <i class="bi bi-gear"></i>
+          <!-- Overflow menu: less-used destinations live here to keep the bar
+               uncluttered, which matters most on the small pi_remote screen. -->
+          <li class="nav-item dropdown">
+            <a class="nav-link dropdown-toggle {% if active in ['setup', 'about', 'defaults'] %}active{% endif %}"
+               href="#" id="moreMenu" role="button" data-bs-toggle="dropdown" aria-expanded="false" title="More">
+              <i class="bi bi-three-dots-vertical"></i>
             </a>
+            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="moreMenu">
+              <li><a class="dropdown-item {% if active == 'setup' %}active{% endif %}" href="setup"><i class="bi bi-gear me-2"></i>Settings</a></li>
+              <li><a class="dropdown-item {% if active == 'defaults' %}active{% endif %}" href="ui/defaults"><i class="bi bi-table me-2"></i>Defaults</a></li>
+              <li><a class="dropdown-item {% if active == 'about' %}active{% endif %}" href="ui/about"><i class="bi bi-info-circle me-2"></i>About</a></li>
+              <li class="kiosk-hide"><hr class="dropdown-divider"></li>
+              <li class="kiosk-hide"><a class="dropdown-item" href="docs" target="_blank"><i class="bi bi-code-square me-2"></i>API docs</a></li>
+              <li class="kiosk-hide"><a class="dropdown-item" href="#" onclick="if(window.__kbdNavHelp){window.__kbdNavHelp();}return false;"><i class="bi bi-keyboard me-2"></i>Keyboard shortcuts</a></li>
+            </ul>
           </li>
           <li class="nav-item">
             <a class="nav-link" href="ui/logout" title="Sign out">
