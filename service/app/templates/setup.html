@@ -65,6 +65,9 @@
     .summary-item:last-child { border-bottom: none; }
     .summary-icon { width: 1.5rem; text-align: center; }
     .summary-fix-link { font-size: 0.78rem; margin-left: auto; white-space: nowrap; }
+    /* Live install/start log panels: fixed-height scroll region so streaming
+       output does not push the page longer. The tailer auto-scrolls to bottom. */
+    .install-log { max-height: 14rem; overflow: auto; white-space: pre-wrap; }
   </style>
 </head>
 <body>
