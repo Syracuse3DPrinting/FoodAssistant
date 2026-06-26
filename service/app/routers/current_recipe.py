@@ -13,7 +13,7 @@ from fastapi import APIRouter, Body
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from ..services import current_recipe, timers
+from ..services import current_recipe, recipe_timers, timers
 
 recipe_router = APIRouter(prefix="/current-recipe", tags=["current-recipe"])
 timers_router = APIRouter(prefix="/timers", tags=["timers"])
@@ -43,6 +43,15 @@ class ScaleIn(BaseModel):
 class TimerIn(BaseModel):
     label: str = ""
     seconds: float
+
+
+class StartSuggestionIn(BaseModel):
+    """Start a real timer from a suggestion. Identify the suggestion by
+    step_index OR label; seconds is optional and, when omitted, is filled from
+    the matching suggestion so a surface can fire one without re-deriving it."""
+    step_index: int | None = None
+    label: str | None = None
+    seconds: float | None = None
 
 
 # --- Active recipe -------------------------------------------------------
@@ -75,6 +84,45 @@ def scale_current_recipe(payload: ScaleIn):
     if recipe is None:
         return JSONResponse({"detail": "No active recipe"}, status_code=404)
     return {"recipe": recipe}
+
+
+@recipe_router.get("/timer-suggestions")
+def get_timer_suggestions():
+    """Return ordered timer suggestions parsed from the active recipe's steps,
+    each {label, seconds, step_index}. Empty list when no recipe is active. This
+    only OFFERS timers; nothing is created until /current-recipe/timers/start or
+    POST /timers is called."""
+    suggestions = recipe_timers.suggestions_for_recipe(current_recipe.get_active())
+    return {"suggestions": suggestions}
+
+
+@recipe_router.post("/timers/start")
+def start_suggested_timer(payload: StartSuggestionIn = Body(...)):
+    """Create a real timer from a suggestion. Pick the suggestion by step_index
+    or label; seconds is taken from the payload when given, otherwise from the
+    matching suggestion. Reuses the shared timer service so the countdown shows
+    up on every surface."""
+    suggestions = recipe_timers.suggestions_for_recipe(current_recipe.get_active())
+
+    match = None
+    for s in suggestions:
+        if payload.step_index is not None and s["step_index"] != payload.step_index:
+            continue
+        if payload.label is not None and s["label"] != payload.label:
+            continue
+        match = s
+        break
+
+    seconds = payload.seconds if payload.seconds is not None else (match or {}).get("seconds")
+    if seconds is None:
+        return JSONResponse({"detail": "No matching suggestion"}, status_code=404)
+
+    label = payload.label or (match or {}).get("label") or ""
+    try:
+        timer = timers.create_timer(label, seconds)
+    except ValueError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=400)
+    return {"timer": timer}
 
 
 # --- Timers --------------------------------------------------------------
