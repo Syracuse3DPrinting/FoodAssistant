@@ -596,6 +596,52 @@ async def shopping_summary():
             "list_name": lists[0].get("name", "Shopping List")}
 
 
+@router.get("/shopping/count")
+async def shopping_count():
+    """Tiny unchecked-items count for the Stream Deck status key (FoodAssistant-4msn).
+
+    Kept deliberately cheap (one JSON int) so the deck poll stays light. Degrades
+    to ``{"count": 0}`` when Mealie is unconfigured or unreachable, so the deck
+    key never shows a stale or crashing value."""
+    if not settings.mealie_configured():
+        return {"count": 0}
+    m = MealieClient()
+    try:
+        lists = await m.get_shopping_lists()
+        if not lists:
+            return {"count": 0}
+        detail = await m.get_shopping_list(lists[0]["id"])
+    except Exception:
+        return {"count": 0}
+    unchecked = [i for i in detail.get("listItems") or [] if not i.get("checked")]
+    return {"count": len(unchecked)}
+
+
+@router.get("/suggest/ready-count")
+async def suggest_ready_count():
+    """Tiny count of recipes cookable from current stock alone (the "ready" tier),
+    for the Stream Deck status key (FoodAssistant-4msn).
+
+    Reuses the same Mealie recipes + Grocy stock classifier as /suggest but returns
+    only the ready-tier size as one JSON int. Degrades to ``{"count": 0}`` when
+    Mealie is unconfigured or either service is unreachable, so the deck poll stays
+    cheap and never crashes."""
+    if not settings.mealie_configured():
+        return {"count": 0}
+    try:
+        recipes = await MealieClient().get_recipes_with_ingredients()
+    except Exception:
+        return {"count": 0}
+    try:
+        stock = await GrocyClient().get_full_stock()
+    except Exception:
+        stock = []
+    # A large per-tier cap so the count reflects effectively every ready recipe
+    # (classify_recipes slices each tier to top_per_tier, so 0 would empty it).
+    tiers = classify_recipes(recipes, stock, top_per_tier=9999)
+    return {"count": len(tiers.get("ready", []))}
+
+
 @router.get("/shopping")
 async def get_shopping(list_id: str = ""):
     m = _client()

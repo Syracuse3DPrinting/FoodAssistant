@@ -14,6 +14,48 @@ import time
 from dataclasses import dataclass, field, replace
 from typing import Any, Awaitable, Callable, Optional
 
+def _clock_label(now: Any, show_date: bool = True) -> str:
+    """Render a clock key face from a ``datetime``-like ``now``.
+
+    Top line is the 24-hour ``HH:MM`` time; when ``show_date`` is set a second
+    line carries an abbreviated weekday and day-of-month (e.g. "Thu 26"). Pure:
+    it formats whatever ``now`` it is handed, so the controller can pass the
+    current local time each fast-loop tick and tests can pass a fixed datetime.
+    """
+    time_str = now.strftime("%H:%M")
+    if not show_date:
+        return time_str
+    return f"{time_str}\n{now.strftime('%a %-d')}"
+
+
+# Longest meal-name a meal_today info key shows before truncation, so the name
+# stays glanceable on a single key face. Matches the recipe-timer label cap.
+MEAL_TODAY_LABEL_MAX: int = 14
+
+
+def meal_today_label(mealplan: dict, fallback: str = "No meal") -> str:
+    """Extract today's planned meal name from a /mealie/mealplan response.
+
+    The response shape is ``{"start": iso, "days": {iso: [entry, ...]}}`` where
+    each entry carries a ``title``. Picks the first entry on the start date,
+    cleans and truncates its title to a deck-safe length, and falls back to
+    ``fallback`` when there is no plan for today. Pure, so it is unit-testable
+    without any network.
+    """
+    if not isinstance(mealplan, dict):
+        return fallback
+    start = mealplan.get("start", "")
+    days = mealplan.get("days") or {}
+    entries = days.get(start) or []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        title = clean_timer_label(entry.get("title", ""), MEAL_TODAY_LABEL_MAX)
+        if title:
+            return title
+    return fallback
+
+
 class TimerState:
     """Mutable per-key countdown timer.
 
@@ -641,6 +683,14 @@ ACTION_ICONS: dict[str, str] = {
     "ha_4": "house",
     "ha_5": "house",
     "pin": "shield-lock",
+    "clock": "clock",
+    "shopping_count": "cart",
+    "ready": "check2-circle",
+    "meal_today": "calendar-event",
+    "cooked": "fire",
+    "timer_eggs": "egg-fried",
+    "timer_pasta": "stopwatch",
+    "timer_rice": "stopwatch",
 }
 
 
@@ -806,6 +856,76 @@ ACTIONS: dict[str, ActionSpec] = {
                        description="Home Assistant entity slot 4. Configure in config.toml."),
     "ha_5": ActionSpec(name="ha_5", label="HA 5", color=_HA_STATE_COLOR_OFF, kind="ha_entity",
                        description="Home Assistant entity slot 5. Configure in config.toml."),
+    "clock": ActionSpec(
+        name="clock",
+        label="Clock",
+        color="#1f2937",
+        kind="clock",
+        description="Current time (HH:MM) and date, updated every second. "
+        "Pure local clock, no network.",
+    ),
+    "shopping_count": ActionSpec(
+        name="shopping_count",
+        label="Shop",
+        color="#0f766e",
+        kind="status",
+        status_field="shopping",
+        target_path="ui/shopping",
+        description="Count of items on the Mealie shopping list. "
+        "Press to open the shopping list and refresh.",
+    ),
+    "ready": ActionSpec(
+        name="ready",
+        label="Ready",
+        color="#15803d",
+        kind="status",
+        status_field="ready",
+        target_path="ui/cook",
+        description="How many recipes are cookable from current stock alone. "
+        "Press to open the Cook page and refresh.",
+    ),
+    "meal_today": ActionSpec(
+        name="meal_today",
+        label="Tonight",
+        color="#7e22ce",
+        kind="info",
+        status_field="meal_today",
+        target_path="ui/mealplan",
+        description="Today's planned meal from the meal plan. "
+        "Press to open the Meal Plan page.",
+    ),
+    "cooked": ActionSpec(
+        name="cooked",
+        label="Cooked",
+        color="#b45309",
+        kind="trigger",
+        description="Mark the active Current Recipe as cooked, consuming its "
+        "matched inventory items. No-op when no recipe is active.",
+    ),
+    "timer_eggs": ActionSpec(
+        name="timer_eggs",
+        label="Eggs",
+        color="#0d9488",
+        kind="timer",
+        timer_minutes=6,
+        description="Preset 6-minute timer for soft-boiled eggs.",
+    ),
+    "timer_pasta": ActionSpec(
+        name="timer_pasta",
+        label="Pasta",
+        color="#0d9488",
+        kind="timer",
+        timer_minutes=10,
+        description="Preset 10-minute pasta timer.",
+    ),
+    "timer_rice": ActionSpec(
+        name="timer_rice",
+        label="Rice",
+        color="#0d9488",
+        kind="timer",
+        timer_minutes=18,
+        description="Preset 18-minute rice timer.",
+    ),
 }
 
 # Stamp each spec with its glyph from the single-source-of-truth map above, so
@@ -836,6 +956,8 @@ def icon_for(name: str) -> str:
 DEFAULT_ORDER: list[str] = [
     "expiring",
     "pending",
+    "ready",
+    "shopping_count",
     "commit",
     "add",
     "inventory",
@@ -843,9 +965,15 @@ DEFAULT_ORDER: list[str] = [
     "recipes",
     "mealplan",
     "shopping",
+    "meal_today",
+    "cooked",
     "timer_1",
     "timer_2",
     "timer_3",
+    "timer_eggs",
+    "timer_pasta",
+    "timer_rice",
+    "clock",
     "weather",
     "forecast",
     "brightness",
@@ -856,6 +984,7 @@ _GROUP_BY_KIND = {
     "status": "Status", "trigger": "Actions", "nav": "Navigation",
     "system": "System", "timer": "Timers", "weather": "Weather",
     "forecast": "Weather", "ha_entity": "Home Assistant",
+    "clock": "Info", "info": "Info",
 }
 
 
@@ -1029,7 +1158,7 @@ async def poll_status(client: Any, base_url: str, soon_days: int = 7) -> dict[st
     Returns a flat mapping of status_field -> integer. Network or service
     errors collapse to zeros so a key never shows a stale or crashing value.
     """
-    out = {"expiring": 0, "pending": 0}
+    out = {"expiring": 0, "pending": 0, "shopping": 0, "ready": 0}
     base = base_url.rstrip("/")
     try:
         r = await client.get(f"{base}/expiring/summary")
@@ -1047,6 +1176,21 @@ async def poll_status(client: Any, base_url: str, soon_days: int = 7) -> dict[st
         r = await client.get(f"{base}/pending/count")
         if r.status_code == 200:
             out["pending"] = int(r.json().get("count", 0))
+    except Exception:
+        pass
+    # Shopping-list size and ready-to-cook count come from tiny dedicated count
+    # endpoints so the poll stays cheap. Each degrades to 0 on any failure so a
+    # status key never shows a stale or crashing value.
+    try:
+        r = await client.get(f"{base}/mealie/shopping/count")
+        if r.status_code == 200:
+            out["shopping"] = int(r.json().get("count", 0))
+    except Exception:
+        pass
+    try:
+        r = await client.get(f"{base}/mealie/suggest/ready-count")
+        if r.status_code == 200:
+            out["ready"] = int(r.json().get("count", 0))
     except Exception:
         pass
     return out
@@ -1069,6 +1213,56 @@ async def fetch_timer_suggestions(client: Any, base_url: str) -> list[dict]:
     except Exception:  # noqa: BLE001 - surface as no suggestions, never crash
         pass
     return []
+
+
+async def fetch_meal_today(client: Any, base_url: str, fallback: str = "No meal") -> str:
+    """Fetch today's planned meal name for the meal_today info key, or fallback.
+
+    Calls /mealie/mealplan and extracts the first entry on the start (today)
+    date via ``meal_today_label``. Any network or service failure degrades to
+    ``fallback`` so the info key shows a neutral face rather than crashing.
+    """
+    base = base_url.rstrip("/")
+    try:
+        r = await client.get(f"{base}/mealie/mealplan")
+        if r.status_code == 200:
+            return meal_today_label(r.json(), fallback)
+    except Exception:  # noqa: BLE001 - surface as the fallback, never crash
+        pass
+    return fallback
+
+
+async def mark_current_recipe_cooked(client: Any, base_url: str) -> str:
+    """Mark the active Current Recipe as cooked. Returns a short status face.
+
+    Reads the active recipe's slug from /current-recipe, then posts it to
+    /mealie/cooked to consume the matched inventory items. Returns a brief
+    confirmation ("Cooked" with the consumed count) on success, "No recipe" when
+    nothing is active, and "Failed" on any error, so a press always degrades to a
+    readable face rather than crashing the controller.
+    """
+    base = base_url.rstrip("/")
+    try:
+        r = await client.get(f"{base}/current-recipe")
+        if r.status_code != 200:
+            return "Failed"
+        recipe = (r.json() or {}).get("recipe") or {}
+    except Exception:  # noqa: BLE001 - never crash a press
+        return "Failed"
+    # The active recipe carries the Mealie slug in its ``id`` field (set by
+    # from_mealie_detail); accept a few aliases defensively.
+    slug = (recipe.get("id") or recipe.get("slug") or recipe.get("source_slug") or "")
+    slug = str(slug).strip()
+    if not slug:
+        return "No recipe"
+    try:
+        r = await client.post(f"{base}/mealie/cooked", json={"slug": slug})
+        if r.status_code == 200:
+            consumed = len((r.json() or {}).get("consumed") or [])
+            return f"Cooked {consumed}" if consumed else "Cooked"
+        return "Failed"
+    except Exception:  # noqa: BLE001
+        return "Failed"
 
 
 async def start_recipe_timer(
@@ -1160,9 +1354,23 @@ async def run_action(spec: ActionSpec, ctx: ActionContext, long_press: bool = Fa
         except Exception as e:  # noqa: BLE001 - surface, never crash
             return f"commit error: {e}"
 
+    if spec.kind == "trigger" and spec.name == "cooked":
+        face = await mark_current_recipe_cooked(ctx.client, base)
+        await ctx.refresh()
+        return face
+
     if spec.kind == "nav":
         ok = await ctx.navigate(spec.target_path)
         return "opened" if ok else "no display"
+
+    if spec.kind in ("info", "clock"):
+        # An info/clock key may carry a target view (e.g. meal_today -> the meal
+        # plan). With one it deep-links the kiosk; without one (the clock) the
+        # press is a harmless no-op so the key never feels dead.
+        if spec.target_path:
+            opened = await ctx.navigate(spec.target_path)
+            return "opened" if opened else "no display"
+        return "tick"
 
     if spec.kind == "system" and spec.name == "brightness":
         pct = ctx.cycle_brightness()

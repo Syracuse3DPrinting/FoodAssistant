@@ -14,6 +14,7 @@ import os
 import shutil
 import subprocess
 import time
+from datetime import datetime
 from typing import Optional
 
 import httpx
@@ -89,7 +90,12 @@ class Controller:
         self.keypad_page_idx: int = 0
         self.pin_buffer: PinBuffer = PinBuffer()
         self.pin_status: str = ""
-        self.status: dict[str, int] = {"expiring": 0, "pending": 0}
+        self.status: dict[str, int] = {
+            "expiring": 0, "pending": 0, "shopping": 0, "ready": 0,
+        }
+        # Today's planned meal name shown on a meal_today info key. Refreshed on
+        # the normal status poll; defaults to a neutral face until first fetched.
+        self.meal_today: str = "No meal"
         self.timers: dict[str, TimerState] = {}  # action name -> timer state
         # Active-recipe timer suggestions mapped onto the timer keys. Keyed by
         # the timer action name (timer_1/2/3 and any timer-override slot name),
@@ -338,6 +344,20 @@ class Controller:
                     color = ha.color(base_color) if ha else base_color
                     alert = False
                     count = None
+                elif spec.kind == "clock":
+                    # Computed fresh each draw so the fast loop keeps it ticking.
+                    label = actions._clock_label(datetime.now())
+                    color = base_color
+                    alert = False
+                    count = None
+                elif spec.kind == "info":
+                    # An info key shows a polled text label (e.g. today's meal)
+                    # rather than a count. Falls back to its stock label when the
+                    # field is unknown.
+                    label = self._info_label(spec)
+                    color = base_color
+                    alert = False
+                    count = None
                 else:
                     count = (
                         self.status.get(spec.status_field)
@@ -579,6 +599,35 @@ class Controller:
             self.recipe_timer_specs = new_map
             self._draw_page()
 
+    def _has_kind(self, *kinds: str) -> bool:
+        """True when any visible page slot carries one of the given kinds."""
+        wanted = set(kinds)
+        for page in self.pages:
+            for spec in page:
+                if spec is not None and spec.kind in wanted:
+                    return True
+        return False
+
+    async def _refresh_meal_today(self) -> None:
+        """Fetch today's planned meal for the meal_today info key.
+
+        Best-effort and only when a meal_today key is actually shown, so a deck
+        without one never pays for the call. A failure degrades to the neutral
+        fallback rather than disturbing the status poll."""
+        if self.client is None:
+            return
+        has_meal_key = any(
+            spec is not None and spec.kind == "info"
+            and spec.status_field == "meal_today"
+            for page in self.pages for spec in page
+        )
+        if not has_meal_key:
+            return
+        label = await actions.fetch_meal_today(self.client, self.config.base_url)
+        if label != self.meal_today:
+            self.meal_today = label
+            self._draw_page()
+
     def _timer_default_label(self, name: str) -> str:
         """The stock label a timer key shows with no recipe suggestion."""
         spec = actions.ACTIONS.get(name)
@@ -596,11 +645,29 @@ class Controller:
             return spec.get("label") or base_label
         return base_label
 
+    def _info_label(self, spec: ActionSpec) -> str:
+        """Label for an info key, drawn from its polled field.
+
+        Today only the meal_today field is wired; an unknown field falls back to
+        the key's stock label so a new info key degrades gracefully.
+        """
+        if spec.status_field == "meal_today":
+            return self.meal_today or spec.label
+        return spec.label
+
     def _override_timer_minutes(self, name: str) -> int:
-        """Preset minutes for a timer-override key, or 0 for a stock timer."""
+        """Preset minutes for a timer key, or 0 for a count-up timer.
+
+        Checks per-key overrides first, then the static ACTIONS registry so the
+        stock preset timers (timer_eggs/pasta/rice) load their whole duration on
+        a single press just like a configured timer override.
+        """
         for spec in self.key_overrides.values():
             if spec.name == name and spec.kind == "timer":
                 return spec.timer_minutes
+        spec = actions.ACTIONS.get(name)
+        if spec is not None and spec.kind == "timer":
+            return spec.timer_minutes
         return 0
 
     def _weather_for(self, name: str) -> WeatherState:
@@ -892,6 +959,9 @@ class Controller:
         # status counts (sbu3). Defensive inside, so a failure never disturbs the
         # status poll above.
         await self._refresh_recipe_timers()
+        # Refresh today's planned meal for any meal_today info key, on the same
+        # cadence. Skipped when no such key is shown so the poll stays cheap.
+        await self._refresh_meal_today()
 
     def _tick_timers(self) -> bool:
         """Advance all active timers. Returns True if any expired this tick."""
@@ -900,10 +970,19 @@ class Controller:
 
     async def _poll_forever(self) -> None:
         tick = 0
+        last_clock_minute: Optional[str] = None
         while True:
             await asyncio.sleep(1)
             tick += 1
             try:
+                # Tick the clock key: redraw when the HH:MM changes so the face
+                # stays current without a full status poll. Cheap when no clock
+                # key is shown (the redraw is gated on its presence).
+                if self._has_kind("clock"):
+                    minute = datetime.now().strftime("%H:%M")
+                    if minute != last_clock_minute:
+                        last_clock_minute = minute
+                        self._draw_page()
                 expired = self._tick_timers()
                 any_running = any(t.is_running() for t in self.timers.values())
                 any_alerting = any(t.alert_active() for t in self.timers.values())

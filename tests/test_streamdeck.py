@@ -84,7 +84,9 @@ def test_single_page_pads_to_key_count():
 
 
 def test_no_paging_key_when_everything_fits():
-    pages = layout.build_pages(list(actions.DEFAULT_ORDER), 15)
+    # The fuller default set fits a single 32-key XL page with no paging key.
+    pages = layout.build_pages(list(actions.DEFAULT_ORDER), 32)
+    assert len(pages) == 1
     names = [s.name for s in pages[0] if s is not None]
     assert "page_next" not in names
 
@@ -116,10 +118,112 @@ def test_default_order_resolves():
 
 
 def test_status_fields_match_poll_output():
-    poll_keys = {"expiring", "pending"}
+    poll_keys = {"expiring", "pending", "shopping", "ready"}
     for spec in actions.ACTIONS.values():
         if spec.kind == "status":
             assert spec.status_field in poll_keys
+
+
+# -- new deck actions (FoodAssistant-4msn) ---------------------------------
+
+
+def test_new_actions_resolve_and_have_icons():
+    # Every new action the bead adds must resolve in ACTIONS and carry a glyph.
+    for name in (
+        "clock", "shopping_count", "ready", "meal_today", "cooked",
+        "timer_eggs", "timer_pasta", "timer_rice",
+    ):
+        spec = actions.resolve(name)
+        assert spec is not None, f"{name} does not resolve"
+        assert actions.icon_for(name), f"{name} has no icon mapping"
+        assert spec.icon == actions.ACTION_ICONS[name]
+
+
+def test_preset_timers_carry_the_right_minutes():
+    assert actions.ACTIONS["timer_eggs"].timer_minutes == 6
+    assert actions.ACTIONS["timer_pasta"].timer_minutes == 10
+    assert actions.ACTIONS["timer_rice"].timer_minutes == 18
+    for name in ("timer_eggs", "timer_pasta", "timer_rice"):
+        assert actions.ACTIONS[name].kind == "timer"
+
+
+def test_new_status_actions_field_and_target():
+    shop = actions.ACTIONS["shopping_count"]
+    assert shop.kind == "status" and shop.status_field == "shopping"
+    assert shop.target_path == "ui/shopping"
+    ready = actions.ACTIONS["ready"]
+    assert ready.kind == "status" and ready.status_field == "ready"
+    assert ready.target_path == "ui/cook"
+
+
+def test_meal_today_is_info_with_target():
+    spec = actions.ACTIONS["meal_today"]
+    assert spec.kind == "info"
+    assert spec.status_field == "meal_today"
+    assert spec.target_path == "ui/mealplan"
+
+
+def test_clock_is_clock_kind_no_target():
+    spec = actions.ACTIONS["clock"]
+    assert spec.kind == "clock"
+    assert spec.target_path == ""
+
+
+def test_new_kinds_grouped_in_catalog():
+    cat = {a["name"]: a for a in actions.catalog()}
+    # Clock and the meal info tile group under "Info" in the web grid editor.
+    assert cat["clock"]["group"] == "Info"
+    assert cat["meal_today"]["group"] == "Info"
+
+
+# -- clock label (pure) ----------------------------------------------------
+
+
+def test_clock_label_formats_time_and_date():
+    from datetime import datetime
+    now = datetime(2026, 6, 26, 9, 5)  # a Friday
+    label = actions._clock_label(now)
+    assert label.startswith("09:05")
+    assert "\n" in label
+    # Second line is the abbreviated weekday and day-of-month.
+    assert label.split("\n")[1] == "Fri 26"
+
+
+def test_clock_label_time_only():
+    from datetime import datetime
+    now = datetime(2026, 1, 2, 23, 59)
+    assert actions._clock_label(now, show_date=False) == "23:59"
+
+
+# -- meal-today extraction (pure) ------------------------------------------
+
+
+def test_meal_today_label_picks_today_entry():
+    mealplan = {
+        "start": "2026-06-26",
+        "days": {
+            "2026-06-26": [{"title": "Chicken Curry"}],
+            "2026-06-27": [{"title": "Tacos"}],
+        },
+    }
+    assert actions.meal_today_label(mealplan) == "Chicken Curry"
+
+
+def test_meal_today_label_truncates_long_name():
+    mealplan = {
+        "start": "2026-06-26",
+        "days": {"2026-06-26": [{"title": "Slow Braised Short Rib Ragu"}]},
+    }
+    out = actions.meal_today_label(mealplan)
+    assert len(out) <= actions.MEAL_TODAY_LABEL_MAX
+
+
+def test_meal_today_label_falls_back_when_empty():
+    assert actions.meal_today_label({"start": "2026-06-26", "days": {}}) == "No meal"
+    assert actions.meal_today_label({}, fallback="-") == "-"
+    # An entry with a blank title is skipped in favour of the fallback.
+    blank = {"start": "d", "days": {"d": [{"title": "   "}]}}
+    assert actions.meal_today_label(blank) == "No meal"
 
 
 # -- polling ---------------------------------------------------------------
@@ -174,7 +278,8 @@ def test_poll_status_sums_urgency_buckets():
         }
     )
     out = asyncio.run(actions.poll_status(client, "http://x", soon_days=7))
-    assert out == {"expiring": 1 + 2 + 3 + 4, "pending": 5}
+    assert out["expiring"] == 1 + 2 + 3 + 4
+    assert out["pending"] == 5
 
 
 def test_poll_status_excludes_week_bucket_for_short_window():
@@ -193,7 +298,69 @@ def test_poll_status_excludes_week_bucket_for_short_window():
 
 def test_poll_status_tolerates_errors():
     out = asyncio.run(actions.poll_status(_FakeClient(), "http://x"))
-    assert out == {"expiring": 0, "pending": 0}
+    assert out == {"expiring": 0, "pending": 0, "shopping": 0, "ready": 0}
+
+
+def test_poll_status_includes_shopping_and_ready_counts():
+    client = _FakeClient(
+        get_map={
+            "/mealie/shopping/count": _Resp(200, {"count": 7}),
+            "/mealie/suggest/ready-count": _Resp(200, {"count": 4}),
+        }
+    )
+    out = asyncio.run(actions.poll_status(client, "http://x"))
+    assert out["shopping"] == 7
+    assert out["ready"] == 4
+    # Missing expiring/pending endpoints still collapse to zero, never crash.
+    assert out["expiring"] == 0 and out["pending"] == 0
+
+
+def test_fetch_meal_today_extracts_label():
+    client = _FakeClient(
+        get_map={
+            "/mealie/mealplan": _Resp(
+                200,
+                {"start": "2026-06-26",
+                 "days": {"2026-06-26": [{"title": "Lasagna"}]}},
+            )
+        }
+    )
+    out = asyncio.run(actions.fetch_meal_today(client, "http://x"))
+    assert out == "Lasagna"
+
+
+def test_fetch_meal_today_falls_back_on_error():
+    out = asyncio.run(actions.fetch_meal_today(_FakeClient(), "http://x", fallback="-"))
+    assert out == "-"
+
+
+def test_mark_current_recipe_cooked_consumes_and_reports():
+    client = _FakeClient(
+        get_map={"/current-recipe": _Resp(200, {"recipe": {"id": "stew", "title": "Stew"}})},
+        post_map={"/mealie/cooked": _Resp(200, {"consumed": ["Carrot", "Onion"]})},
+    )
+    face = asyncio.run(actions.mark_current_recipe_cooked(client, "http://x"))
+    assert face == "Cooked 2"
+    assert ("POST", "http://x/mealie/cooked") in client.calls
+
+
+def test_mark_current_recipe_cooked_no_active_recipe():
+    client = _FakeClient(get_map={"/current-recipe": _Resp(200, {"recipe": None})})
+    face = asyncio.run(actions.mark_current_recipe_cooked(client, "http://x"))
+    assert face == "No recipe"
+    # Nothing was posted: no active recipe to mark cooked.
+    assert all(c[0] != "POST" for c in client.calls)
+
+
+def test_cooked_action_dispatches_and_refreshes():
+    client = _FakeClient(
+        get_map={"/current-recipe": _Resp(200, {"recipe": {"id": "stew"}})},
+        post_map={"/mealie/cooked": _Resp(200, {"consumed": ["Carrot"]})},
+    )
+    ctx, refreshed = _ctx(client)
+    msg = asyncio.run(actions.run_action(actions.ACTIONS["cooked"], ctx))
+    assert msg == "Cooked 1"
+    assert refreshed["n"] == 1
 
 
 # -- action handlers -------------------------------------------------------
@@ -1926,13 +2093,27 @@ def test_default_order_includes_new_feature_actions():
 
 
 def test_default_order_fills_a_15_key_deck_with_real_actions():
-    # A 15-key Original now fills entirely with bound actions (no padded blanks)
-    # and needs no paging key because the default list is sized to fit.
+    # A 15-key Original fills entirely with bound actions (no padded blanks). The
+    # fuller default set (sized for the 32-key XL) overflows 15 keys now, so the
+    # Original paginates with a wrapping page-cycle key rather than showing gaps.
     pages = layout.build_pages(list(actions.DEFAULT_ORDER), 15)
+    assert len(pages) >= 1
+    first = pages[0]
+    assert len(first) == 15
+    # Every face on the first page is a real bound action or the paging key, never
+    # a padded blank, so the deck reads full.
+    assert all(s is not None for s in first)
+    assert first[-1].name == "page_next"
+
+
+def test_default_order_fills_a_32_key_deck_in_one_page():
+    # The 32-key XL holds the whole fuller default set on a single page with no
+    # paging key, which is what the longer DEFAULT_ORDER is sized for.
+    pages = layout.build_pages(list(actions.DEFAULT_ORDER), 32)
     assert len(pages) == 1
     names = [s.name for s in pages[0] if s is not None]
-    assert len(names) == 15
     assert "page_next" not in names
+    assert len(names) == len(actions.DEFAULT_ORDER)
 
 
 def test_default_order_still_paginates_on_a_6_key_mini():

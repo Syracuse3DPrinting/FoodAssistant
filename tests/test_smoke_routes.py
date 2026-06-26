@@ -478,6 +478,73 @@ def test_timer_endpoints(client):
     assert client.post("/timers", json={"label": "x", "seconds": 0}).status_code == 400
 
 
+def test_streamdeck_count_endpoints(client, monkeypatch):
+    """The Stream Deck count endpoints return a tiny JSON int and degrade to
+    zero when Mealie is unreachable (FoodAssistant-4msn)."""
+    from app.config import settings
+    from app.services.mealie import MealieClient
+    from app.services.grocy import GrocyClient
+
+    saved = (settings.mealie_base_url, settings.mealie_api_key)
+    try:
+        settings.mealie_base_url = "http://mealie.test"
+        settings.mealie_api_key = "test-mealie-key"
+        assert settings.mealie_configured()
+
+        async def _lists(self):
+            return [{"id": "l1", "name": "Groceries"}]
+
+        async def _list(self, list_id):
+            return {"listItems": [
+                {"checked": False, "note": "milk"},
+                {"checked": True, "note": "eggs"},
+                {"checked": False, "note": "bread"},
+            ]}
+
+        async def _recipes(self):
+            return [
+                {"name": "Toast", "slug": "toast",
+                 "recipeIngredient": [{"note": "bread"}]},
+            ]
+
+        async def _stock(self):
+            return [{"name": "bread", "amount": 1, "product_id": 1,
+                     "days_remaining": 5}]
+
+        monkeypatch.setattr(MealieClient, "get_shopping_lists", _lists)
+        monkeypatch.setattr(MealieClient, "get_shopping_list", _list)
+        monkeypatch.setattr(MealieClient, "get_recipes_with_ingredients", _recipes)
+        monkeypatch.setattr(GrocyClient, "get_full_stock", _stock)
+
+        r = client.get("/mealie/shopping/count")
+        assert r.status_code == 200
+        assert r.json() == {"count": 2}  # two unchecked items
+
+        r = client.get("/mealie/suggest/ready-count")
+        assert r.status_code == 200
+        body = r.json()
+        assert isinstance(body["count"], int)
+        assert body["count"] >= 1  # Toast is cookable from bread alone
+    finally:
+        settings.mealie_base_url, settings.mealie_api_key = saved
+
+
+def test_streamdeck_count_endpoints_degrade_when_unconfigured(client):
+    """With Mealie unconfigured the count endpoints answer a clean zero rather
+    than erroring, so the deck poll stays cheap (FoodAssistant-4msn)."""
+    from app.config import settings
+
+    saved = (settings.mealie_base_url, settings.mealie_api_key)
+    try:
+        settings.mealie_base_url = ""
+        settings.mealie_api_key = ""
+        assert not settings.mealie_configured()
+        assert client.get("/mealie/shopping/count").json() == {"count": 0}
+        assert client.get("/mealie/suggest/ready-count").json() == {"count": 0}
+    finally:
+        settings.mealie_base_url, settings.mealie_api_key = saved
+
+
 def test_settings_menu_has_logical_groups(client):
     """The revamped settings menu renders its section headers and the default
     non-satellite Services pills (FoodAssistant-y9nd)."""
