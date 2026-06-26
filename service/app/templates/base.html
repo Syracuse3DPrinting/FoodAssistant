@@ -102,6 +102,13 @@
             </a>
           </li>
           {% endfor %}
+          <!-- System-health warning: hidden until the host bridge reports an
+               undervoltage/throttle/temp/disk condition on a Pi appliance. -->
+          <li class="nav-item d-none" id="sysHealthItem">
+            <a class="nav-link text-warning" href="setup" id="sysHealthLink" title="System warning">
+              <i class="bi bi-exclamation-triangle-fill"></i>
+            </a>
+          </li>
           <!-- Overflow menu: less-used destinations live here to keep the bar
                uncluttered, which matters most on the small pi_remote screen. -->
           <li class="nav-item dropdown">
@@ -212,6 +219,33 @@
         b.classList.remove('d-none');
       }
     }).catch(() => {});
+  </script>
+  <script>
+    // System-health indicator. Polls the host bridge (via the app) for power,
+    // thermal, and disk warnings on a Pi appliance. Off a Pi the endpoint
+    // returns an empty warnings list, so the icon stays hidden everywhere else.
+    (function () {
+      var item = document.getElementById('sysHealthItem');
+      var link = document.getElementById('sysHealthLink');
+      if (!item || !link) return;
+      function refresh() {
+        fetch('setup/system/health', { cache: 'no-store' })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            var warnings = (d && d.warnings) || [];
+            if (warnings.length) {
+              link.setAttribute('title', warnings.map(function (w) { return w.message; }).join('\n'));
+              item.classList.remove('d-none');
+            } else {
+              item.classList.add('d-none');
+            }
+          })
+          .catch(function () { /* leave the icon as-is on a transient error */ });
+      }
+      refresh();
+      // Re-check every five minutes; these conditions change slowly.
+      setInterval(refresh, 300000);
+    })();
   </script>
   <script>
     // Touch-calibration launcher (kiosk only). A "Calibrate" click in any

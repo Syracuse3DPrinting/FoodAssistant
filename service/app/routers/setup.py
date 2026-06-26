@@ -948,6 +948,24 @@ async def hardware_status():
         return {"ok": False, "error": str(e)}
 
 
+@router.get("/system/health")
+async def system_health():
+    """Pi power/thermal/disk warnings, via the host bridge.
+
+    Off a Pi there is no bridge to probe, so return a clean "no warnings" shape
+    (rather than an error) so the navbar indicator simply shows nothing instead
+    of a failure on a server or phone.
+    """
+    if not is_raspberry_pi():
+        return {"ok": True, "warnings": []}
+    try:
+        async with httpx.AsyncClient(timeout=6.0) as c:
+            r = (await c.get(f"{_HOST_BRIDGE}/system/health")).json()
+        return r
+    except Exception as e:
+        return {"ok": False, "error": str(e), "warnings": []}
+
+
 @router.post("/kiosk/install")
 async def kiosk_install():
     """Provision the kiosk service for a display attached after first install."""

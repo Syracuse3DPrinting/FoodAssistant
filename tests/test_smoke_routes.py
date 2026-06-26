@@ -88,6 +88,19 @@ def test_root_redirects_to_ui(client):
     assert r.headers["location"].endswith("/ui/")
 
 
+def test_system_health_off_pi_is_clean(client, monkeypatch):
+    # On a non-Pi host there is no bridge to probe, so the navbar indicator's
+    # endpoint must return a clean empty-warnings shape, never an error.
+    import app.routers.setup as setup_router
+
+    monkeypatch.setattr(setup_router, "is_raspberry_pi", lambda: False)
+    r = client.get("/setup/system/health")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["warnings"] == []
+
+
 def test_health_ok_shape(client):
     # When configured, /health calls the provider + Grocy health checks; mock both.
     from app.services.grocy import GrocyClient

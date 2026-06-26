@@ -25,6 +25,7 @@ GET  /mealie/status        Mealie state: not-installed / starting / running
 POST /mealie/start         start Mealie in the background (docker compose --profile with-mealie up -d)
 GET  /logs/<name>          tail of an install/start log (name in mealie/kiosk/streamdeck)
 GET  /hardware/status      display/Stream Deck presence + service/install state
+GET  /system/health        power/thermal/disk warnings (vcgencmd get_throttled, temp, df)
 POST /kiosk/install        provision the kiosk service (display attached later)
 POST /streamdeck/install   provision the Stream Deck service (attached later)
 GET  /ap/status            whether the fallback AP is active {active: bool}
@@ -236,6 +237,131 @@ def _hardware_status():
     }
 
 
+# Meaning of each bit in the "throttled" word reported by `vcgencmd
+# get_throttled`. The low four bits are live (happening right now); the high
+# four are sticky (happened at some point since boot). See
+# https://www.raspberrypi.com/documentation/computers/os.html#get_throttled
+_THROTTLE_BITS = {
+    0: ("undervoltage", "Under-voltage detected", True),
+    1: ("freq_capped", "Arm frequency capped", True),
+    2: ("throttled", "Currently throttled", True),
+    3: ("temp_limit", "Soft temperature limit active", True),
+    16: ("undervoltage", "Under-voltage has occurred since boot", False),
+    17: ("freq_capped", "Arm frequency capping has occurred since boot", False),
+    18: ("throttled", "Throttling has occurred since boot", False),
+    19: ("temp_limit", "Soft temperature limit has occurred since boot", False),
+}
+
+
+def _parse_throttled(word):
+    """Decode a `vcgencmd get_throttled` value into a list of warnings.
+
+    `word` is the integer throttle bitmask (the 0x... value vcgencmd prints).
+    Returns a list of {key, message, live} dicts, live=True for conditions
+    happening right now and live=False for sticky "since boot" flags. An
+    all-clear bitmask returns an empty list.
+    """
+    out = []
+    for bit, (key, message, live) in _THROTTLE_BITS.items():
+        if word & (1 << bit):
+            out.append({"key": key, "message": message, "live": live})
+    return out
+
+
+def _read_throttled_word():
+    """Return the integer from `vcgencmd get_throttled`, or None if unavailable.
+
+    Output looks like "throttled=0x50005"; anything else (vcgencmd missing, a
+    non-Pi host) yields None so the caller can report "unknown" rather than a
+    false all-clear.
+    """
+    try:
+        out = subprocess.run(
+            ["vcgencmd", "get_throttled"], capture_output=True, text=True, timeout=5
+        ).stdout.strip()
+    except Exception:
+        return None
+    m = re.search(r"throttled=(0x[0-9a-fA-F]+|\d+)", out)
+    if not m:
+        return None
+    try:
+        return int(m.group(1), 0)
+    except ValueError:
+        return None
+
+
+def _read_cpu_temp(path="/sys/class/thermal/thermal_zone0/temp"):
+    """CPU temperature in Celsius (float), or None if it can't be read.
+
+    The sysfs file holds millidegrees, e.g. "48312" -> 48.3.
+    """
+    raw = _read_sysfs(path)
+    if not raw:
+        return None
+    try:
+        return round(int(raw) / 1000.0, 1)
+    except ValueError:
+        return None
+
+
+def _disk_usage(path="/"):
+    """Return (percent_used, free_gb) for the filesystem holding path.
+
+    Returns (None, None) if it can't be determined.
+    """
+    try:
+        import shutil
+        total, used, free = shutil.disk_usage(path)
+        percent = round(used / total * 100) if total else None
+        return percent, round(free / (1024 ** 3), 1)
+    except Exception:
+        return None, None
+
+
+# Surface a warning when the CPU crosses this temperature or the disk crosses
+# this fill level. The Pi soft-throttles around 80C and hard-throttles at 85C,
+# so 80 is the right point to start nudging the user.
+_TEMP_WARN_C = 80.0
+_DISK_WARN_PCT = 90
+
+
+def _system_health():
+    """Pi system health for GET /system/health: power, thermal, and disk.
+
+    Always succeeds. Each probe degrades to None/empty rather than raising, so
+    a partial read (e.g. vcgencmd present but no thermal zone) still returns a
+    usable shape. The "warnings" list is what the UI badge keys off; an empty
+    list means all clear.
+    """
+    word = _read_throttled_word()
+    throttle_flags = _parse_throttled(word) if word is not None else []
+    temp_c = _read_cpu_temp()
+    disk_pct, disk_free_gb = _disk_usage()
+
+    warnings = list(throttle_flags)
+    if temp_c is not None and temp_c >= _TEMP_WARN_C:
+        warnings.append({
+            "key": "temperature",
+            "message": f"CPU temperature high ({temp_c:.0f}C)",
+            "live": True,
+        })
+    if disk_pct is not None and disk_pct >= _DISK_WARN_PCT:
+        warnings.append({
+            "key": "disk",
+            "message": f"Disk almost full ({disk_pct}% used)",
+            "live": True,
+        })
+
+    return {
+        "ok": True,
+        "throttled": word,
+        "temp_c": temp_c,
+        "disk_percent": disk_pct,
+        "disk_free_gb": disk_free_gb,
+        "warnings": warnings,
+    }
+
+
 def _streamdeck_present():
     try:
         out = subprocess.run(["lsusb"], capture_output=True, text=True, timeout=5).stdout
@@ -415,6 +541,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._logs(self.path[len("/logs/"):])
         elif self.path == "/hardware/status":
             self._hardware_status()
+        elif self.path == "/system/health":
+            self._system_health()
         elif self.path == "/streamdeck/config":
             self._streamdeck_get_config()
         elif self.path == "/streamdeck/actions":
@@ -881,6 +1009,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 "key_count": _streamdeck_keycount(),
             },
         })
+
+    def _system_health(self):
+        """Power / thermal / disk health for the non-obtrusive UI indicator."""
+        try:
+            self._send(200, _system_health())
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
 
     def _provision(self, step, unit):
         if _installing(step):

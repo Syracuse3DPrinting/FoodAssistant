@@ -318,3 +318,89 @@ def test_hardware_status_nothing_attached(monkeypatch):
         "display": {"present": False, "connectors": []},
         "streamdeck": {"present": False, "model": ""},
     }
+
+
+# System health: power / thermal / disk warnings (FoodAssistant-me1)
+# ------------------------------------------------------------------
+
+def test_parse_throttled_all_clear():
+    assert bridge._parse_throttled(0) == []
+
+
+def test_parse_throttled_live_undervoltage():
+    out = bridge._parse_throttled(0x1)
+    assert out == [{"key": "undervoltage", "message": "Under-voltage detected", "live": True}]
+
+
+def test_parse_throttled_sticky_and_live():
+    # 0x50005 = bits 0, 2 (live undervoltage + throttled) and 16, 18 (sticky).
+    out = bridge._parse_throttled(0x50005)
+    keys_live = {(w["key"], w["live"]) for w in out}
+    assert ("undervoltage", True) in keys_live
+    assert ("throttled", True) in keys_live
+    assert ("undervoltage", False) in keys_live
+    assert ("throttled", False) in keys_live
+
+
+def test_read_throttled_word_parses_hex(monkeypatch):
+    class FakeRun:
+        stdout = "throttled=0x50005\n"
+    monkeypatch.setattr(bridge.subprocess, "run", lambda *a, **k: FakeRun())
+    assert bridge._read_throttled_word() == 0x50005
+
+
+def test_read_throttled_word_none_when_unparseable(monkeypatch):
+    class FakeRun:
+        stdout = "command not found"
+    monkeypatch.setattr(bridge.subprocess, "run", lambda *a, **k: FakeRun())
+    assert bridge._read_throttled_word() is None
+
+
+def test_read_throttled_word_none_on_exception(monkeypatch):
+    def boom(*a, **k):
+        raise OSError("no vcgencmd")
+    monkeypatch.setattr(bridge.subprocess, "run", boom)
+    assert bridge._read_throttled_word() is None
+
+
+def test_read_cpu_temp(tmp_path):
+    f = tmp_path / "temp"
+    f.write_text("48312\n")
+    assert bridge._read_cpu_temp(str(f)) == 48.3
+
+
+def test_read_cpu_temp_missing_returns_none(tmp_path):
+    assert bridge._read_cpu_temp(str(tmp_path / "nope")) is None
+
+
+def test_system_health_all_clear(monkeypatch):
+    monkeypatch.setattr(bridge, "_read_throttled_word", lambda: 0)
+    monkeypatch.setattr(bridge, "_read_cpu_temp", lambda *a, **k: 45.0)
+    monkeypatch.setattr(bridge, "_disk_usage", lambda *a, **k: (40, 20.0))
+    health = bridge._system_health()
+    assert health["ok"] is True
+    assert health["warnings"] == []
+    assert health["temp_c"] == 45.0
+    assert health["disk_percent"] == 40
+
+
+def test_system_health_flags_hot_and_full(monkeypatch):
+    monkeypatch.setattr(bridge, "_read_throttled_word", lambda: 0x1)
+    monkeypatch.setattr(bridge, "_read_cpu_temp", lambda *a, **k: 82.0)
+    monkeypatch.setattr(bridge, "_disk_usage", lambda *a, **k: (95, 1.2))
+    health = bridge._system_health()
+    keys = {w["key"] for w in health["warnings"]}
+    assert "undervoltage" in keys
+    assert "temperature" in keys
+    assert "disk" in keys
+
+
+def test_system_health_unknown_throttle_is_not_false_clear(monkeypatch):
+    # vcgencmd unavailable -> throttled is None and contributes no flags, but the
+    # other probes still run.
+    monkeypatch.setattr(bridge, "_read_throttled_word", lambda: None)
+    monkeypatch.setattr(bridge, "_read_cpu_temp", lambda *a, **k: None)
+    monkeypatch.setattr(bridge, "_disk_usage", lambda *a, **k: (None, None))
+    health = bridge._system_health()
+    assert health["throttled"] is None
+    assert health["warnings"] == []
