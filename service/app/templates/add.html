@@ -69,6 +69,11 @@
             </div>
             <div class="form-text">UPC-A, EAN-13, or EAN-8</div>
             <div id="barcode-status" class="mt-2"></div>
+            <div id="barcode-saved-count" class="mt-2 d-none">
+              <span class="badge bg-success" id="barcode-saved-badge">0</span>
+              saved to
+              <a href="ui/pending">Pending</a> &mdash; review and import from there.
+            </div>
           </div>
         </div>
       </div>
@@ -265,7 +270,7 @@ async function decodeBarcodePhoto(input) {
     const decoder = new Html5Qrcode("reader");
     const result = await decoder.scanFileV2(file, /* showImage */ false);
     document.getElementById('barcodeInput').value = result.decodedText;
-    await lookupBarcode();
+    await lookupBarcode();  // saves to pending/scan DB immediately
   } catch(e) {
     showStatus('barcode-status',
       'No barcode found in photo. Get closer, fill the frame with the barcode, and avoid glare.', 'warning');
@@ -282,7 +287,7 @@ function startScanner() {
     (decodedText) => {
       stopScanner();
       document.getElementById('barcodeInput').value = decodedText;
-      lookupBarcode();
+      lookupBarcode();  // now saves to pending/scan DB immediately
     },
     () => {}
   ).catch(err => {
@@ -300,21 +305,42 @@ function stopScanner() {
   document.getElementById('stopScanBtn').classList.add('d-none');
 }
 
+var _barcodeSavedCount = 0;
+
 async function lookupBarcode() {
-  const code = document.getElementById('barcodeInput').value.trim();
+  const input = document.getElementById('barcodeInput');
+  const code = input.value.trim();
   if (!code) return;
   showStatus('barcode-status', '<span class="spinner-border spinner-border-sm me-1"></span>Looking up...', 'info');
   try {
-    const r = await fetch(`analyze/barcode/${code}`);
+    const r = await fetch('pending/scan', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ barcode: code, quantity: 1, source: 'scanner' }),
+    });
     if (!r.ok) {
       const err = await r.json();
-      showStatus('barcode-status', `Not found: ${err.detail}`, 'warning');
+      showStatus('barcode-status', `Error: ${err.detail || r.statusText}`, 'warning');
       return;
     }
     const result = await r.json();
-    addToQueue(result.items);
-    showStatus('barcode-status', `Found: <strong>${result.items[0].name}</strong>`, 'success');
-    document.getElementById('barcodeInput').value = '';
+    const name = result.item ? result.item.name : code;
+    const merged = result.status === 'merged';
+    showStatus('barcode-status',
+      merged ? `<strong>${name}</strong> &mdash; quantity bumped (already pending)`
+              : `Saved: <strong>${name}</strong>`,
+      'success');
+    input.value = '';
+    _barcodeSavedCount++;
+    const badge = document.getElementById('barcode-saved-badge');
+    const wrap = document.getElementById('barcode-saved-count');
+    if (badge) badge.textContent = _barcodeSavedCount;
+    if (wrap) wrap.classList.remove('d-none');
+    // Refresh the navbar pending badge
+    fetch('pending/count').then(r => r.json()).then(d => {
+      const b = document.getElementById('pending-nav-badge');
+      if (b && d.count > 0) { b.textContent = d.count; b.classList.remove('d-none'); }
+    }).catch(() => {});
   } catch(e) {
     showStatus('barcode-status', 'Lookup failed: ' + e, 'danger');
   }
