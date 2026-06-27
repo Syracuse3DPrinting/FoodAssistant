@@ -1434,14 +1434,19 @@
               <div class="col-md-6">
                 <label class="form-label small mb-1" for="streamdeck_ha_base_url">Base URL</label>
                 <input type="text" class="form-control form-control-sm" id="streamdeck_ha_base_url"
-                       placeholder="http://homeassistant.local:8123" value="{{ s.streamdeck_ha_base_url or '' }}">
+                       placeholder="http://homeassistant.local:8123" value="{{ s.streamdeck_ha_base_url or '' }}"
+                       {% if features.satellite %}readonly{% endif %}>
               </div>
               <div class="col-md-6">
                 <label class="form-label small mb-1" for="streamdeck_ha_token">Long-lived access token</label>
                 <input type="password" class="form-control form-control-sm" id="streamdeck_ha_token" autocomplete="off"
+                       {% if features.satellite %}disabled{% endif %}
                        placeholder="{% if has.streamdeck_ha_token %}(unchanged){% else %}(token){% endif %}">
               </div>
             </div>
+            {% if features.satellite %}
+            <div class="form-text"><i class="bi bi-hdd-network me-1"></i>Home Assistant is configured on the main server and syncs here automatically. Change it there.</div>
+            {% else %}
             <div class="d-flex gap-2">
               <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneHomeAssistant(this)">
                 <i class="bi bi-check-lg me-1"></i>Save Home Assistant
@@ -1451,6 +1456,7 @@
               </button>
             </div>
             <div class="test-result mt-2" id="ha-result"></div>
+            {% endif %}
           </div>
 
           <div class="section-card">
@@ -1465,16 +1471,17 @@
               <div class="row g-2 align-items-end sd-camera-row">
                 <div class="col-md-2">
                   <label class="form-label small mb-1">Name</label>
-                  <input type="text" class="form-control form-control-sm sd-cam-name" placeholder="Front door" value="{{ cam.name or '' }}">
+                  <input type="text" class="form-control form-control-sm sd-cam-name" placeholder="Front door" value="{{ cam.name or '' }}" {% if features.satellite %}readonly{% endif %}>
                 </div>
                 <div class="col-md-3">
                   <label class="form-label small mb-1">Stream URL</label>
-                  <input type="text" class="form-control form-control-sm sd-cam-stream" placeholder="http://.../stream.m3u8" value="{{ cam.stream_url or '' }}">
+                  <input type="text" class="form-control form-control-sm sd-cam-stream" placeholder="http://.../stream.m3u8" value="{{ cam.stream_url or '' }}" {% if features.satellite %}readonly{% endif %}>
                 </div>
                 <div class="col-md-3">
                   <label class="form-label small mb-1">Snapshot URL</label>
-                  <input type="text" class="form-control form-control-sm sd-cam-snapshot" placeholder="http://.../snapshot.jpg" value="{{ cam.snapshot_url or '' }}">
+                  <input type="text" class="form-control form-control-sm sd-cam-snapshot" placeholder="http://.../snapshot.jpg" value="{{ cam.snapshot_url or '' }}" {% if features.satellite %}readonly{% endif %}>
                 </div>
+                {% if not features.satellite %}
                 <div class="col-md-3">
                   <label class="form-label small mb-1">HA entity</label>
                   <input type="text" class="form-control form-control-sm sd-cam-entity" placeholder="camera.front_door">
@@ -1483,9 +1490,13 @@
                   <button type="button" class="btn btn-outline-secondary btn-sm" title="From Home Assistant" onclick="_sdCameraFromHa(this)"><i class="bi bi-house"></i></button>
                   <button type="button" class="btn btn-outline-danger btn-sm" title="Remove" onclick="this.closest('.sd-camera-row').remove()"><i class="bi bi-trash"></i></button>
                 </div>
+                {% endif %}
               </div>
               {% endfor %}
             </div>
+            {% if features.satellite %}
+            <div class="form-text"><i class="bi bi-hdd-network me-1"></i>Cameras are configured on the main server and sync here automatically. Change them there.</div>
+            {% else %}
             <div class="d-flex gap-2 flex-wrap">
               <button type="button" class="btn btn-outline-secondary btn-sm" onclick="_sdAddCameraRow()">
                 <i class="bi bi-plus-lg me-1"></i>Add camera
@@ -1499,6 +1510,7 @@
             </div>
             <div id="cameras-discovered" class="mt-2"></div>
             <div class="test-result mt-2" id="cameras-result"></div>
+            {% endif %}
           </div>
         </div>
 

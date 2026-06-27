@@ -27,6 +27,7 @@ All notable changes to FoodAssistant are recorded here. The format is based on
 - **Camera in the navigation.** When at least one camera is configured, a Camera entry appears in the navigation bar, the floating nav, and the overflow menu, so the live feed page is reachable without typing its URL. It hides itself again when no cameras are set.
 
 ### Fixed
+- **Home Assistant and cameras now sync to a Pi Remote.** A satellite mirrors the main server's Home Assistant credentials and camera feeds, and its Settings show them read-only with a "configured on the main server" note (like the Stream Deck weather), so the values are visible and clearly server-managed instead of looking unset. Update the satellite (`sudo foodassistant-update`) so it pulls the new fields.
 - **Kiosk overflow menu was nearly empty.** In kiosk mode the three-dots More menu hid everything except Settings (the reference links are kiosk-hidden and the secondary-tab copies only appeared under 820px). The secondary destinations (Recipes, Cook, Current Recipe, Meal Plan, Camera) now show in that menu in kiosk mode at any width, so every page stays reachable from the kebab.
 
 ### Changed
