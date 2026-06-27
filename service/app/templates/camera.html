@@ -28,7 +28,7 @@
        style="width:100%; height:100%; max-height:85vh; object-fit:contain; background:#000;">
   <div id="cameraError" class="d-none text-center text-secondary p-4">
     <i class="bi bi-camera-video-off fs-1 d-block mb-2"></i>
-    <div>Camera unavailable. Check that the feed is reachable.</div>
+    <div id="cameraErrorMsg">Camera unavailable. Check that the feed is reachable.</div>
   </div>
 </div>
 {% else %}
@@ -59,10 +59,12 @@
   const videoEl = document.getElementById('cameraVideo');
   const imgEl = document.getElementById('cameraImg');
   const errEl = document.getElementById('cameraError');
+  const errMsgEl = document.getElementById('cameraErrorMsg');
   // How often the refreshing-snapshot mode pulls a new still, in milliseconds.
   const SNAPSHOT_INTERVAL_MS = 1500;
   let snapTimer = null;
   let snapOk = false;
+  let lastObjUrl = null;
 
   function _stopSnapshot() {
     if (snapTimer) { clearInterval(snapTimer); snapTimer = null; }
@@ -74,20 +76,41 @@
     errEl.classList.add('d-none');
   }
 
-  function _showError() {
+  function _showError(msg) {
     _hideAll();
+    if (errMsgEl) {
+      errMsgEl.textContent = msg || 'Camera unavailable. Check that the feed is reachable.';
+    }
     errEl.classList.remove('d-none');
   }
 
+  // Pull the snapshot through fetch (not a bare <img src>) so HTTP errors are
+  // visible: a 401/404/502 from the proxy is shown verbatim instead of a silent
+  // broken image, which makes a misconfigured feed diagnosable at a glance.
   function _startSnapshot(src) {
-    // Cache-bust each load so the browser fetches a fresh frame. The first load
-    // proves reachability; later failures keep the last good frame on screen.
     snapOk = false;
-    const tick = () => {
+    const tick = async () => {
       const sep = src.includes('?') ? '&' : '?';
-      imgEl.src = `${src}${sep}_=${Date.now()}`;
+      try {
+        const res = await fetch(`${src}${sep}_=${Date.now()}`, {cache: 'no-store'});
+        if (!res.ok) {
+          let detail = '';
+          try { detail = (await res.json()).detail || ''; } catch (e) { /* not json */ }
+          if (!snapOk) _showError(`Camera proxy returned HTTP ${res.status}${detail ? ': ' + detail : ''}.`);
+          return;
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        imgEl.src = url;
+        imgEl.classList.remove('d-none');
+        errEl.classList.add('d-none');
+        if (lastObjUrl) URL.revokeObjectURL(lastObjUrl);
+        lastObjUrl = url;
+        snapOk = true;
+      } catch (e) {
+        if (!snapOk) _showError(`Could not reach the camera proxy: ${e}`);
+      }
     };
-    imgEl.classList.remove('d-none');
     tick();
     snapTimer = setInterval(tick, SNAPSHOT_INTERVAL_MS);
   }
@@ -118,7 +141,7 @@
     } else if (snapshot) {
       _startSnapshot(snapshot);
     } else {
-      _showError();
+      _showError('This camera has no stream or snapshot URL.');
     }
 
     // Update the switcher active state.
@@ -127,14 +150,9 @@
     });
   }
 
-  imgEl.addEventListener('load', () => { snapOk = true; });
-  imgEl.addEventListener('error', () => {
-    // In refreshing-snapshot mode, only show the error panel if no frame has
-    // ever loaded; once a frame is up, a transient miss keeps the last one.
-    if (snapTimer && snapOk) return;
-    _showError();
-  });
-  videoEl.addEventListener('error', _showError);
+  // The direct-<img> modes (HLS poster / manual MJPEG) still report load errors.
+  imgEl.addEventListener('error', () => { if (!snapTimer) _showError(); });
+  videoEl.addEventListener('error', () => { if (!snapTimer) _showError(); });
 
   // Start on the first configured camera.
   if (CAMERAS.length) selectCamera(0);
