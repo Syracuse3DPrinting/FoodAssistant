@@ -27,11 +27,12 @@ a.btn {
 
 /* Non-essential controls that strand or distract on a touch kiosk: the API
  * (Swagger) link opens a tab the kiosk browser cannot close or return from, the
- * keyboard-shortcuts helper needs a physical keyboard, and the phone QR code,
- * Defaults, About, and AI Declarations are reference pages no one needs on a
- * wall-mounted screen. Settings stays visible so the device is still
- * configurable. Hidden only in kiosk mode, since this stylesheet loads only
- * when kioskMode is set. */
+ * keyboard-shortcuts helper needs a physical keyboard, and Defaults, About, and
+ * AI Declarations are reference pages no one needs on a wall-mounted screen.
+ * Settings stays visible so the device is still configurable, and the phone QR
+ * code stays too, since scanning it to open the UI on a phone is most useful
+ * precisely on a wall-mounted kiosk. Hidden only in kiosk mode, since this
+ * stylesheet loads only when kioskMode is set. */
 .kiosk-hide {
   display: none !important;
 }

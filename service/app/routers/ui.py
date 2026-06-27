@@ -291,6 +291,20 @@ async def camera_page(request: Request):
     })
 
 
+@router.get("/weather", response_class=HTMLResponse)
+async def weather_page(request: Request):
+    # Full-screen forecast for the kiosk. Opened by the Stream Deck weather and
+    # forecast keys, and reachable from the nav. Uses the same location/units the
+    # deck weather widget uses (streamdeck_weather_location/units); a blank
+    # location lets the forecast service auto-detect from the device IP.
+    return templates.TemplateResponse(request, "weather.html", {
+        "request": request,
+        "active": "weather",
+        "weather_location": settings.streamdeck_weather_location or "",
+        "weather_units": settings.streamdeck_weather_units or "f",
+    })
+
+
 @router.get("/about", response_class=HTMLResponse)
 async def about_page(request: Request):
     return templates.TemplateResponse(request, "about.html", {

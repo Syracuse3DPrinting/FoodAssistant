@@ -1500,11 +1500,12 @@ def test_weather_press_cycles_stat_via_context():
     async def noop():
         pass
 
+    opened = []
     ctx = actions.ActionContext(
         client=None,
         base_url="http://x",
         refresh=noop,
-        navigate=lambda _: noop(),
+        navigate=lambda p: (opened.append(p), noop())[1],
         cycle_brightness=lambda: 80,
         page_next=lambda: None,
         page_prev=lambda: None,
@@ -1512,12 +1513,15 @@ def test_weather_press_cycles_stat_via_context():
         forecast_cycle=lambda name: cycled.append(("forecast", name)),
     )
     msg = asyncio.run(actions.run_action(actions.ACTIONS["weather"], ctx))
-    assert msg == "weather stat cycled"
+    assert msg == "weather"
     assert cycled == [("weather", "weather")]
+    # A press also opens the full weather page on the attached kiosk display.
+    assert opened == ["ui/weather"]
 
 
 def test_forecast_press_cycles_day_via_context():
     cycled = []
+    opened = []
 
     async def noop():
         pass
@@ -1526,7 +1530,7 @@ def test_forecast_press_cycles_day_via_context():
         client=None,
         base_url="http://x",
         refresh=noop,
-        navigate=lambda _: noop(),
+        navigate=lambda p: (opened.append(p), noop())[1],
         cycle_brightness=lambda: 80,
         page_next=lambda: None,
         page_prev=lambda: None,
@@ -1534,8 +1538,9 @@ def test_forecast_press_cycles_day_via_context():
         forecast_cycle=lambda name: cycled.append(("forecast", name)),
     )
     msg = asyncio.run(actions.run_action(actions.ACTIONS["forecast"], ctx))
-    assert msg == "forecast day cycled"
+    assert msg == "forecast"
     assert cycled == [("forecast", "forecast")]
+    assert opened == ["ui/weather"]
 
 
 # -- HA entity -------------------------------------------------------------

@@ -73,6 +73,7 @@ GET_PAGES = [
     "/ui/convert",
     "/ui/timers",
     "/ui/camera",
+    "/ui/weather",
     "/setup",
 ]
 

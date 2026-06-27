@@ -1787,15 +1787,20 @@ async def run_action(spec: ActionSpec, ctx: ActionContext, long_press: bool = Fa
         return f"keypad {spec.keypad_key}"
 
     if spec.kind == "weather":
-        # A press cycles to the next stat (temp, feels-like, humidity, wind);
-        # the data itself is refreshed on its own timer, not on every tap.
+        # A press cycles to the next stat (temp, feels-like, humidity, wind) on
+        # the key face and also opens the full weather page on the attached kiosk
+        # display, so the deck doubles as a remote for the screen. The data itself
+        # is refreshed on its own timer, not on every tap.
         ctx.weather_cycle(spec.name)
-        return "weather stat cycled"
+        await ctx.navigate("ui/weather")
+        return "weather"
 
     if spec.kind == "forecast":
-        # A press advances to the next forecast day, wrapping around.
+        # A press advances to the next forecast day on the key face and opens the
+        # full weather page on the attached kiosk display.
         ctx.forecast_cycle(spec.name)
-        return "forecast day cycled"
+        await ctx.navigate("ui/weather")
+        return "forecast"
 
     if spec.kind == "ha_entity":
         entity_id = spec.ha_entity_id

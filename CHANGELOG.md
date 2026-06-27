@@ -29,7 +29,11 @@ All notable changes to FoodAssistant are recorded here. The format is based on
 - **Add a camera by IP.** The Cameras page can build a network camera's stream and snapshot URLs from its address, with brand templates for Generic MJPEG, Generic snapshot, Reolink, Amcrest/Dahua, Hikvision, and ONVIF, plus a Custom path. It fills a camera row you can review and edit before saving. RTSP-only cameras still need an MJPEG/HLS source or a transcoder, which the page notes.
 - **Choose which camera a Stream Deck key shows.** A new Camera override type in the per-key editor binds a key to a specific configured camera (by name) instead of always the first one, and an optional Full deck flag makes that key splash the chosen camera across the whole deck on press. Several camera keys can each show a different feed.
 
+### Added
+- **Weather page on the display.** Pressing a Stream Deck weather or forecast key now opens a full forecast page on the attached kiosk display (in addition to cycling the key face), so the deck doubles as a remote for the screen. The page is reachable at /ui/weather and uses the same location and units as the deck weather widget.
+
 ### Fixed
+- **Phone QR code stays in kiosk mode.** The QR code that opens the UI on a phone is no longer hidden in kiosk mode, where it is most useful (scan the wall-mounted screen to control it from your phone).
 - **Home Assistant and cameras now sync to a Pi Remote.** A satellite mirrors the main server's Home Assistant credentials and camera feeds, and its Settings show them read-only with a "configured on the main server" note (like the Stream Deck weather), so the values are visible and clearly server-managed instead of looking unset. Update the satellite (`sudo foodassistant-update`) so it pulls the new fields.
 - **Kiosk overflow menu was nearly empty.** In kiosk mode the three-dots More menu hid everything except Settings (the reference links are kiosk-hidden and the secondary-tab copies only appeared under 820px). The secondary destinations (Recipes, Cook, Current Recipe, Meal Plan, Camera) now show in that menu in kiosk mode at any width, so every page stays reachable from the kebab.
 
