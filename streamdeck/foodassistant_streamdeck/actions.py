@@ -1059,6 +1059,36 @@ def icon_for(name: str) -> str:
     return ACTION_ICONS.get(name, "")
 
 
+# Full-colour icon set: each action maps to a bundled colour emoji PNG (see
+# assets/emoji/<slug>.png, rendered from Noto Color Emoji). The render layer
+# composites these when the deck icon style is "color", instead of tinting the
+# monochrome Bootstrap glyph. Slugs that repeat (cart, house, refresh) reuse the
+# same icon. Keep in step with the files under assets/emoji/.
+ACTION_EMOJI: dict[str, str] = {
+    "expiring": "alarm", "pending": "hourglass", "commit": "outbox",
+    "add": "plus", "inventory": "package", "cook": "fire",
+    "recipes": "book", "mealplan": "calendar", "shopping": "cart",
+    "defaults": "clipboard", "brightness": "bright",
+    "page_next": "next", "page_prev": "prev",
+    "timer_1": "timer", "timer_2": "timer", "timer_3": "timer",
+    "weather": "weather", "forecast": "thermometer",
+    "ha_1": "house", "ha_2": "house", "ha_3": "house", "ha_4": "house", "ha_5": "house",
+    "pin": "lock", "clock": "clock", "shopping_count": "cart",
+    "ready": "check", "meal_today": "plate", "cooked": "cooking",
+    "timer_eggs": "egg", "timer_pasta": "pasta", "timer_rice": "rice",
+    "scale_half": "down", "scale_1x": "refresh", "scale_2x": "up",
+    "screen_off": "sleep", "screen_on": "sun", "health": "heart",
+    "convert": "abacus", "timers_view": "stopwatch",
+    "kiosk_restart": "refresh", "update": "inbox", "reboot": "plug",
+    "shopping_add": "cart", "macro": "bolt",
+}
+
+
+def emoji_for(name: str) -> str:
+    """Return the colour-emoji icon slug for an action, or "" if none."""
+    return ACTION_EMOJI.get(name, "")
+
+
 # Order used when no explicit key list is configured. The controller trims or
 # paginates this to fit the connected deck, so a longer list simply fills a 15
 # or 32 key deck with real actions and still paginates a 6 key Mini.

@@ -2440,3 +2440,55 @@ def test_mono_icon_color_keeps_text_fill():
     text_fill = (235, 235, 235)
     out = render._icon_fill("mono", "cook", (20, 20, 20), text_fill)
     assert out == text_fill
+
+
+# -- full-colour icon set + clean style (FoodAssistant: colour icons) --------
+
+
+def test_emoji_for_maps_actions_to_slugs():
+    assert actions.emoji_for("cook") == "fire"
+    assert actions.emoji_for("shopping_count") == "cart"
+    assert actions.emoji_for("nonexistent") == ""
+
+
+def test_bundled_colour_icons_exist():
+    # The slugs referenced by ACTION_EMOJI must have a bundled PNG.
+    slugs = set(actions.ACTION_EMOJI.values())
+    for slug in slugs:
+        assert render.emoji_available(slug), f"missing colour icon: {slug}"
+
+
+def test_color_icon_renders_without_crashing():
+    img = render.render_key(
+        96, 96, "Cook", "#7e22ce", icon="fire",
+        key_style="clean", icon_color="color",
+        action_name="cook", emoji=actions.emoji_for("cook"),
+    )
+    assert img.size == (96, 96)
+    assert img.mode == "RGB"
+
+
+def test_color_icon_falls_back_to_glyph_when_missing():
+    # An action with no colour icon still renders (mono glyph path), no crash.
+    img = render.render_key(
+        96, 96, "X", "#333333", icon="grid",
+        key_style="clean", icon_color="color", action_name="inventory", emoji="",
+    )
+    assert img.size == (96, 96)
+
+
+def test_clean_style_renders_and_mid_is_dark():
+    from foodassistant_streamdeck.render import _mid_color, _CLEAN_BG
+    assert _mid_color("clean", (200, 50, 50)) == _CLEAN_BG
+    img = render.render_key(96, 96, "Cook", "#7e22ce", icon="fire", key_style="clean")
+    assert img.size == (96, 96)
+
+
+def test_config_accepts_clean_and_color():
+    c = config.Config(key_style="clean", icon_color="color").validated()
+    assert c.key_style == "clean"
+    assert c.icon_color == "color"
+    # Unknown values still fall back to the defaults.
+    c2 = config.Config(key_style="neon", icon_color="rainbow").validated()
+    assert c2.key_style == "rich"
+    assert c2.icon_color == "full"

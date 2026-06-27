@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.6.46"
+APP_VERSION = "0.6.47"
 
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
@@ -217,8 +217,8 @@ SATELLITE_PULL_FIELDS = [
 # config.toml so the controller picks them up. "rich" is a subtle gradient,
 # "glass" a glassmorphism panel, "minimal" the flat legacy fill. icon_color
 # "full" tints glyphs with the action accent; "mono" keeps them monochrome.
-STREAMDECK_KEY_STYLES = ("rich", "minimal", "glass")
-STREAMDECK_ICON_COLORS = ("full", "mono")
+STREAMDECK_KEY_STYLES = ("rich", "minimal", "glass", "clean")
+STREAMDECK_ICON_COLORS = ("full", "mono", "color")
 
 # Settings that hold credentials. These are redacted from backups unless the
 # user explicitly opts in, and never rendered back into the setup page.

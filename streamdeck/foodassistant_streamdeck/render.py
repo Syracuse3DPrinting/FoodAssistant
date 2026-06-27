@@ -28,6 +28,32 @@ _ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 _ICON_FONT_PATH = _ASSETS_DIR / "bootstrap-icons.ttf"
 _ICON_MAP_PATH = _ASSETS_DIR / "bootstrap-icons.json"
 
+# Bundled full-colour icon set (colour emoji PNGs, one per slug). Used when the
+# deck icon style is "color". Missing files fall back to the monochrome glyph.
+_EMOJI_DIR = _ASSETS_DIR / "emoji"
+
+
+@lru_cache(maxsize=256)
+def _emoji_image(slug: str, size: int) -> "Image.Image | None":
+    """Load a bundled colour icon by slug, resized to fit a `size`x`size` box,
+    as an RGBA image. Returns None when the slug or file is missing."""
+    if not slug:
+        return None
+    path = _EMOJI_DIR / f"{slug}.png"
+    if not path.is_file():
+        return None
+    try:
+        icon = Image.open(path).convert("RGBA")
+    except OSError:
+        return None
+    icon.thumbnail((size, size), Image.LANCZOS)
+    return icon
+
+
+def emoji_available(slug: str) -> bool:
+    """True when a bundled colour icon exists for the slug."""
+    return bool(slug) and (_EMOJI_DIR / f"{slug}.png").is_file()
+
 # Fraction of key height used for the glyph when a key has both an icon and a
 # label stacked beneath it.
 _ICON_FRACTION = 0.42
@@ -238,6 +264,9 @@ def _mid_color(style: str, bg: tuple[int, int, int]) -> tuple[int, int, int]:
     if style == "glass":
         # The panel tint over a darkened base reads close to a light mix.
         return _mix(_darken(bg, 0.55), _lighten(bg, 0.25), 0.55)
+    if style == "clean":
+        # The face is a fixed dark colour, so contrast is judged against it.
+        return _CLEAN_BG
     return bg
 
 
@@ -342,6 +371,15 @@ def _styled_background(
     definition. "glass" is a glassmorphism inset panel. Always returns an opaque
     RGB image of exactly (width, height).
     """
+    if style == "clean":
+        # No coloured background: a uniform dark face with a faint accent border,
+        # so a full-colour icon stands out. The accent border keeps a hint of the
+        # action's colour without the heavy fill.
+        img = Image.new("RGB", (width, height), _CLEAN_BG)
+        ImageDraw.Draw(img).rectangle(
+            [0, 0, width - 1, height - 1], outline=_darken(bg, 0.15), width=2
+        )
+        return img
     if style == "glass":
         return _glass_panel((width, height), bg)
     if style == "rich":
@@ -357,6 +395,10 @@ def _styled_background(
     return Image.new("RGB", (width, height), bg)
 
 
+# The dark face colour used by the "clean" (no coloured background) style.
+_CLEAN_BG = (22, 24, 29)
+
+
 def render_key(
     width: int,
     height: int,
@@ -370,6 +412,7 @@ def render_key(
     key_style: str = "minimal",
     icon_color: str = "mono",
     action_name: str = "",
+    emoji: str = "",
 ) -> Image.Image:
     """Render one key.
 
@@ -402,7 +445,7 @@ def render_key(
     if count and alert:
         bg = tuple(min(255, int(c * 1.35) + 25) for c in bg)  # type: ignore[assignment]
 
-    style = key_style if key_style in ("minimal", "rich", "glass") else "minimal"
+    style = key_style if key_style in ("minimal", "rich", "glass", "clean") else "minimal"
     img = _styled_background(width, height, bg, style)
     draw = ImageDraw.Draw(img)
 
@@ -437,6 +480,26 @@ def render_key(
         )
         _draw_label(draw, label, label_px, width, height, label_y, max_label_width, text_fill)
         return img
+
+    # Full-colour icon set: composite a bundled colour emoji PNG when the deck
+    # icon style is "color" and one exists for this action. Falls through to the
+    # monochrome glyph below when there is no colour icon, so nothing goes blank.
+    if icon_color == "color":
+        icon_px = _font_px(height, _ICON_FRACTION, density=density, floor=18)
+        color_icon = _emoji_image(emoji, int(icon_px * 1.35))
+        if color_icon is not None:
+            cx = (width - color_icon.width) // 2
+            cy = int(height * 0.10)
+            base = img.convert("RGBA")
+            base.alpha_composite(color_icon, (cx, cy))
+            img = base.convert("RGB")
+            draw = ImageDraw.Draw(img)
+            label_px = _font_px(
+                height, _STATUS_LABEL_FRACTION, density=density, floor=_MIN_FONT_PX
+            )
+            label_y = height * 0.66
+            _draw_label(draw, label, label_px, width, height, label_y, max_label_width, text_fill)
+            return img
 
     glyph = _icon_char(icon)
     icon_font = _icon_font(_font_px(

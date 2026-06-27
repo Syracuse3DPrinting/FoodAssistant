@@ -1973,17 +1973,19 @@ docker compose up -d</code></pre>
                   <select class="form-select form-select-sm" id="streamdeck_key_style" style="max-width:200px">
                     <option value="rich"    {{ 'selected' if s.streamdeck_key_style == 'rich' else '' }}>Rich (gradient)</option>
                     <option value="glass"   {{ 'selected' if s.streamdeck_key_style == 'glass' else '' }}>Glass</option>
+                    <option value="clean"   {{ 'selected' if s.streamdeck_key_style == 'clean' else '' }}>Clean (no background)</option>
                     <option value="minimal" {{ 'selected' if s.streamdeck_key_style == 'minimal' else '' }}>Minimalist (flat)</option>
                   </select>
                 </div>
                 <div class="col-auto">
                   <label class="form-label" for="streamdeck_icon_color">Icons</label>
-                  <select class="form-select form-select-sm" id="streamdeck_icon_color" style="max-width:200px">
-                    <option value="full" {{ 'selected' if s.streamdeck_icon_color == 'full' else '' }}>Full colour</option>
-                    <option value="mono" {{ 'selected' if s.streamdeck_icon_color == 'mono' else '' }}>Monochrome</option>
+                  <select class="form-select form-select-sm" id="streamdeck_icon_color" style="max-width:220px">
+                    <option value="color" {{ 'selected' if s.streamdeck_icon_color == 'color' else '' }}>Full colour (emoji set)</option>
+                    <option value="full"  {{ 'selected' if s.streamdeck_icon_color == 'full' else '' }}>Tinted glyph</option>
+                    <option value="mono"  {{ 'selected' if s.streamdeck_icon_color == 'mono' else '' }}>Monochrome</option>
                   </select>
                 </div>
-                <div class="form-text">How the keys are drawn. Rich and Glass look fuller than the flat minimalist style; full-colour icons tint each glyph with its action colour.</div>
+                <div class="form-text">How the keys are drawn. Rich and Glass have depth; Clean drops the coloured background so the icons stand out. The full-colour icon set uses bundled colour artwork (best with Clean); Tinted recolours the line glyph, Monochrome leaves it plain.</div>
               </div>
 
               <div class="mb-3">

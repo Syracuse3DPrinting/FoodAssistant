@@ -397,6 +397,7 @@ class Controller:
                     key_style=self.config.key_style,
                     icon_color=self.config.icon_color,
                     action_name=spec.name,
+                    emoji=actions.emoji_for(spec.name),
                 )
             if rotation:
                 # PIL rotates counter-clockwise, so negate to turn the face

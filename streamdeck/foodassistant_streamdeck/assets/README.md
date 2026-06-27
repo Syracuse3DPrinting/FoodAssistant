@@ -14,6 +14,16 @@ deck that the web UI uses for each action (see `actions.ACTION_ICONS`).
 Both files are optional. If either is missing, `render.render_key` falls back
 to a text-only key, so the deck still works without the font binary present.
 
+## Full-colour icon set (`emoji/`)
+
+`emoji/<slug>.png` is a bundled set of full-colour icons composited onto key
+faces when the deck icon style is "color" (see `actions.ACTION_EMOJI`). Each PNG
+is a 96px transparent-background colour icon. They were rendered once from the
+Noto Color Emoji font via Pillow's `embedded_color` and cropped, so the deck
+needs no colour-emoji font at runtime. A missing slug falls back to the
+monochrome glyph. Noto Color Emoji is licensed under the Apache License 2.0
+(Google), which permits redistributing its rendered output.
+
 ## Source and version
 
 - Bootstrap Icons v1.13.1 (matches the vendored web CSS at

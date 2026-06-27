@@ -27,12 +27,17 @@ ALLOWED_ROTATIONS: tuple[int, ...] = (0, 90, 180, 270)
 # Key face rendering style. "rich" (the default) draws a subtle vertical
 # gradient with an inner border; "glass" draws a glassmorphism panel; "minimal"
 # keeps the old flat fill.
-ALLOWED_KEY_STYLES: tuple[str, ...] = ("rich", "minimal", "glass")
+# Key face rendering style. "rich" (the default) draws a subtle vertical
+# gradient with an inner border; "glass" draws a glassmorphism panel; "minimal"
+# keeps the old flat fill; "clean" draws no coloured background (a dark face with
+# a faint accent border) so a full-colour icon stands out.
+ALLOWED_KEY_STYLES: tuple[str, ...] = ("rich", "minimal", "glass", "clean")
 DEFAULT_KEY_STYLE = "rich"
 
-# Glyph colouring. "full" tints the icon in the action's vivid accent colour;
-# "mono" keeps the luminance-adapted text colour.
-ALLOWED_ICON_COLORS: tuple[str, ...] = ("full", "mono")
+# Glyph colouring. "full" tints the monochrome glyph in the action's vivid
+# accent; "mono" keeps the luminance-adapted text colour; "color" composites a
+# bundled full-colour icon (assets/emoji), best paired with the "clean" style.
+ALLOWED_ICON_COLORS: tuple[str, ...] = ("full", "mono", "color")
 DEFAULT_ICON_COLOR = "full"
 
 
