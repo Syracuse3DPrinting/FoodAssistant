@@ -737,6 +737,30 @@ def test_density_factor_clamped_and_inverse():
     assert render._density_factor(96, 96) == 1.0
 
 
+def test_weather_forecast_use_smaller_icon_fraction():
+    # Weather and forecast faces shrink the glyph so the temperature text reads;
+    # every other kind keeps the standard size.
+    standard = render.icon_fraction_for("status")
+    assert render.icon_fraction_for("weather") < standard
+    assert render.icon_fraction_for("forecast") < standard
+    assert render.icon_fraction_for("status") == render._ICON_FRACTION
+
+
+def test_weather_face_renders_with_small_icon():
+    # A weather face (icon + multi-line temperature label) renders without raising
+    # when handed the reduced glyph fraction.
+    img = render.render_key(
+        96,
+        96,
+        label="72F\nClear",
+        color="#1d4ed8",
+        icon="cloud-sun",
+        icon_fraction=render.icon_fraction_for("weather"),
+    )
+    assert img.size == (96, 96)
+    assert img.mode == "RGB"
+
+
 # -- action -> icon mapping ------------------------------------------------
 
 

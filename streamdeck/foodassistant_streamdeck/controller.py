@@ -422,6 +422,7 @@ class Controller:
                     icon_color=self.config.icon_color,
                     action_name=spec.name,
                     emoji=actions.emoji_for(spec.name),
+                    icon_fraction=render.icon_fraction_for(spec.kind),
                 )
                 # A camera key paints the latest snapshot over the fallback face
                 # when a frame is cached for its chosen camera; if decoding fails

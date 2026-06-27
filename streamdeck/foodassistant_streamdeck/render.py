@@ -59,6 +59,23 @@ def emoji_available(slug: str) -> bool:
 # label stacked beneath it.
 _ICON_FRACTION = 0.42
 
+# Weather and forecast faces show multi-line temperature text (the current temp,
+# or a high/low pair) that needs the room, so their glyph is drawn small to stay
+# out of the way of the numbers (FoodAssistant-bf7a).
+_WIDGET_ICON_FRACTION = 0.22
+
+# Action kinds whose face is dominated by temperature text rather than a glyph.
+_SMALL_ICON_KINDS = frozenset({"weather", "forecast"})
+
+
+def icon_fraction_for(kind: str) -> float:
+    """Glyph height fraction for an action kind.
+
+    Weather and forecast faces use a reduced glyph so the temperature text stays
+    legible; every other kind keeps the standard size.
+    """
+    return _WIDGET_ICON_FRACTION if kind in _SMALL_ICON_KINDS else _ICON_FRACTION
+
 # Per-model pixel density (FoodAssistant-pjk).
 #
 # Decks differ in how many pixels a key occupies (Mini/Original roughly 72-80px,
@@ -414,6 +431,7 @@ def render_key(
     icon_color: str = "mono",
     action_name: str = "",
     emoji: str = "",
+    icon_fraction: float = _ICON_FRACTION,
 ) -> Image.Image:
     """Render one key.
 
@@ -441,6 +459,10 @@ def render_key(
     "full" (the action's vivid accent, guarded for legibility). ``action_name``
     feeds the full-colour accent lookup; it is optional so positional callers
     keep working.
+
+    ``icon_fraction`` is the glyph height as a fraction of the key, defaulting to
+    the standard size. Weather and forecast faces pass a smaller value (see
+    ``icon_fraction_for``) so the temperature text stays legible.
     """
     bg = _hex_to_rgb(color)
     if count and alert:
@@ -486,7 +508,7 @@ def render_key(
     # icon style is "color" and one exists for this action. Falls through to the
     # monochrome glyph below when there is no colour icon, so nothing goes blank.
     if icon_color == "color":
-        icon_px = _font_px(height, _ICON_FRACTION, density=density, floor=18)
+        icon_px = _font_px(height, icon_fraction, density=density, floor=18)
         color_icon = _emoji_image(emoji, int(icon_px * 1.35))
         if color_icon is not None:
             cx = (width - color_icon.width) // 2
@@ -504,7 +526,7 @@ def render_key(
 
     glyph = _icon_char(icon)
     icon_font = _icon_font(_font_px(
-        height, _ICON_FRACTION, density=density, floor=18
+        height, icon_fraction, density=density, floor=18
     )) if glyph else None
 
     if glyph and icon_font is not None:

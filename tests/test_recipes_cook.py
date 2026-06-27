@@ -68,6 +68,19 @@ def test_recipes_page_has_cook_external(client):
     assert "saveExternal(" in page
 
 
+def test_recipes_page_has_cook_mealie(client):
+    page = client.get("/ui/recipes").text
+    # Own (Mealie) recipe rows are the default "My recipes" view, so each row
+    # must carry a Cook button that sets it as the Current Recipe by slug.
+    assert "function setCurrentFromMealie(" in page
+    assert "setCurrentFromMealie('${r.slug}', this)" in page
+    # It reuses the same set-active endpoint and redirect as the Cook page.
+    assert "current-recipe/from-mealie" in page
+    assert "ui/current-recipe" in page
+    # The Cook label/flame is present on the row, not just in the modal.
+    assert "bi-fire me-1\"></i>Cook" in page
+
+
 def test_recipes_preview_modal_has_cook(client):
     page = client.get("/ui/recipes").text
     # The external preview modal gains a Cook button wired to cookFromPreview.
