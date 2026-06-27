@@ -28,6 +28,7 @@ from .actions import (
     ActionContext,
     ActionSpec,
     HaEntityState,
+    HealthState,
     PinBuffer,
     TimerState,
     WeatherState,
@@ -110,6 +111,9 @@ class Controller:
         self.weather: WeatherState = WeatherState(
             location=config.weather_location, units=config.weather_units
         )
+        # Host-bridge system health shown on a health key. Refreshed on the
+        # status poll; neutral grey until first fetched (and when off-Pi).
+        self.health: HealthState = HealthState()
         # Build per-slot HA entity state and override the static ActionSpec
         # placeholders (ha_1..ha_5) with slot config from config.toml.
         self.ha_entities: dict[str, HaEntityState] = {}
@@ -356,6 +360,13 @@ class Controller:
                     # field is unknown.
                     label = self._info_label(spec)
                     color = base_color
+                    alert = False
+                    count = None
+                elif spec.kind == "health":
+                    # The health key's colour tracks the polled bridge state:
+                    # green when clear, amber on warnings, grey when unreachable.
+                    label = self.health.label(spec.label)
+                    color = self.health.color(base_color)
                     alert = False
                     count = None
                 elif spec.kind in ("shopping_add", "macro"):
@@ -637,6 +648,20 @@ class Controller:
             self.meal_today = label
             self._draw_page()
 
+    async def _refresh_health(self) -> None:
+        """Refresh the host-bridge health summary for any health key.
+
+        Best-effort and only when a health key is actually shown, so a deck
+        without one never polls the bridge. An unreachable bridge degrades to
+        the neutral grey state rather than disturbing the status poll."""
+        if not self._has_kind("health"):
+            return
+        before = (self.health.label("Health"), self.health.color("#000"))
+        await self.health.refresh(getattr(self.config, "host_bridge_url", ""))
+        after = (self.health.label("Health"), self.health.color("#000"))
+        if after != before:
+            self._draw_page()
+
     def _timer_default_label(self, name: str) -> str:
         """The stock label a timer key shows with no recipe suggestion."""
         spec = actions.ACTIONS.get(name)
@@ -712,6 +737,7 @@ class Controller:
             forecast_cycle=self._forecast_cycle,
             ha_base_url=self.config.ha_base_url,
             ha_token=self.config.ha_token,
+            host_bridge_url=getattr(self.config, "host_bridge_url", ""),
             ha_entity_refresh=self._refresh_ha_entities,
             keypad_enter=self._enter_keypad,
             keypad_press=self._keypad_press,
@@ -971,6 +997,9 @@ class Controller:
         # Refresh today's planned meal for any meal_today info key, on the same
         # cadence. Skipped when no such key is shown so the poll stays cheap.
         await self._refresh_meal_today()
+        # Refresh host-bridge health for any health key, same cadence. Skipped
+        # when no such key is shown so the poll stays cheap and off-Pi safe.
+        await self._refresh_health()
 
     def _tick_timers(self) -> bool:
         """Advance all active timers. Returns True if any expired this tick."""

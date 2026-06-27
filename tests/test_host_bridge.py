@@ -472,6 +472,16 @@ def test_display_power_commands_empty_when_no_tools():
     assert bridge._display_power_commands(True, which=lambda n: False) == []
 
 
+def test_reboot_command_prefers_systemctl():
+    cmd = bridge._reboot_command(which=lambda n: n == "systemctl")
+    assert cmd == ["systemctl", "reboot"]
+
+
+def test_reboot_command_falls_back_to_reboot():
+    cmd = bridge._reboot_command(which=lambda n: False)
+    assert cmd == ["reboot"]
+
+
 def test_persist_idle_minutes_roundtrip(tmp_path):
     p = tmp_path / "display-idle"
     assert bridge._write_persisted_idle_minutes(15, path=str(p)) is True

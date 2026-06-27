@@ -31,6 +31,7 @@ POST /streamdeck/install   provision the Stream Deck service (attached later)
 GET  /ap/status            whether the fallback AP is active {active: bool}
 POST /ap/disable           stop hostapd+dnsmasq and remove the AP flag file
 POST /update               git pull + redeploy app and Stream Deck + restart (Pi Remote OTA)
+POST /reboot               reboot the host (systemctl reboot, or reboot as fallback)
 POST /restore              full-stack snapshot restore (stop stack, swap data, restart)  {source}
 GET  /activity             shared activity/display state (polled by the deck)
 POST /activity             report user activity; wakes the display  {source?}
@@ -140,6 +141,18 @@ def _display_power_commands(on, which=shutil.which):
     if which("xset"):
         cmds.append(["xset", "dpms", "force", "on" if on else "off"])
     return cmds
+
+
+def _reboot_command(which=shutil.which):
+    """The command vector used to reboot the host.
+
+    Prefers `systemctl reboot`; falls back to a bare `reboot` when systemctl is
+    not on PATH. Kept pure (the tool probe is injected) so it is unit-testable
+    without actually rebooting, mirroring _display_power_commands.
+    """
+    if which("systemctl"):
+        return ["systemctl", "reboot"]
+    return ["reboot"]
 
 
 def _should_blank(now, last_activity, idle_minutes, already_blanked):
@@ -779,6 +792,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._ap_disable()
         elif self.path == "/update":
             self._update()
+        elif self.path == "/reboot":
+            self._reboot()
         elif self.path == "/restore":
             self._restore()
         elif self.path == "/activity":
@@ -1329,6 +1344,18 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._send(200 if result.get("ok") else 500, result)
         except subprocess.TimeoutExpired:
             self._send(500, {"ok": False, "error": "update timed out"})
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _reboot(self):
+        # Reboot the host. The bridge runs as root, so it can call systemctl
+        # directly (the app service cannot: its caps are bound to
+        # CAP_NET_BIND_SERVICE). We answer before the reboot takes effect; the
+        # caller treats a dropped connection as success.
+        cmd = _reboot_command()
+        try:
+            subprocess.Popen(cmd)
+            self._send(200, {"ok": True, "rebooting": True})
         except Exception as e:
             self._send(500, {"ok": False, "error": str(e)})
 

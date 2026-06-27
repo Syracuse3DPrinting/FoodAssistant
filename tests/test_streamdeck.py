@@ -176,6 +176,129 @@ def test_new_kinds_grouped_in_catalog():
     assert cat["meal_today"]["group"] == "Info"
 
 
+# -- deck-filler actions (FoodAssistant-t02x) ------------------------------
+
+
+def test_filler_actions_resolve_and_have_icons():
+    for name in (
+        "scale_half", "scale_1x", "scale_2x", "screen_off", "screen_on",
+        "health", "convert", "timers_view", "kiosk_restart", "update", "reboot",
+    ):
+        spec = actions.resolve(name)
+        assert spec is not None, f"{name} does not resolve"
+        assert actions.icon_for(name), f"{name} has no icon mapping"
+        assert spec.icon == actions.ACTION_ICONS[name]
+
+
+def test_recipe_scale_specs_carry_the_right_factor():
+    assert actions.ACTIONS["scale_half"].scale_factor == 0.5
+    assert actions.ACTIONS["scale_1x"].scale_factor == 1.0
+    assert actions.ACTIONS["scale_2x"].scale_factor == 2.0
+    for name in ("scale_half", "scale_1x", "scale_2x"):
+        assert actions.ACTIONS[name].kind == "recipe_scale"
+
+
+def test_display_power_specs_carry_power_flag():
+    assert actions.ACTIONS["screen_off"].kind == "display_power"
+    assert actions.ACTIONS["screen_off"].power_on is False
+    assert actions.ACTIONS["screen_on"].kind == "display_power"
+    assert actions.ACTIONS["screen_on"].power_on is True
+
+
+def test_bridge_action_specs_carry_path():
+    assert actions.ACTIONS["kiosk_restart"].kind == "bridge_action"
+    assert actions.ACTIONS["kiosk_restart"].bridge_path == "/kiosk/restart"
+    assert actions.ACTIONS["update"].bridge_path == "/update"
+    assert actions.ACTIONS["reboot"].bridge_path == "/reboot"
+
+
+def test_nav_filler_specs_carry_target_path():
+    convert = actions.ACTIONS["convert"]
+    assert convert.kind == "nav" and convert.target_path == "ui/convert"
+    timers_view = actions.ACTIONS["timers_view"]
+    assert timers_view.kind == "nav" and timers_view.target_path == "ui/timers"
+
+
+def test_filler_kinds_grouped_in_catalog():
+    cat = {a["name"]: a for a in actions.catalog()}
+    assert cat["scale_half"]["group"] == "Recipe"
+    assert cat["screen_off"]["group"] == "System"
+    assert cat["health"]["group"] == "System"
+    assert cat["update"]["group"] == "System"
+    assert cat["convert"]["group"] == "Navigation"
+
+
+def test_recipe_scale_run_action_posts_factor():
+    client = _FakeClient(
+        post_map={"/current-recipe/scale": _Resp(200, {"ok": True})}
+    )
+    ctx, _ = _ctx(client)
+    msg = asyncio.run(actions.run_action(actions.ACTIONS["scale_half"], ctx))
+    assert msg == "0.5x"
+    assert ("POST", "http://x/current-recipe/scale") in client.calls
+
+
+def test_recipe_scale_run_action_no_recipe_surfaces_face():
+    # The scale endpoint 404s when no recipe is active; the press must surface a
+    # short message and never crash.
+    client = _FakeClient()  # everything 404s
+    ctx, _ = _ctx(client)
+    msg = asyncio.run(actions.run_action(actions.ACTIONS["scale_1x"], ctx))
+    assert msg == "No recipe"
+
+
+def test_display_power_run_action_posts_to_bridge():
+    client = _FakeClient(post_map={"/display/blank": _Resp(200, {"ok": True})})
+    ctx, _ = _ctx(client)
+    ctx.host_bridge_url = "http://bridge:9299"
+    msg = asyncio.run(actions.run_action(actions.ACTIONS["screen_off"], ctx))
+    assert msg == "Off"
+    assert ("POST", "http://bridge:9299/display/blank") in client.calls
+
+
+def test_display_power_wake_posts_wake_path():
+    client = _FakeClient(post_map={"/display/wake": _Resp(200, {"ok": True})})
+    ctx, _ = _ctx(client)
+    ctx.host_bridge_url = "http://bridge:9299"
+    msg = asyncio.run(actions.run_action(actions.ACTIONS["screen_on"], ctx))
+    assert msg == "On"
+    assert ("POST", "http://bridge:9299/display/wake") in client.calls
+
+
+def test_bridge_action_run_action_posts_to_expected_path():
+    client = _FakeClient(post_map={"/kiosk/restart": _Resp(200, {"ok": True})})
+    ctx, _ = _ctx(client)
+    ctx.host_bridge_url = "http://bridge:9299"
+    msg = asyncio.run(actions.run_action(actions.ACTIONS["kiosk_restart"], ctx))
+    assert msg == "OK"
+    assert ("POST", "http://bridge:9299/kiosk/restart") in client.calls
+
+
+def test_bridge_action_without_bridge_is_safe():
+    # Off-Pi: no host_bridge_url, so the press is a no-op face, never a crash.
+    ctx, _ = _ctx(_FakeClient())
+    msg = asyncio.run(actions.run_action(actions.ACTIONS["reboot"], ctx))
+    assert msg == "No bridge"
+
+
+def test_health_state_color_and_label_by_warnings():
+    h = actions.HealthState()
+    # Before any poll: neutral grey, base label.
+    assert h.color("#000") == actions._HEALTH_COLOR_UNKNOWN
+    assert h.label("Health") == "Health"
+    # Reachable, no warnings: green and OK.
+    h.apply(reachable=True, warnings=0)
+    assert h.color("#000") == actions._HEALTH_COLOR_OK
+    assert h.label("Health") == "OK"
+    # Reachable with warnings: amber and a count.
+    h.apply(reachable=True, warnings=2)
+    assert h.color("#000") == actions._HEALTH_COLOR_WARN
+    assert "2" in h.label("Health")
+    # Unreachable: back to neutral grey.
+    h.apply(reachable=False, warnings=0)
+    assert h.color("#000") == actions._HEALTH_COLOR_UNKNOWN
+
+
 # -- clock label (pure) ----------------------------------------------------
 
 

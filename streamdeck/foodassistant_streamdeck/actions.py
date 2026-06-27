@@ -647,6 +647,12 @@ class ActionSpec:
     macro_actions: tuple = ()  # for kind=="macro" overrides: ordered action names
                              # to run in sequence. A tuple keeps the frozen
                              # dataclass hashable.
+    scale_factor: float = 0.0  # for kind=="recipe_scale": the factor (0.5/1.0/2.0)
+                             # POSTed to /current-recipe/scale on press.
+    power_on: bool = False   # for kind=="display_power": True wakes the display,
+                             # False blanks it (via the host bridge).
+    bridge_path: str = ""    # for kind=="bridge_action": host-bridge path to POST
+                             # on press (e.g. "/kiosk/restart").
 
 
 # Single source of truth for key iconography. Each action maps to the same
@@ -696,6 +702,17 @@ ACTION_ICONS: dict[str, str] = {
     "timer_eggs": "egg-fried",
     "timer_pasta": "stopwatch",
     "timer_rice": "stopwatch",
+    "scale_half": "arrows-angle-contract",
+    "scale_1x": "arrow-repeat",
+    "scale_2x": "arrows-angle-expand",
+    "screen_off": "lightbulb-off",
+    "screen_on": "lightbulb",
+    "health": "heart-pulse",
+    "convert": "calculator",
+    "timers_view": "clock-history",
+    "kiosk_restart": "arrow-clockwise",
+    "update": "cloud-arrow-down",
+    "reboot": "power",
 }
 
 
@@ -931,6 +948,100 @@ ACTIONS: dict[str, ActionSpec] = {
         timer_minutes=18,
         description="Preset 18-minute rice timer.",
     ),
+    "scale_half": ActionSpec(
+        name="scale_half",
+        label="0.5x",
+        color="#9333ea",
+        kind="recipe_scale",
+        scale_factor=0.5,
+        description="Halve the active Current Recipe's serving scale. "
+        "No-op when no recipe is active.",
+    ),
+    "scale_1x": ActionSpec(
+        name="scale_1x",
+        label="1x",
+        color="#9333ea",
+        kind="recipe_scale",
+        scale_factor=1.0,
+        description="Reset the active Current Recipe to its original scale. "
+        "No-op when no recipe is active.",
+    ),
+    "scale_2x": ActionSpec(
+        name="scale_2x",
+        label="2x",
+        color="#9333ea",
+        kind="recipe_scale",
+        scale_factor=2.0,
+        description="Double the active Current Recipe's serving scale. "
+        "No-op when no recipe is active.",
+    ),
+    "screen_off": ActionSpec(
+        name="screen_off",
+        label="Screen\nOff",
+        color="#334155",
+        kind="display_power",
+        power_on=False,
+        description="Blank the kiosk display now (via the host bridge).",
+    ),
+    "screen_on": ActionSpec(
+        name="screen_on",
+        label="Screen\nOn",
+        color="#475569",
+        kind="display_power",
+        power_on=True,
+        description="Wake the kiosk display now (via the host bridge).",
+    ),
+    "health": ActionSpec(
+        name="health",
+        label="Health",
+        color="#15803d",
+        kind="health",
+        target_path="setup",
+        description="Pi power/thermal/disk health from the host bridge. Green "
+        "when clear, amber when warnings are present. Press to open Setup.",
+    ),
+    "convert": ActionSpec(
+        name="convert",
+        label="Convert",
+        color="#0f766e",
+        kind="nav",
+        target_path="ui/convert",
+        description="Open the unit-conversion page on the attached display.",
+    ),
+    "timers_view": ActionSpec(
+        name="timers_view",
+        label="Timers",
+        color="#0d9488",
+        kind="nav",
+        target_path="ui/timers",
+        description="Open the shared timers page on the attached display.",
+    ),
+    "kiosk_restart": ActionSpec(
+        name="kiosk_restart",
+        label="Kiosk",
+        color="#b45309",
+        kind="bridge_action",
+        bridge_path="/kiosk/restart",
+        description="Restart the kiosk browser (via the host bridge).",
+    ),
+    "update": ActionSpec(
+        name="update",
+        label="Update",
+        color="#1d4ed8",
+        kind="bridge_action",
+        bridge_path="/update",
+        description="Pull and redeploy the latest app + Stream Deck (host bridge "
+        "OTA). Best-effort: the request is fired and the deck does not block.",
+    ),
+    "reboot": ActionSpec(
+        name="reboot",
+        label="Reboot",
+        color="#b91c1c",
+        kind="bridge_action",
+        bridge_path="/reboot",
+        description="Reboot the host (via the host bridge). Best-effort: the "
+        "request is fired and the deck does not block.",
+    ),
 }
 
 # Stamp each spec with its glyph from the single-source-of-truth map above, so
@@ -978,9 +1089,13 @@ DEFAULT_ORDER: list[str] = [
     "timer_eggs",
     "timer_pasta",
     "timer_rice",
+    "timers_view",
+    "convert",
     "clock",
     "weather",
     "forecast",
+    "health",
+    "screen_off",
     "brightness",
 ]
 
@@ -990,6 +1105,8 @@ _GROUP_BY_KIND = {
     "system": "System", "timer": "Timers", "weather": "Weather",
     "forecast": "Weather", "ha_entity": "Home Assistant",
     "clock": "Info", "info": "Info",
+    "recipe_scale": "Recipe", "display_power": "System",
+    "health": "System", "bridge_action": "System",
 }
 
 
@@ -1376,6 +1493,111 @@ async def start_recipe_timer(
         return False
 
 
+async def scale_current_recipe(client: Any, base_url: str, factor: float) -> str:
+    """Scale the active Current Recipe by ``factor``. Returns a short face.
+
+    Posts the factor to /current-recipe/scale. Returns a brief confirmation
+    ("0.5x") on success, "No recipe" when nothing is active (the endpoint 404s),
+    and "Failed" on any other error, so a press always degrades to a readable
+    face rather than crashing the controller.
+    """
+    base = base_url.rstrip("/")
+    try:
+        r = await client.post(f"{base}/current-recipe/scale", json={"factor": factor})
+    except Exception:  # noqa: BLE001 - never crash a press
+        return "Failed"
+    if r.status_code == 404:
+        return "No recipe"
+    if r.status_code == 200:
+        # Render the factor compactly: "0.5x", "1x", "2x".
+        text = f"{factor:g}"
+        return f"{text}x"
+    return "Failed"
+
+
+async def bridge_post(client: Any, host_bridge_url: str, path: str,
+                      timeout: float = 0.0) -> str:
+    """POST to a host-bridge path, best-effort. Returns a short face.
+
+    ``host_bridge_url`` is the bridge base (empty off-Pi, so the call is a
+    no-op returning "No bridge"). A short ``timeout`` lets slow operations
+    (reboot, update) fire without blocking the deck: a read timeout is treated
+    as a successful "Sent" rather than a failure, since the request reached the
+    bridge even if the reply never comes. Other errors return "Failed".
+    """
+    base = (host_bridge_url or "").rstrip("/")
+    if not base:
+        return "No bridge"
+    kwargs: dict[str, Any] = {"json": {}}
+    if timeout:
+        kwargs["timeout"] = timeout
+    try:
+        r = await client.post(f"{base}{path}", **kwargs)
+        return "OK" if r.status_code == 200 else "Failed"
+    except Exception:  # noqa: BLE001
+        # A timeout on a slow op (reboot/update) means the request reached the
+        # bridge; treat it as sent rather than a hard failure.
+        if timeout:
+            return "Sent"
+        return "Failed"
+
+
+_HEALTH_COLOR_OK = "#15803d"
+_HEALTH_COLOR_WARN = "#b45309"
+_HEALTH_COLOR_UNKNOWN = "#6b7280"
+
+
+class HealthState:
+    """Caches the host bridge's system-health summary for the health key.
+
+    Refreshed from GET {host_bridge_url}/system/health on the status loop. The
+    key is green when the bridge reports ok with no warnings, amber when any
+    warning is present, and a neutral grey when the bridge is unreachable (off-Pi
+    or not yet up), so the key is never misleading and never crashes the loop.
+    """
+
+    def __init__(self) -> None:
+        self._fetched_at: float = 0.0
+        self._reachable: bool = False
+        self._warnings: int = 0
+
+    def age_seconds(self) -> float:
+        return time.monotonic() - self._fetched_at
+
+    def label(self, base_label: str) -> str:
+        if not self._fetched_at or not self._reachable:
+            return base_label
+        return "OK" if self._warnings == 0 else f"Warn {self._warnings}"
+
+    def color(self, base_color: str) -> str:
+        if not self._fetched_at or not self._reachable:
+            return _HEALTH_COLOR_UNKNOWN
+        return _HEALTH_COLOR_OK if self._warnings == 0 else _HEALTH_COLOR_WARN
+
+    def apply(self, reachable: bool, warnings: int) -> None:
+        """Record a poll result. Pure setter so the colour/label logic is testable."""
+        self._reachable = bool(reachable)
+        self._warnings = max(0, int(warnings))
+        self._fetched_at = time.monotonic()
+
+    async def refresh(self, host_bridge_url: str) -> None:
+        base = (host_bridge_url or "").rstrip("/")
+        if not base:
+            self.apply(False, 0)
+            return
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                r = await client.get(f"{base}/system/health")
+            if r.status_code == 200:
+                warnings = (r.json() or {}).get("warnings") or []
+                self.apply(True, len(warnings))
+            else:
+                self.apply(False, 0)
+        except Exception:  # noqa: BLE001 - unreachable -> neutral, never crash
+            self.apply(False, 0)
+
+
 @dataclass
 class ActionContext:
     """Effects the controller exposes to action handlers."""
@@ -1398,6 +1620,9 @@ class ActionContext:
     forecast_cycle: Callable[[str], None] = field(default=lambda _name: None)
     ha_base_url: str = ""
     ha_token: str = ""
+    # Base URL of the host bridge (empty off-Pi). Bridge actions POST here via
+    # ctx.client; display_power, health, and bridge_action keys all use it.
+    host_bridge_url: str = ""
     ha_entity_refresh: Callable[[], Awaitable[None]] = field(
         default=lambda: __import__("asyncio").sleep(0)
     )
@@ -1512,6 +1737,35 @@ async def run_action(spec: ActionSpec, ctx: ActionContext, long_press: bool = Fa
             return f"{entity_id} -> {service} ({r.status_code})"
         except Exception as e:  # noqa: BLE001
             return f"ha error: {e}"
+
+    if spec.kind == "recipe_scale":
+        # Scale the active Current Recipe by the spec's factor. Defensive: no
+        # active recipe 404s, surfaced as a short face, never a crash.
+        return await scale_current_recipe(ctx.client, base, spec.scale_factor)
+
+    if spec.kind == "display_power":
+        # Wake or blank the kiosk display via the host bridge.
+        path = "/display/wake" if spec.power_on else "/display/blank"
+        face = await bridge_post(ctx.client, ctx.host_bridge_url, path)
+        if face in ("OK", "Sent"):
+            return "On" if spec.power_on else "Off"
+        return face
+
+    if spec.kind == "health":
+        # The health key's live state comes from the poll loop; a press just
+        # deep-links to Setup so the user can read the detail.
+        opened = await ctx.navigate(spec.target_path) if spec.target_path else False
+        return "opened" if opened else "no display"
+
+    if spec.kind == "bridge_action":
+        # One dispatch for kiosk_restart / update / reboot. Update and reboot are
+        # slow, so fire them with a short client timeout and return immediately
+        # rather than blocking the deck (a timeout is treated as "Sent").
+        slow = spec.bridge_path in ("/update", "/reboot")
+        timeout = 2.0 if slow else 0.0
+        return await bridge_post(
+            ctx.client, ctx.host_bridge_url, spec.bridge_path, timeout=timeout
+        )
 
     if spec.kind == "shopping_add":
         face = await add_shopping_item(ctx.client, base, spec.item)
