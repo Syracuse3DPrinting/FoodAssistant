@@ -7,6 +7,7 @@ import so it can be exercised in tests.
 """
 from __future__ import annotations
 
+import io
 import json
 from functools import lru_cache
 from pathlib import Path
@@ -567,6 +568,129 @@ def _draw_label(
         lw = _text_width(draw, line, font)
         draw.text(((width - lw) / 2, y), line, font=font, fill=fill)
         y += line_h
+
+
+# -- camera snapshot helpers (pure, unit-testable) -------------------------
+#
+# These turn a JPEG snapshot (a single key face) or one source image (the
+# full-deck overlay) into deck-ready RGB tiles. They never touch the hardware,
+# so the controller can fetch bytes and hand them straight in.
+
+
+def _center_crop_to_aspect(image: "Image.Image", target_w: int, target_h: int) -> "Image.Image":
+    """Center-crop ``image`` to the aspect ratio of ``target_w`` x ``target_h``.
+
+    Returns a crop of the source (no resize) whose width/height ratio matches the
+    target. A degenerate target (zero side) returns the image unchanged.
+    """
+    src_w, src_h = image.size
+    if target_w <= 0 or target_h <= 0 or src_w <= 0 or src_h <= 0:
+        return image
+    # Compare aspect ratios with cross-multiplication to avoid float drift.
+    if src_w * target_h > target_w * src_h:
+        # Source is wider than the target: trim the sides.
+        new_w = max(1, round(src_h * target_w / target_h))
+        left = (src_w - new_w) // 2
+        return image.crop((left, 0, left + new_w, src_h))
+    # Source is taller than the target: trim the top and bottom.
+    new_h = max(1, round(src_w * target_h / target_w))
+    top = (src_h - new_h) // 2
+    return image.crop((0, top, src_w, top + new_h))
+
+
+def image_from_jpeg(data: bytes, size: tuple[int, int]) -> "Image.Image | None":
+    """Decode JPEG ``data`` into an RGB image cropped and resized to ``size``.
+
+    Center-crops the decoded frame to the target aspect, then resizes to exactly
+    ``size`` (width, height). Returns None when the bytes are missing or cannot be
+    decoded, so a draw loop can fall back to a normal key face rather than crash.
+    """
+    if not data:
+        return None
+    width, height = size
+    if width <= 0 or height <= 0:
+        return None
+    try:
+        with Image.open(io.BytesIO(data)) as src:
+            src.load()
+            image = src.convert("RGB")
+    except (OSError, ValueError):
+        return None
+    cropped = _center_crop_to_aspect(image, width, height)
+    return cropped.resize((width, height), Image.LANCZOS)
+
+
+def slice_full_image(
+    image: "Image.Image",
+    rows: int,
+    cols: int,
+    key_size: tuple[int, int],
+    spacing: int = 0,
+) -> list["Image.Image"]:
+    """Slice one source image into ``rows`` x ``cols`` per-key RGB tiles.
+
+    The source is scaled to cover the full physical deck area, accounting for the
+    inter-key gaps: a key face is ``key_size`` (w, h) and successive keys are
+    ``spacing`` pixels apart, so the whole deck spans
+    ``(cols*kw + (cols-1)*spacing, rows*kh + (rows-1)*spacing)``. The image is
+    center-cropped to that aspect, resized to it, and then each key (r, c) takes
+    the region at ``(c*(kw+spacing), r*(kh+spacing), +kw, +kh)``. Tiles come back
+    in row-major order (index = r*cols + c), so a tile drops straight onto its
+    physical key. Pure: no hardware, fully unit-testable.
+    """
+    kw, kh = key_size
+    rows = max(0, int(rows))
+    cols = max(0, int(cols))
+    spacing = max(0, int(spacing))
+    if rows == 0 or cols == 0 or kw <= 0 or kh <= 0:
+        return []
+    full_w = cols * kw + (cols - 1) * spacing
+    full_h = rows * kh + (rows - 1) * spacing
+    rgb = image.convert("RGB")
+    cropped = _center_crop_to_aspect(rgb, full_w, full_h)
+    full = cropped.resize((full_w, full_h), Image.LANCZOS)
+    tiles: list[Image.Image] = []
+    for r in range(rows):
+        for c in range(cols):
+            x = c * (kw + spacing)
+            y = r * (kh + spacing)
+            tiles.append(full.crop((x, y, x + kw, y + kh)))
+    return tiles
+
+
+def message_across_deck(
+    rows: int, cols: int, key_size: tuple[int, int], text: str
+) -> list["Image.Image"]:
+    """Render a short ``text`` centred across the whole deck as per-key tiles.
+
+    Used by the full-deck overlay when there is no camera or the snapshot fails,
+    so the deck shows a readable "No camera" rather than going blank. Returns
+    ``rows*cols`` RGB tiles in row-major order, each ``key_size`` (w, h).
+    """
+    kw, kh = key_size
+    rows = max(0, int(rows))
+    cols = max(0, int(cols))
+    if rows == 0 or cols == 0 or kw <= 0 or kh <= 0:
+        return []
+    full_w = cols * kw
+    full_h = rows * kh
+    canvas = Image.new("RGB", (full_w, full_h), (16, 18, 22))
+    draw = ImageDraw.Draw(canvas)
+    px = _font_px(full_h, 0.20, density=1.0, floor=_MIN_FONT_PX)
+    font = _fit_font(draw, text, px, int(full_w * _FIT_FRACTION), floor=_MIN_FONT_PX)
+    box = draw.textbbox((0, 0), text, font=font)
+    tw, th = box[2] - box[0], box[3] - box[1]
+    draw.text(
+        ((full_w - tw) / 2 - box[0], (full_h - th) / 2 - box[1]),
+        text,
+        font=font,
+        fill=(235, 235, 235),
+    )
+    tiles: list[Image.Image] = []
+    for r in range(rows):
+        for c in range(cols):
+            tiles.append(canvas.crop((c * kw, r * kh, c * kw + kw, r * kh + kh)))
+    return tiles
 
 
 def blank_key(width: int, height: int) -> Image.Image:

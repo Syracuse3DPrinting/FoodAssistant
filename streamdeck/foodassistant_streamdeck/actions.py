@@ -715,6 +715,8 @@ ACTION_ICONS: dict[str, str] = {
     "kiosk_restart": "arrow-clockwise",
     "update": "cloud-arrow-down",
     "reboot": "power",
+    "camera": "camera-video",
+    "camera_full": "camera",
 }
 
 
@@ -1044,6 +1046,23 @@ ACTIONS: dict[str, ActionSpec] = {
         description="Reboot the host (via the host bridge). Best-effort: the "
         "request is fired and the deck does not block.",
     ),
+    "camera": ActionSpec(
+        name="camera",
+        label="Camera",
+        color="#0f172a",
+        kind="camera",
+        target_path="ui/camera",
+        description="Live camera snapshot. The key face shows the latest frame; "
+        "press to open the full feed on the attached display.",
+    ),
+    "camera_full": ActionSpec(
+        name="camera_full",
+        label="Camera\nFull",
+        color="#0f172a",
+        kind="camera_full",
+        description="Take over the whole deck with a single live camera frame "
+        "sliced across every key. Press any key to exit.",
+    ),
 }
 
 # Stamp each spec with its glyph from the single-source-of-truth map above, so
@@ -1127,6 +1146,7 @@ DEFAULT_ORDER: list[str] = [
     "weather",
     "forecast",
     "health",
+    "camera",
     "screen_off",
     "brightness",
 ]
@@ -1139,6 +1159,7 @@ _GROUP_BY_KIND = {
     "clock": "Info", "info": "Info",
     "recipe_scale": "Recipe", "display_power": "System",
     "health": "System", "bridge_action": "System",
+    "camera": "Camera", "camera_full": "Camera",
 }
 
 
@@ -1805,6 +1826,18 @@ async def run_action(spec: ActionSpec, ctx: ActionContext, long_press: bool = Fa
         return await bridge_post(
             ctx.client, ctx.host_bridge_url, spec.bridge_path, timeout=timeout
         )
+
+    if spec.kind == "camera":
+        # The key face is a live snapshot the controller paints; a press opens
+        # the full feed on the kiosk display. A missing display is not an error.
+        target = spec.target_path or "ui/camera"
+        opened = await ctx.navigate(target)
+        return "opened" if opened else "no display"
+
+    if spec.kind == "camera_full":
+        # The controller toggles the full-deck overlay on press (see
+        # _on_key); the handler itself is a no-op marker so dispatch never fails.
+        return "Camera"
 
     if spec.kind == "shopping_add":
         face = await add_shopping_item(ctx.client, base, spec.item)

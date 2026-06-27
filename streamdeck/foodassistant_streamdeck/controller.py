@@ -175,6 +175,16 @@ class Controller:
         # even when the health probe passes on the closed handle.
         self._deck_live: bool = True
 
+        # Camera snapshot cache for the single-key camera face. Holds the last
+        # fetched JPEG bytes and the monotonic time it was fetched, so the draw
+        # loop reuses a recent frame instead of hammering the camera each redraw.
+        self._camera_snapshot_bytes: Optional[bytes] = None
+        self._camera_snapshot_at: float = 0.0
+        # Full-deck overlay state. While active, a dedicated task refreshes the
+        # whole deck from one frame and any key press exits it.
+        self._camera_full_active: bool = False
+        self._camera_full_task: Optional[asyncio.Task] = None
+
     # -- lifecycle ---------------------------------------------------------
 
     async def run(self) -> None:
@@ -300,6 +310,10 @@ class Controller:
         return self.pages[self.page % len(self.pages)]
 
     def _draw_page(self) -> None:
+        # The full-deck camera overlay owns every key while active; its own loop
+        # paints them, so the normal page draw stays out of the way until exit.
+        if self._camera_full_active:
+            return
         from StreamDeck.ImageHelpers import PILHelper
 
         rotation = self.config.rotation
@@ -369,6 +383,14 @@ class Controller:
                     color = self.health.color(base_color)
                     alert = False
                     count = None
+                elif spec.kind in ("camera", "camera_full"):
+                    # A camera key shows the latest snapshot when one is cached;
+                    # the face is painted below from the JPEG. Until a frame is
+                    # available it falls back to a normal labelled face.
+                    label = spec.label
+                    color = base_color
+                    alert = False
+                    count = None
                 elif spec.kind in ("shopping_add", "macro"):
                     # Quick-add and macro override keys are stateless faces: they
                     # show their configured label and colour and do their work on
@@ -399,6 +421,14 @@ class Controller:
                     action_name=spec.name,
                     emoji=actions.emoji_for(spec.name),
                 )
+                # A camera key paints the latest snapshot over the fallback face
+                # when a frame is cached; if decoding fails it keeps the label.
+                if spec.kind == "camera" and self._camera_snapshot_bytes:
+                    snap = render.image_from_jpeg(
+                        self._camera_snapshot_bytes, self._key_size()
+                    )
+                    if snap is not None:
+                        image = snap
             if rotation:
                 # PIL rotates counter-clockwise, so negate to turn the face
                 # clockwise (matching how a user physically turns the deck).
@@ -444,6 +474,16 @@ class Controller:
     def _on_key(self, deck, key: int, pressed: bool) -> None:
         if self.loop is None:
             return
+        # While the full-deck camera overlay is up, ANY key press exits it and
+        # is otherwise swallowed (no action runs). Handled on the press edge so
+        # the deck returns to normal immediately. The matching release is
+        # ignored because the overlay key state was cleared on entry.
+        if self._camera_full_active:
+            if pressed:
+                self._last_activity = time.monotonic()
+                self._key_down_time.pop(key, None)
+                self.loop.call_soon_threadsafe(self._exit_camera_full)
+            return
         if pressed:
             # Record when this key went down so we can measure hold duration.
             self._key_down_time[key] = time.monotonic()
@@ -475,6 +515,11 @@ class Controller:
         if slot >= len(page) or page[slot] is None:
             return
         spec = page[slot]
+        # A camera_full key takes over the whole deck. Enter the overlay on the
+        # loop thread (it creates a task) rather than running the no-op handler.
+        if spec.kind == "camera_full":
+            self.loop.call_soon_threadsafe(self._enter_camera_full)
+            return
         fut = asyncio.run_coroutine_threadsafe(
             self._handle(spec, long_press=long_press), self.loop
         )
@@ -663,6 +708,167 @@ class Controller:
         if after != before:
             self._draw_page()
 
+    # -- camera ------------------------------------------------------------
+
+    def _first_camera_url(self) -> str:
+        """Snapshot URL of the first configured camera, or "" when none.
+
+        ``config.cameras`` is a list of dicts pushed by the app; only the first
+        entry feeds the single-key face and the full-deck overlay today.
+        """
+        cams = getattr(self.config, "cameras", None) or []
+        for cam in cams:
+            if isinstance(cam, dict):
+                url = str(cam.get("snapshot_url", "")).strip()
+                if url:
+                    return url
+        return ""
+
+    async def _camera_snapshot(self, max_age: float = 0.0) -> Optional[bytes]:
+        """Fetch the first camera's snapshot JPEG, cached briefly. None on failure.
+
+        Reuses the cached frame when it is younger than ``max_age`` seconds (0
+        forces a fresh fetch) so the draw loop does not hammer the camera. Any
+        network or service error returns None and leaves the cache untouched, so
+        a transient hiccup keeps showing the last good frame rather than blanking.
+        """
+        url = self._first_camera_url()
+        if not url or self.client is None:
+            return None
+        if (max_age > 0 and self._camera_snapshot_bytes is not None
+                and (time.monotonic() - self._camera_snapshot_at) < max_age):
+            return self._camera_snapshot_bytes
+        try:
+            r = await self.client.get(url, timeout=4.0)
+            if r.status_code == 200 and r.content:
+                self._camera_snapshot_bytes = r.content
+                self._camera_snapshot_at = time.monotonic()
+                return self._camera_snapshot_bytes
+        except Exception:  # noqa: BLE001 - keep the last good frame, never crash
+            pass
+        return None
+
+    async def _refresh_camera_snapshot(self) -> None:
+        """Refresh the cached snapshot for any single-key camera face, on poll.
+
+        Best-effort and only when a camera key is shown and a camera is
+        configured, so a deck without one never pays for the fetch. Redraws when a
+        new frame arrives so the face stays current between presses."""
+        if not self._has_kind("camera") or not self._first_camera_url():
+            return
+        # Refresh roughly on the status-poll cadence; a slightly stale frame is
+        # fine for the small single-key face.
+        before = self._camera_snapshot_bytes
+        snap = await self._camera_snapshot(max_age=0.0)
+        if snap is not None and snap is not before:
+            self._draw_page()
+
+    def _enter_camera_full(self) -> None:
+        """Take over the whole deck with the live camera overlay.
+
+        Starts a refresh task that paints every key from one frame. A no camera
+        or no event loop case is a safe no-op. Re-entry while already active is
+        ignored so a double press does not stack tasks.
+        """
+        if self._camera_full_active or self.loop is None or not self.loop.is_running():
+            return
+        self._camera_full_active = True
+        # Treat the overlay as activity and ensure the deck is lit, so it does
+        # not fight the idle blanker while the user is watching.
+        self._last_activity = time.monotonic()
+        if self._idle_blanked:
+            self._idle_blanked = False
+            try:
+                self.deck.set_brightness(BRIGHTNESS_STEPS[self._bright_idx])
+            except Exception:  # noqa: BLE001 - best-effort wake
+                pass
+        self._camera_full_task = self.loop.create_task(self._camera_full_loop())
+
+    def _exit_camera_full(self) -> None:
+        """Leave the full-deck overlay and redraw the normal current page."""
+        if not self._camera_full_active:
+            return
+        self._camera_full_active = False
+        task, self._camera_full_task = self._camera_full_task, None
+        if task is not None:
+            task.cancel()
+        self._last_activity = time.monotonic()
+        self._draw_page()
+
+    def _set_full_deck_tiles(self, tiles: list) -> None:
+        """Push a row-major list of per-key tiles to the physical deck.
+
+        Honours the configured rotation exactly like the normal draw loop, so a
+        turned deck shows the frame the right way up. Defensive: a short or empty
+        tile list simply skips the missing keys rather than raising.
+        """
+        from StreamDeck.ImageHelpers import PILHelper
+
+        rotation = self.config.rotation
+        for index, tile in enumerate(tiles):
+            if index >= self.key_count:
+                break
+            image = tile.rotate(-rotation, expand=True) if rotation else tile
+            phys = layout.rotated_index(index, self.key_count, rotation)
+            self.deck.set_key_image(phys, PILHelper.to_native_format(self.deck, image))
+
+    async def _camera_full_refresh_once(self) -> bool:
+        """Paint one frame across the whole deck. Returns False when unavailable.
+
+        Fetches a fresh snapshot, slices it across every key, and pushes the
+        tiles. When there is no camera or the snapshot fails it paints a simple
+        "No camera" message across the deck and returns False so the caller can
+        decide to stop. Any unexpected error is swallowed so the overlay loop
+        never crashes the daemon.
+        """
+        rows, cols = self.deck.key_layout()
+        key_size = self.deck.key_image_format()["size"]
+        try:
+            snap = await self._camera_snapshot(max_age=0.0)
+            if snap is None:
+                self._set_full_deck_tiles(
+                    render.message_across_deck(rows, cols, key_size, "No camera")
+                )
+                return False
+            from PIL import Image
+            import io as _io
+            with Image.open(_io.BytesIO(snap)) as src:
+                src.load()
+                frame = src.convert("RGB")
+            tiles = render.slice_full_image(frame, rows, cols, key_size)
+            self._set_full_deck_tiles(tiles)
+            return True
+        except Exception:  # noqa: BLE001 - never let the overlay crash the loop
+            try:
+                self._set_full_deck_tiles(
+                    render.message_across_deck(rows, cols, key_size, "No camera")
+                )
+            except Exception:  # noqa: BLE001
+                pass
+            return False
+
+    async def _camera_full_loop(self) -> None:
+        """Refresh the full-deck overlay until it is exited or cancelled."""
+        try:
+            while self._camera_full_active:
+                ok = await self._camera_full_refresh_once()
+                # Each tick counts as activity so the idle blanker stays out of
+                # the way while the overlay is up.
+                self._last_activity = time.monotonic()
+                if not ok and not self._first_camera_url():
+                    # No camera is even configured: stop rather than spin showing
+                    # the placeholder forever. A configured-but-down camera keeps
+                    # retrying so it recovers when the feed comes back.
+                    self._camera_full_active = False
+                    self._camera_full_task = None
+                    self._draw_page()
+                    return
+                await asyncio.sleep(
+                    max(1, int(self.config.camera_full_refresh_seconds))
+                )
+        except asyncio.CancelledError:  # noqa: PERF203 - normal exit path
+            pass
+
     def _timer_default_label(self, name: str) -> str:
         """The stock label a timer key shows with no recipe suggestion."""
         spec = actions.ACTIONS.get(name)
@@ -785,7 +991,9 @@ class Controller:
         """
         self._reset_weather_cycles_if_idle()
         timeout_mins = self.config.idle_timeout_minutes
-        if timeout_mins <= 0 or self._idle_blanked:
+        # The camera overlay treats each refresh tick as activity, but guard here
+        # too so the blanker never fights a live overlay.
+        if timeout_mins <= 0 or self._idle_blanked or self._camera_full_active:
             return
         idle_secs = time.monotonic() - self._last_activity
         if idle_secs >= timeout_mins * 60:
@@ -1001,6 +1209,9 @@ class Controller:
         # Refresh host-bridge health for any health key, same cadence. Skipped
         # when no such key is shown so the poll stays cheap and off-Pi safe.
         await self._refresh_health()
+        # Refresh the cached snapshot behind any single-key camera face, same
+        # cadence. Skipped when no camera key is shown or none is configured.
+        await self._refresh_camera_snapshot()
 
     def _tick_timers(self) -> bool:
         """Advance all active timers. Returns True if any expired this tick."""

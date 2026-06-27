@@ -26,9 +26,6 @@ ALLOWED_ROTATIONS: tuple[int, ...] = (0, 90, 180, 270)
 
 # Key face rendering style. "rich" (the default) draws a subtle vertical
 # gradient with an inner border; "glass" draws a glassmorphism panel; "minimal"
-# keeps the old flat fill.
-# Key face rendering style. "rich" (the default) draws a subtle vertical
-# gradient with an inner border; "glass" draws a glassmorphism panel; "minimal"
 # keeps the old flat fill; "clean" draws no coloured background (a dark face with
 # a faint accent border) so a full-colour icon stands out.
 ALLOWED_KEY_STYLES: tuple[str, ...] = ("rich", "minimal", "glass", "clean")
@@ -100,6 +97,14 @@ class Config:
     # default "keys" layout, replacing the action at the given slot. See
     # actions.overrides_to_specs.
     key_overrides: list = field(default_factory=list)
+    # Camera snapshot sources pushed by the app. Each entry is a dict with
+    # "name" and "snapshot_url" (a still-frame JPEG endpoint). The first entry
+    # feeds the single-key camera face and the full-deck overlay. Stamped into
+    # config.toml by the app's camera setup page (a parallel task owns that side).
+    cameras: list = field(default_factory=list)
+    # How often the full-deck camera overlay refreshes its frame, in seconds.
+    # Clamped to at least 1 so a stray 0 cannot spin the refresh loop.
+    camera_full_refresh_seconds: int = 5
 
     def validated(self) -> "Config":
         """Drop unknown action names and clamp numbers into sane ranges."""
@@ -117,6 +122,7 @@ class Config:
             self.key_style = DEFAULT_KEY_STYLE
         if self.icon_color not in ALLOWED_ICON_COLORS:
             self.icon_color = DEFAULT_ICON_COLOR
+        self.camera_full_refresh_seconds = max(1, int(self.camera_full_refresh_seconds))
         return self
 
 
@@ -172,9 +178,14 @@ def _apply(cfg: Config, data: dict) -> None:
         if isinstance(data.get(name), str):
             setattr(cfg, name, data[name])
     for name in ("brightness", "poll_seconds", "soon_days", "rotation",
-                 "weather_poll_minutes", "ha_poll_seconds", "idle_timeout_minutes"):
+                 "weather_poll_minutes", "ha_poll_seconds", "idle_timeout_minutes",
+                 "camera_full_refresh_seconds"):
         if isinstance(data.get(name), int):
             setattr(cfg, name, data[name])
+
+    raw_cameras = data.get("cameras")
+    if isinstance(raw_cameras, list):
+        cfg.cameras = [c for c in raw_cameras if isinstance(c, dict)]
 
     raw_slots = data.get("ha_slots")
     if isinstance(raw_slots, list):

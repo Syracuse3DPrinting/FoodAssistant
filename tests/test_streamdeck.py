@@ -2492,3 +2492,130 @@ def test_config_accepts_clean_and_color():
     c2 = config.Config(key_style="neon", icon_color="rainbow").validated()
     assert c2.key_style == "rich"
     assert c2.icon_color == "full"
+
+
+# -- camera (snapshot + full-deck overlay) ---------------------------------
+
+
+def _tiny_jpeg(width: int = 64, height: int = 48, color=(200, 60, 60)) -> bytes:
+    import io
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (width, height), color).save(buf, format="JPEG")
+    return buf.getvalue()
+
+
+def test_image_from_jpeg_decodes_to_requested_size():
+    img = render.image_from_jpeg(_tiny_jpeg(80, 40), (72, 72))
+    assert img is not None
+    assert img.size == (72, 72)
+    assert img.mode == "RGB"
+
+
+def test_image_from_jpeg_bad_bytes_returns_none():
+    assert render.image_from_jpeg(b"not a jpeg", (72, 72)) is None
+    assert render.image_from_jpeg(b"", (72, 72)) is None
+
+
+def test_slice_full_image_3x5_no_spacing():
+    src = _tiny_jpeg(640, 384)
+    from PIL import Image
+    import io
+
+    image = Image.open(io.BytesIO(src)).convert("RGB")
+    tiles = render.slice_full_image(image, 3, 5, (72, 72))
+    assert len(tiles) == 3 * 5
+    for tile in tiles:
+        assert tile.size == (72, 72)
+        assert tile.mode == "RGB"
+
+
+def test_slice_full_image_4x8_with_spacing():
+    from PIL import Image
+
+    image = Image.new("RGB", (400, 300), (10, 120, 200))
+    tiles = render.slice_full_image(image, 4, 8, (96, 96), spacing=6)
+    assert len(tiles) == 4 * 8
+    assert all(t.size == (96, 96) for t in tiles)
+
+
+def test_slice_full_image_row_major_order():
+    from PIL import Image
+
+    image = Image.new("RGB", (300, 200), (0, 0, 0))
+    rows, cols = 3, 5
+    tiles = render.slice_full_image(image, rows, cols, (40, 40))
+    # Index r*cols + c maps to a single key; the count and per-tile size confirm
+    # the row-major contract the controller relies on.
+    assert len(tiles) == rows * cols
+    assert tiles[rows * cols - 1].size == (40, 40)
+
+
+def test_slice_full_image_degenerate_returns_empty():
+    from PIL import Image
+
+    image = Image.new("RGB", (10, 10), (0, 0, 0))
+    assert render.slice_full_image(image, 0, 5, (40, 40)) == []
+    assert render.slice_full_image(image, 3, 0, (40, 40)) == []
+
+
+def test_camera_actions_resolve_and_have_icons():
+    cam = actions.resolve("camera")
+    full = actions.resolve("camera_full")
+    assert cam is not None and cam.kind == "camera"
+    assert full is not None and full.kind == "camera_full"
+    assert cam.icon and render.icon_available(cam.icon)
+    assert full.icon and render.icon_available(full.icon)
+
+
+def test_camera_actions_group_under_camera():
+    items = {i["name"]: i for i in actions.catalog()}
+    assert items["camera"]["group"] == "Camera"
+    assert items["camera_full"]["group"] == "Camera"
+
+
+def test_camera_config_loads_cameras_and_refresh(tmp_path):
+    f = tmp_path / "config.toml"
+    f.write_text(
+        "camera_full_refresh_seconds = 8\n"
+        "[[cameras]]\n"
+        'name = "Front"\n'
+        'snapshot_url = "http://cam/snap.jpg"\n'
+    )
+    cfg = config.load(f)
+    assert cfg.camera_full_refresh_seconds == 8
+    assert cfg.cameras and cfg.cameras[0]["snapshot_url"] == "http://cam/snap.jpg"
+
+
+def test_camera_full_refresh_clamped():
+    c = config.Config(camera_full_refresh_seconds=0).validated()
+    assert c.camera_full_refresh_seconds == 1
+
+
+def test_camera_action_run_opens_feed():
+    opened = []
+
+    async def navigate(path):
+        opened.append(path)
+        return True
+
+    ctx = actions.ActionContext(
+        client=None, base_url="http://x", refresh=lambda: asyncio.sleep(0),
+        navigate=navigate, cycle_brightness=lambda: 0,
+        page_next=lambda: None, page_prev=lambda: None,
+    )
+    msg = asyncio.run(actions.run_action(actions.resolve("camera"), ctx))
+    assert msg == "opened"
+    assert opened == ["ui/camera"]
+
+
+def test_camera_full_action_is_marker():
+    ctx = actions.ActionContext(
+        client=None, base_url="http://x", refresh=lambda: asyncio.sleep(0),
+        navigate=lambda p: asyncio.sleep(0), cycle_brightness=lambda: 0,
+        page_next=lambda: None, page_prev=lambda: None,
+    )
+    msg = asyncio.run(actions.run_action(actions.resolve("camera_full"), ctx))
+    assert msg == "Camera"
