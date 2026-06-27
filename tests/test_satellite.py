@@ -609,3 +609,30 @@ def test_sync_caches_resolved_server_ip(satellite_mode, monkeypatch):
 
     assert out["ok"] is True
     assert settings.remote_server_ip == "10.0.0.9"
+
+
+def test_satellite_save_drops_server_managed_fields(client, monkeypatch, tmp_path):
+    # On a satellite, a user POST to /setup/save must not change a server-managed
+    # field (it is pulled on each sync); the edit is dropped, not saved then
+    # silently overwritten.
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path), raising=False)
+    monkeypatch.setattr(settings, "auth_password", "", raising=False)
+    monkeypatch.setattr(settings, "deployment_mode", "pi_remote", raising=False)
+    monkeypatch.setattr(settings, "remote_server_url", "http://server:9284", raising=False)
+    monkeypatch.setattr(settings, "upstream_api_key", "k", raising=False)
+    monkeypatch.setattr(settings, "grocy_base_url", "http://server-grocy:9383", raising=False)
+    assert settings.is_satellite()
+    r = client.post("/setup/save", json={"grocy_base_url": "http://satellite-edit:1"})
+    assert r.status_code == 200
+    # The server-managed field is unchanged (the edit was dropped).
+    assert settings.grocy_base_url == "http://server-grocy:9383"
+
+
+def test_calibrate_touch_page_renders(client, monkeypatch):
+    # Regression: the page used the deprecated TemplateResponse(name, ctx) form,
+    # which crashed on the installed Starlette ('str' has no attribute headers).
+    import app.routers.setup as setup_router
+    monkeypatch.setattr(setup_router, "is_raspberry_pi", lambda: False, raising=False)
+    r = client.get("/setup/calibrate/touch/page")
+    assert r.status_code == 200
+    assert "<html" in r.text.lower()

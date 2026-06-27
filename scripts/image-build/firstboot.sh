@@ -1506,7 +1506,9 @@ if ip route show default 2>/dev/null | grep -q .; then exit 0; fi
 # appliance is reachable on the network), so the setup hotspot is not needed.
 for dev in /sys/class/net/*; do
   name=$(basename "$dev")
-  case "$name" in lo|wlan*) continue;; esac
+  # Skip loopback, Wi-Fi (handled above), and virtual interfaces (docker,
+  # bridges, veth, tun/tap) so only a real wired link counts as connectivity.
+  case "$name" in lo|wlan*|docker*|br-*|veth*|tun*|tap*|vir*) continue;; esac
   if [ "$(cat "$dev/carrier" 2>/dev/null)" = "1" ] \
      && ip -4 addr show dev "$name" 2>/dev/null | grep -q "inet "; then
     exit 0

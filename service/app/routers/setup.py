@@ -17,7 +17,7 @@ from ..config import (
     FLOATING_NAV_ORIENTATIONS,
     STREAMDECK_KEY_STYLES, STREAMDECK_ICON_COLORS,
     DEPLOYMENT_MODES, _DEFAULT_DEPLOYMENT_MODE,
-    AI_MODELS,
+    AI_MODELS, SATELLITE_PULL_FIELDS,
     browser_host, device_hostname,
 )
 from ..database import SessionLocal
@@ -472,6 +472,14 @@ async def save_scale(payload: ScalePayload):
 @router.post("/save")
 async def save_setup(payload: SetupPayload):
     data = payload.model_dump(exclude_unset=True)
+    # On a satellite the backend config is owned by the main server and pulled on
+    # each sync. Drop any user edit to those fields here so it is not saved and
+    # then silently overwritten on the next sync (the panes show them read-only,
+    # but this guards a stray or scripted POST). The sync path persists pulled
+    # values through settings.save() directly, which this does not touch.
+    if settings.is_satellite():
+        for f in SATELLITE_PULL_FIELDS:
+            data.pop(f, None)
     for f in _SECRET_FIELDS:
         if data.get(f) == "":
             data.pop(f, None)        # blank = keep existing value
@@ -1596,7 +1604,7 @@ async def calibrate_touch_page(request: Request):
     except Exception:
         rotation = 0
     return templates.TemplateResponse(
-        "calibrate.html", {"request": request, "rotation": rotation})
+        request, "calibrate.html", {"rotation": rotation})
 
 
 @router.get("/calibrate/touch/events")
