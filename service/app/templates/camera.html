@@ -64,7 +64,6 @@
   const SNAPSHOT_INTERVAL_MS = 1500;
   let snapTimer = null;
   let snapOk = false;
-  let lastObjUrl = null;
 
   function _stopSnapshot() {
     if (snapTimer) { clearInterval(snapTimer); snapTimer = null; }
@@ -84,35 +83,37 @@
     errEl.classList.remove('d-none');
   }
 
-  // Pull the snapshot through fetch (not a bare <img src>) so HTTP errors are
-  // visible: a 401/404/502 from the proxy is shown verbatim instead of a silent
-  // broken image, which makes a misconfigured feed diagnosable at a glance.
+  // Refresh a same-origin <img> straight from the snapshot proxy. The proxy is
+  // same-origin, so there is no mixed-content or CORS issue and a bare <img src>
+  // is the most reliable path (more so than fetch+blob inside the kiosk's
+  // Chromium). The proxy adds the Home Assistant bearer token server-side. On
+  // the first load failure we do one diagnostic fetch to surface the HTTP status.
+  let snapSrc = '';
   function _startSnapshot(src) {
     snapOk = false;
-    const tick = async () => {
+    snapSrc = src;
+    const tick = () => {
       const sep = src.includes('?') ? '&' : '?';
-      try {
-        const res = await fetch(`${src}${sep}_=${Date.now()}`, {cache: 'no-store'});
-        if (!res.ok) {
-          let detail = '';
-          try { detail = (await res.json()).detail || ''; } catch (e) { /* not json */ }
-          if (!snapOk) _showError(`Camera proxy returned HTTP ${res.status}${detail ? ': ' + detail : ''}.`);
-          return;
-        }
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        imgEl.src = url;
-        imgEl.classList.remove('d-none');
-        errEl.classList.add('d-none');
-        if (lastObjUrl) URL.revokeObjectURL(lastObjUrl);
-        lastObjUrl = url;
-        snapOk = true;
-      } catch (e) {
-        if (!snapOk) _showError(`Could not reach the camera proxy: ${e}`);
-      }
+      imgEl.src = `${src}${sep}_=${Date.now()}`;
     };
+    imgEl.classList.remove('d-none');
+    errEl.classList.add('d-none');
     tick();
     snapTimer = setInterval(tick, SNAPSHOT_INTERVAL_MS);
+  }
+
+  async function _reportSnapshotError() {
+    if (!snapSrc) { _showError(); return; }
+    try {
+      const sep = snapSrc.includes('?') ? '&' : '?';
+      const res = await fetch(`${snapSrc}${sep}_=${Date.now()}`, {cache: 'no-store'});
+      if (res.ok) return;  // it actually works now; leave the image alone
+      let detail = '';
+      try { detail = (await res.json()).detail || ''; } catch (e) { /* not json */ }
+      _showError(`Camera proxy returned HTTP ${res.status}${detail ? ': ' + detail : ''}.`);
+    } catch (e) {
+      _showError(`Could not reach the camera proxy: ${e}`);
+    }
   }
 
   function selectCamera(index) {
@@ -150,8 +151,14 @@
     });
   }
 
-  // The direct-<img> modes (HLS poster / manual MJPEG) still report load errors.
-  imgEl.addEventListener('error', () => { if (!snapTimer) _showError(); });
+  imgEl.addEventListener('load', () => { snapOk = true; errEl.classList.add('d-none'); });
+  imgEl.addEventListener('error', () => {
+    // Keep the last good frame on a transient miss; on the first failure fetch
+    // the proxy once to show the real HTTP status. The direct (non-snapshot)
+    // <img> modes have no snapSrc, so they fall back to the generic panel.
+    if (snapOk) return;
+    if (snapTimer) { _reportSnapshotError(); } else { _showError(); }
+  });
   videoEl.addEventListener('error', () => { if (!snapTimer) _showError(); });
 
   // Start on the first configured camera.

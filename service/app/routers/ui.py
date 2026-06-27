@@ -285,11 +285,16 @@ async def timers_page(request: Request):
 @router.get("/camera", response_class=HTMLResponse)
 async def camera_page(request: Request):
     from ..services.cameras import camera_sources
-    return templates.TemplateResponse(request, "camera.html", {
+    resp = templates.TemplateResponse(request, "camera.html", {
         "request": request,
         "active": "camera",
         "cameras": camera_sources(settings.streamdeck_cameras),
     })
+    # Never let a kiosk serve a stale copy of this page: the camera list and the
+    # display logic change, and a cached page would keep showing an old (broken)
+    # version after an update.
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @router.get("/camera/diag")
