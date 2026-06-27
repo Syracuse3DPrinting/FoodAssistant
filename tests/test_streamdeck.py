@@ -2706,3 +2706,19 @@ def test_camera_snapshot_target_uses_bearer_for_ha():
     url3, headers3 = actions.camera_snapshot_target(
         {"name": "Cam", "snapshot_url": "http://192.168.1.5/snap.jpg"}, "", "")
     assert url3 == "http://192.168.1.5/snap.jpg" and headers3 is None
+
+
+def test_media_override_builds_ha_service_spec():
+    # A media override is a stateless HA service call (kind ha_service), not a
+    # polled entity, with the service and glyph from MEDIA_ACTIONS.
+    spec = actions.override_to_spec(4, {"type": "media", "entity_id": "media_player.kitchen", "action": "next"})
+    assert spec is not None
+    assert spec.kind == "ha_service"
+    assert spec.ha_entity_id == "media_player.kitchen"
+    assert spec.ha_service == "media_player.media_next_track"
+    assert spec.icon == "skip-forward"
+    assert spec.label == "Next"
+    # An unknown action falls back to play/pause; a missing entity is dropped.
+    assert actions.override_to_spec(1, {"type": "media", "entity_id": "x", "action": "zzz"}).ha_service == "media_player.media_play_pause"
+    assert actions.override_to_spec(1, {"type": "media", "action": "next"}) is None
+    assert "media" in actions.OVERRIDE_TYPES

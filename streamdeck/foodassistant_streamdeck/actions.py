@@ -1192,7 +1192,7 @@ def resolve(name: str) -> Optional[ActionSpec]:
 # controller already knows how to render and dispatch. "default" is a sentinel
 # that leaves the slot's stock action in place (used to clear an override).
 OVERRIDE_TYPES: tuple[str, ...] = (
-    "ha_action", "timer", "weather", "shopping_add", "macro", "camera", "default"
+    "ha_action", "timer", "weather", "shopping_add", "macro", "camera", "media", "default"
 )
 
 _OVERRIDE_DEFAULT_COLORS = {
@@ -1202,6 +1202,19 @@ _OVERRIDE_DEFAULT_COLORS = {
     "shopping_add": "#0f766e",
     "macro": "#6d28d9",
     "camera": "#0f172a",
+    "media": "#7c3aed",
+}
+
+# Media transport actions a "media" override can bind to, mapped to the Home
+# Assistant media_player service and the glyph shown on the key. Each service
+# takes only the entity_id, so the existing ha_service dispatch handles them.
+MEDIA_ACTIONS: dict[str, dict] = {
+    "play_pause": {"service": "media_player.media_play_pause", "icon": "play-circle", "label": "Play/Pause"},
+    "next":       {"service": "media_player.media_next_track", "icon": "skip-forward", "label": "Next"},
+    "previous":   {"service": "media_player.media_previous_track", "icon": "skip-backward", "label": "Previous"},
+    "volume_up":  {"service": "media_player.volume_up", "icon": "volume-up", "label": "Volume +"},
+    "volume_down": {"service": "media_player.volume_down", "icon": "volume-down", "label": "Volume -"},
+    "stop":       {"service": "media_player.media_stop", "icon": "stop-circle", "label": "Stop"},
 }
 
 _OVERRIDE_DEFAULT_ICONS = {
@@ -1211,6 +1224,7 @@ _OVERRIDE_DEFAULT_ICONS = {
     "shopping_add": "cart-plus",
     "macro": "collection-play",
     "camera": "camera-video",
+    "media": "play-circle",
 }
 
 # Longest item name a shopping_add key shows on its face before truncation, so a
@@ -1340,6 +1354,22 @@ def override_to_spec(slot: int, override: dict) -> Optional[ActionSpec]:
         return ActionSpec(
             name=name, label=label or "Macro", color=color, kind="macro",
             macro_actions=tuple(names), icon=icon,
+        )
+
+    if otype == "media":
+        # A media transport key calls a Home Assistant media_player service on a
+        # chosen entity. It is stateless (kind "ha_service"): no on/off polling,
+        # just a fixed face that fires the service on press.
+        entity_id = str(override.get("entity_id", "")).strip()
+        action = str(override.get("action", "play_pause")).strip()
+        meta = MEDIA_ACTIONS.get(action) or MEDIA_ACTIONS["play_pause"]
+        if not entity_id:
+            return None
+        if not icon or icon == _OVERRIDE_DEFAULT_ICONS.get("media"):
+            icon = meta["icon"]
+        return ActionSpec(
+            name=name, label=label or meta["label"], color=color, kind="ha_service",
+            ha_entity_id=entity_id, ha_service=meta["service"], icon=icon,
         )
 
     if otype == "camera":
@@ -1850,11 +1880,13 @@ async def run_action(spec: ActionSpec, ctx: ActionContext, long_press: bool = Fa
         await ctx.navigate("ui/weather")
         return "forecast"
 
-    if spec.kind == "ha_entity":
+    if spec.kind in ("ha_entity", "ha_service"):
+        # "ha_entity" toggles a stateful entity (its face tracks on/off); the
+        # stateless "ha_service" (media transport keys) just fires the service.
         entity_id = spec.ha_entity_id
         service = spec.ha_service
         if not entity_id or not service or not ctx.ha_base_url or not ctx.ha_token:
-            return "ha_entity: not configured"
+            return "ha: not configured"
         domain, svc = (service.split(".", 1) + ["turn_on"])[:2]
         try:
             import httpx
@@ -1866,7 +1898,8 @@ async def run_action(spec: ActionSpec, ctx: ActionContext, long_press: bool = Fa
                     headers={"Authorization": f"Bearer {ctx.ha_token}",
                              "Content-Type": "application/json"},
                 )
-            await ctx.ha_entity_refresh()
+            if spec.kind == "ha_entity":
+                await ctx.ha_entity_refresh()
             return f"{entity_id} -> {service} ({r.status_code})"
         except Exception as e:  # noqa: BLE001
             return f"ha error: {e}"

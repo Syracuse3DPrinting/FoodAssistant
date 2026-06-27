@@ -4456,6 +4456,18 @@ const _SD_OVERRIDE_PREVIEW = {
   shopping_add: {color: '#0f766e', icon: 'cart-plus', label: 'Add'},
   macro: {color: '#6d28d9', icon: 'collection-play', label: 'Macro'},
   camera: {color: '#0f172a', icon: 'camera-video', label: 'Camera'},
+  media: {color: '#7c3aed', icon: 'play-circle', label: 'Media'},
+};
+
+// Media transport actions a "media" override can bind to (mirrors MEDIA_ACTIONS
+// in streamdeck/actions.py): value -> {label, icon} for the grid preview.
+const _SD_MEDIA_ACTIONS = {
+  play_pause: {label: 'Play/Pause', icon: 'play-circle'},
+  next: {label: 'Next', icon: 'skip-forward'},
+  previous: {label: 'Previous', icon: 'skip-backward'},
+  volume_up: {label: 'Volume +', icon: 'volume-up'},
+  volume_down: {label: 'Volume -', icon: 'volume-down'},
+  stop: {label: 'Stop', icon: 'stop-circle'},
 };
 
 // Paint each configured override onto its target grid cell so the grid mirrors
@@ -4488,6 +4500,7 @@ function _sdPaintOverridesOnGrid() {
     if (o.type === 'shopping_add' && !o.label && o.item) label = o.item;
     if (o.type === 'macro' && !o.label && Array.isArray(o.actions) && o.actions.length) label = o.actions.length + ' steps';
     if (o.type === 'camera') { if (o.full) icon = icon || 'camera'; if (!o.label) label = o.camera || (o.full ? 'Full' : 'Camera'); }
+    if (o.type === 'media') { const m = _SD_MEDIA_ACTIONS[o.action] || _SD_MEDIA_ACTIONS.play_pause; icon = o.icon || m.icon; if (!o.label) label = m.label; }
     if (!cell.dataset.ovBase) cell.dataset.ovBase = cell.style.background;
     cell.dataset.ovColor = color;
     cell.style.background = color;
@@ -4512,6 +4525,7 @@ const _SD_OVERRIDE_TYPES = [
   {value: 'shopping_add', label: 'Quick-add shopping item'},
   {value: 'macro', label: 'Macro (run actions in sequence)'},
   {value: 'camera', label: 'Camera feed'},
+  {value: 'media', label: 'Media control (Home Assistant)'},
 ];
 
 // Curated Bootstrap Icons glyphs (names without the "bi-" prefix) offered in
@@ -4650,6 +4664,19 @@ function _sdOverrideRow(o) {
           <label class="form-check-label small" for="${camFullId}">Full deck (press to take over every key)</label>
         </div>
       </div>
+    </div>
+    <div class="row g-2 mt-1 sd-ov-fields-media">
+      <div class="col-md-6">
+        <label class="form-label small mb-1">Media player entity</label>
+        <input type="text" class="form-control form-control-sm sd-ov-media-entity" placeholder="media_player.living_room" value="${escapeHtml(o.entity_id || '')}">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label small mb-1">Control</label>
+        <select class="form-select form-select-sm sd-ov-media-action">
+          ${Object.entries(_SD_MEDIA_ACTIONS).map(([v, m]) => `<option value="${v}"${o.action === v ? ' selected' : ''}>${escapeHtml(m.label)}</option>`).join('')}
+        </select>
+        <div class="form-text">Calls the Home Assistant media_player service on press. Set the connection under Home Assistant.</div>
+      </div>
     </div>`;
   const typeSel = row.querySelector('.sd-ov-type');
   const sync = () => {
@@ -4730,6 +4757,11 @@ function _sdCollectOverrides() {
       const camera = row.querySelector('.sd-ov-camera')?.value.trim() || '';
       if (camera) entry.camera = camera;
       if (row.querySelector('.sd-ov-camera-full')?.checked) entry.full = true;
+    } else if (type === 'media') {
+      const entity_id = row.querySelector('.sd-ov-media-entity')?.value.trim() || '';
+      if (!entity_id) continue;
+      entry.entity_id = entity_id;
+      entry.action = row.querySelector('.sd-ov-media-action')?.value || 'play_pause';
     } else {
       continue;
     }
