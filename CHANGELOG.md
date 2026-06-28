@@ -31,8 +31,6 @@ All notable changes to FoodAssistant are recorded here. The format is based on
 - **Dedicated Home Assistant and Cameras settings pages.** Home Assistant and Cameras moved out of the Interface pane into their own entries in the Settings menu, so they are easy to find and have room to grow.
 - **Add a camera by IP.** The Cameras page can build a network camera's stream and snapshot URLs from its address, with brand templates for Generic MJPEG, Generic snapshot, Reolink, Amcrest/Dahua, Hikvision, and ONVIF, plus a Custom path. It fills a camera row you can review and edit before saving. RTSP-only cameras still need an MJPEG/HLS source or a transcoder, which the page notes.
 - **Choose which camera a Stream Deck key shows.** A new Camera override type in the per-key editor binds a key to a specific configured camera (by name) instead of always the first one, and an optional Full deck flag makes that key splash the chosen camera across the whole deck on press. Several camera keys can each show a different feed.
-
-### Added
 - **Weather page on the display.** Pressing a Stream Deck weather or forecast key now opens a full forecast page on the attached kiosk display (in addition to cycling the key face), so the deck doubles as a remote for the screen. The page is reachable at /ui/weather and uses the same location and units as the deck weather widget.
 
 ### Fixed
@@ -41,6 +39,10 @@ All notable changes to FoodAssistant are recorded here. The format is based on
 - **Phone QR code stays in kiosk mode.** The QR code that opens the UI on a phone is no longer hidden in kiosk mode, where it is most useful (scan the wall-mounted screen to control it from your phone).
 - **Home Assistant and cameras now sync to a Pi Remote.** A satellite mirrors the main server's Home Assistant credentials and camera feeds, and its Settings show them read-only with a "configured on the main server" note (like the Stream Deck weather), so the values are visible and clearly server-managed instead of looking unset. Update the satellite (`sudo foodassistant-update`) so it pulls the new fields.
 - **Kiosk overflow menu was nearly empty.** In kiosk mode the three-dots More menu hid everything except Settings (the reference links are kiosk-hidden and the secondary-tab copies only appeared under 820px). The secondary destinations (Recipes, Cook, Current Recipe, Meal Plan, Camera) now show in that menu in kiosk mode at any width, so every page stays reachable from the kebab.
+- **Display scale applies without a reboot.** Changing the display scale or orientation from a phone or laptop now restarts the kiosk browser so the attached display picks it up right away, instead of waiting for a reboot.
+- **Touch calibration page loads.** The full-screen touch-calibration page was crashing (a deprecated template call), so calibration could never start; it renders now.
+- **Satellites survive a flaky mDNS.** A Pi Remote caches its main server's LAN IP on each successful sync and falls back to it automatically when the configured `.local` name stops resolving, so the satellite stays wired to its server on networks that block or drop multicast DNS. Device discovery (the Scan LAN button) was already IP-based, and the co-hosted Grocy/Mealie browser links already prefer the LAN IP.
+- **Over-the-air Pi updates now refresh the Stream Deck too.** The update helper redeploys both the web app and the Stream Deck controller package (previously only the app), reinstalls Python dependencies only when they changed, restarts both services, and is safe to re-run after a manual `git pull`.
 
 ### Changed
 - **Settings menu reorganized into logical groups.** The Settings sidebar now groups its sections under Services, App, Devices & Hardware, and System headers instead of a flat list, so related settings sit together and the flow reads top to bottom. The satellite (Pi Remote) and Pi-only visibility rules are unchanged: a satellite still shows Main Server in place of the backend services, and Display/Stream Deck/Network stay Pi-only.
@@ -55,10 +57,6 @@ All notable changes to FoodAssistant are recorded here. The format is based on
 - **Stream Deck weather and forecast keys cycle.** Pressing the weather key cycles through stats and the forecast key cycles through days, each returning to its default after a short idle.
 - **AI Declarations moved.** The standalone AI Declarations page is gone; the same content now lives in a section of the About page and in `docs/AI_DECLARATIONS.md`.
 - **Cook icon unified.** Cook uses a flame icon consistently across the web UI and the Stream Deck.
-
-### Fixed
-- **Satellites survive a flaky mDNS.** A Pi Remote caches its main server's LAN IP on each successful sync and falls back to it automatically when the configured `.local` name stops resolving, so the satellite stays wired to its server on networks that block or drop multicast DNS. Device discovery (the Scan LAN button) was already IP-based, and the co-hosted Grocy/Mealie browser links already prefer the LAN IP.
-- **Over-the-air Pi updates now refresh the Stream Deck too.** The update helper redeploys both the web app and the Stream Deck controller package (previously only the app), reinstalls Python dependencies only when they changed, restarts both services, and is safe to re-run after a manual `git pull`.
 
 ## [0.6.0] - 2026-06-26
 
