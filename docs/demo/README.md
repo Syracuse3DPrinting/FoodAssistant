@@ -8,10 +8,10 @@ or host it as a static site.
 ## Live demo (Cloudflare)
 
 The demo is deployed from `docs/demo` as a Cloudflare **Workers Static Assets**
-site, configured by [`wrangler.toml`](../../wrangler.toml) at the repo root. With
-the Cloudflare dashboard connected to this repo, every push to `main` rebuilds
-and redeploys it automatically, so the published demo stays in step with the
-repo.
+site, configured by [`wrangler.toml`](wrangler.toml) in this folder. The dashboard
+build runs from `docs/demo` (so it never trips over the Python app at the repo
+root); every push to `main` rebuilds and redeploys it automatically, so the
+published demo stays in step with the repo.
 
 After the first deploy it lives at
 `https://foodassistant-demo.<your-subdomain>.workers.dev` (add a custom domain in
@@ -25,12 +25,12 @@ the dashboard if you want a nicer URL).
 | Build command | *(leave blank)* |
 | Deploy command | `npx wrangler deploy` |
 | Non-production branch deploy command | `npx wrangler versions upload` (or blank) |
-| Path | `/` |
+| **Path** | **`docs/demo`** (important: not `/`, so the build does not try to `pip install` the Python app) |
 | Variables / secrets | none needed |
 
-`wrangler.toml` points `[assets].directory` at `./docs/demo` and defines a
-static, script-less Worker, so `npx wrangler deploy` publishes the folder with no
-build step.
+`docs/demo/wrangler.toml` points `[assets].directory` at `.` and defines a
+static, script-less Worker, so `npx wrangler deploy` (run from `docs/demo`)
+publishes the folder with no build step.
 
 The build token's missing-permission warning (ssl_and_certificates, ai_search,
 connectivity_directory) is unrelated to a static deploy and can be ignored; those
