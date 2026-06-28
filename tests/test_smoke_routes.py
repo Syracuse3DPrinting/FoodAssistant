@@ -472,19 +472,18 @@ def test_floating_nav_renders_on_page(client):
 
 
 def test_small_screen_nav_markup_present(client):
-    """Small-screen nav simplification (FoodAssistant-q6ql).
+    """Phone-visible primary nav (FoodAssistant-97al).
 
-    The navbar tags essential vs secondary tabs and renders overflow copies of
-    the secondary tabs inside the #moreMenu dropdown; the CSS media query toggles
-    them on a narrow panel. Assert the server-rendered hooks exist so the CSS has
-    something to act on.
+    All page tabs live in the primary nav, which sits outside the Bootstrap
+    collapse and scrolls sideways on a narrow panel, so the main menu stays
+    visible instead of folding behind the hamburger. Assert the server-rendered
+    hooks the CSS acts on are present.
     """
     page = client.get("/ui/").text
-    # Essentials carry .nav-essential; other tabs carry .nav-secondary.
-    assert "nav-essential" in page
-    assert "nav-secondary" in page
-    # Secondary tabs also appear as hidden overflow copies in the kebab menu.
-    assert "nav-overflow-item" in page
+    # The primary nav is the always-visible scrollable tab row.
+    assert "nav-primary" in page
+    # The hamburger collapse now holds only the utility controls.
+    assert 'id="nav"' in page
 
 
 def test_kiosk_auto_enable_hooks_present(client):
