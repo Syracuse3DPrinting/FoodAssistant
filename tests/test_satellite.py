@@ -342,6 +342,18 @@ def test_streamdeck_weather_fields_are_pulled():
     assert "streamdeck_weather_units" in SATELLITE_PULL_FIELDS
 
 
+def test_streamdeck_visual_style_is_device_local():
+    """Key style and icon colour are a per-deck choice, NOT pulled from the
+    server, so a satellite can pick its own (e.g. the full-colour emoji set)
+    and have it stick instead of being overwritten on the next sync (ys79)."""
+    from app.services import satellite as sat
+
+    assert "streamdeck_key_style" not in SATELLITE_PULL_FIELDS
+    assert "streamdeck_icon_color" not in SATELLITE_PULL_FIELDS
+    assert "streamdeck_key_style" not in sat._STREAMDECK_SYNCED_FIELDS
+    assert "streamdeck_icon_color" not in sat._STREAMDECK_SYNCED_FIELDS
+
+
 def test_merge_streamdeck_settings_overlays_only_weather_and_theme():
     from app.services import satellite as sat
 

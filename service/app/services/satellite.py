@@ -97,7 +97,9 @@ _HOST_BRIDGE = "http://127.0.0.1:9299"
 # theme that recolours the keys (gxl).
 _STREAMDECK_SYNCED_FIELDS = (
     "streamdeck_weather_location", "streamdeck_weather_units", "ui_theme",
-    "streamdeck_key_style", "streamdeck_icon_color",
+    # key_style / icon_color are intentionally absent: they are a per-deck visual
+    # choice owned by the device the deck is attached to, not pulled from the
+    # server, so a satellite can set its own (FoodAssistant-ys79).
     # HA credentials/keys and cameras come from the server too, so a satellite's
     # deck drives the same entities and feeds without local setup (cr50).
     "streamdeck_ha_base_url", "streamdeck_ha_token", "streamdeck_ha_slots",

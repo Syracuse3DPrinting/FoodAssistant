@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.6.125"
+APP_VERSION = "0.6.126"
 
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
@@ -223,8 +223,11 @@ SATELLITE_PULL_FIELDS = [
     # Stream Deck weather widget config, so a satellite's deck matches the
     # server's location/units without separate local setup (FoodAssistant-bra).
     "streamdeck_weather_location", "streamdeck_weather_units",
-    # Stream Deck key visual style, so a satellite's deck looks like the server's.
-    "streamdeck_key_style", "streamdeck_icon_color",
+    # NOTE: streamdeck_key_style and streamdeck_icon_color are deliberately NOT
+    # pulled. They are a per-deck visual choice owned by the device the deck is
+    # attached to, so a satellite can pick its own key style / icon mode (e.g.
+    # the full-colour emoji set) and have it stick instead of being overwritten
+    # by the server on the next sync (FoodAssistant-ys79).
     # Cameras, so a satellite's kiosk page and deck mirror the server's feeds.
     "streamdeck_cameras",
     # Home Assistant credentials + key map, so a satellite's deck drives the same
