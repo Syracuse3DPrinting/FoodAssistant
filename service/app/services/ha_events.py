@@ -67,6 +67,13 @@ def add_camera(name: str = "", src: str = "", seconds: int = 0) -> int:
     })
 
 
+def add_navigate(path: str) -> int:
+    """Queue a kiosk page-change event. ``path`` is an app-relative path (e.g.
+    "ui/cook"), so a Home Assistant automation can drive which page the display
+    shows (FoodAssistant-i4rs). The kiosk navigates same-origin only."""
+    return _add({"type": "navigate", "path": str(path or "").strip()})
+
+
 def poll(after_id: int = 0) -> dict:
     """Events newer than ``after_id``, plus the current last id.
 

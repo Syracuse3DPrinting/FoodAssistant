@@ -101,6 +101,33 @@ def test_camera_popup_no_cameras(client, monkeypatch):
     assert client.post("/events/camera-popup", json={}).json()["ok"] is False
 
 
+def test_navigate_event_queued_and_polled(client):
+    r = client.post("/events/navigate", json={"path": "ui/cook"}).json()
+    assert r["ok"] is True and r["path"] == "ui/cook"
+    ev = client.get("/events/poll?since=0").json()["events"][-1]
+    assert ev["type"] == "navigate" and ev["path"] == "ui/cook"
+
+
+def test_navigate_strips_leading_slash_and_keeps_query(client):
+    r = client.post("/events/navigate", json={"path": "/ui/camera?cam=1"}).json()
+    assert r["ok"] is True and r["path"] == "ui/camera?cam=1"
+
+
+def test_navigate_rejects_external_and_scheme_targets(client):
+    for bad in ("http://evil.com", "//evil.com", "javascript:alert(1)", "", "  "):
+        assert client.post("/events/navigate", json={"path": bad}).json()["ok"] is False
+
+
+def test_safe_nav_path_unit():
+    from app.routers.events import safe_nav_path
+    assert safe_nav_path("ui/cook") == "ui/cook"
+    assert safe_nav_path("/ui/cook") == "ui/cook"
+    assert safe_nav_path("http://x/y") == ""
+    assert safe_nav_path("//x") == ""
+    assert safe_nav_path("javascript:x") == ""
+    assert safe_nav_path("") == ""
+
+
 def test_convert_tab_and_custom_rows(client, monkeypatch):
     from app.navigation import visible_tabs
     monkeypatch.setattr(settings, "nav_order", "", raising=False)

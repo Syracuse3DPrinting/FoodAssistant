@@ -92,9 +92,23 @@
     camTimer = setTimeout(closeCamera, secs * 1000);
   }
 
+  // --- navigate (HA drives the on-screen page) -----------------------------
+  function doNavigate(ev) {
+    var p = String(ev.path || '').replace(/^\/+/, '');
+    if (!p) return;
+    // Same-origin relative paths only: never follow a scheme or a
+    // protocol-relative URL the server should already have refused.
+    if (/^[a-z][a-z0-9+.-]*:/i.test(p) || p.indexOf('//') === 0) return;
+    // Already on this page: don't reload (avoids a refresh loop).
+    var here = window.location.pathname.replace(/^\/+/, '');
+    if (here === p || here === p.split('?')[0]) return;
+    try { window.location.assign(p); } catch (e) { /* ignore */ }
+  }
+
   function handle(ev) {
     if (ev.type === 'notification') showToast(ev);
     else if (ev.type === 'camera') showCamera(ev);
+    else if (ev.type === 'navigate') doNavigate(ev);
   }
 
   // --- poll loop ------------------------------------------------------------

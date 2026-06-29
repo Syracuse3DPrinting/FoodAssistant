@@ -37,6 +37,30 @@ class CameraPopupPayload(BaseModel):
     seconds: int = 0             # 0 = the configured default
 
 
+class NavigatePayload(BaseModel):
+    path: str = ""               # app-relative path, e.g. "ui/cook"
+
+
+def safe_nav_path(path: str) -> str:
+    """Reduce a requested navigation target to a safe same-origin relative path.
+
+    The kiosk navigates to whatever HA sends, so an absolute or scheme-bearing
+    URL (``http://...``, ``//evil``, ``javascript:``) must never get through.
+    Returns a cleaned relative path (leading slashes stripped) or "" when the
+    input is empty or not same-origin. Pure, so it is unit-testable.
+    """
+    p = (path or "").strip()
+    if not p:
+        return ""
+    low = p.lower()
+    if "://" in low or low.startswith(("//", "http:", "https:", "javascript:", "data:", "\\")):
+        return ""
+    # A scheme would show up as a colon in the first path segment.
+    if ":" in p.split("/", 1)[0]:
+        return ""
+    return p.lstrip("/")
+
+
 def _camera_src(name: str) -> tuple[str, str]:
     """Return (resolved_name, proxy_snapshot_src) for a camera by name, or ("","").
 
@@ -84,6 +108,18 @@ async def camera_popup(payload: CameraPopupPayload):
     seconds = payload.seconds or int(settings.ha_camera_popup_seconds or 20)
     eid = ha_events.add_camera(name=name, src=src, seconds=seconds)
     return {"ok": True, "id": eid, "camera": name}
+
+
+@router.post("/navigate")
+async def navigate(payload: NavigatePayload):
+    """Queue a page-change for the display so HA can drive which page is shown
+    (for example, jump the kitchen screen to the Cook page on a voice command,
+    FoodAssistant-i4rs). Same-origin relative paths only."""
+    path = safe_nav_path(payload.path)
+    if not path:
+        return {"ok": False, "error": "a valid same-origin path is required (e.g. ui/cook)"}
+    eid = ha_events.add_navigate(path)
+    return {"ok": True, "id": eid, "path": path}
 
 
 @router.post("/test")
