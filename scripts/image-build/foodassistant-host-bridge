@@ -603,6 +603,69 @@ def _touch_device_name(path="/proc/bus/input/devices"):
     return ""
 
 
+# Where the base calibration is remembered so it can follow a display rotation
+# (FoodAssistant-9ohp): the matrix the user fit, plus the rotation it was fit
+# at. The compositor does not transform touch, so a matrix taken at one rotation
+# is wrong at another; we recompose it by the rotation delta instead of making
+# the user recalibrate.
+_CALIB_STORE = "/etc/foodassistant/touch-calibration.json"
+
+# Rotation of normalized coordinates as a 2x3 affine [a b c d e f] mapping
+# (x,y) -> (a*x+b*y+c, d*x+e*y+f). The 90/270 pair is the clockwise/counter
+# convention; if a rotated display ends up mirrored the wrong way, swap them.
+_ROT_AFFINE = {
+    0:   [1, 0, 0, 0, 1, 0],
+    90:  [0, -1, 1, 1, 0, 0],    # (x,y) -> (1-y, x)
+    180: [-1, 0, 1, 0, -1, 1],   # (x,y) -> (1-x, 1-y)
+    270: [0, 1, 0, -1, 0, 1],    # (x,y) -> (y, 1-x)
+}
+
+
+def _compose_affine(t, m):
+    """Affine for t(m(x,y)); both are 2x3 [a b c d e f]."""
+    a, b, c, d, e, f = m
+    t0, t1, t2, t3, t4, t5 = t
+    return [t0 * a + t1 * d, t0 * b + t1 * e, t0 * c + t1 * f + t2,
+            t3 * a + t4 * d, t3 * b + t4 * e, t3 * c + t4 * f + t5]
+
+
+def _read_kiosk_rotation():
+    """Current kiosk rotation in degrees (0 when unset/normal)."""
+    try:
+        val = open("/etc/foodassistant/kiosk-rotation").read().strip()
+    except OSError:
+        return 0
+    return {"90": 90, "180": 180, "270": 270}.get(val, 0)
+
+
+def _store_base_calibration(matrix, rotation):
+    """Remember the fit matrix and the rotation it was taken at."""
+    try:
+        os.makedirs("/etc/foodassistant", exist_ok=True)
+        with open(_CALIB_STORE, "w") as f:
+            json.dump({"matrix": matrix, "rotation": int(rotation)}, f)
+    except OSError:
+        pass
+
+
+def _matrix_for_rotation(target_deg):
+    """The stored base calibration recomposed for target_deg, or None if there
+    is no base (then the panel default applies). Composes the rotation delta
+    onto the fit matrix: M_target = Rot(target - base) . M_base."""
+    try:
+        with open(_CALIB_STORE) as f:
+            base = json.load(f)
+    except (OSError, ValueError):
+        return None
+    parts = (base.get("matrix") or "").split()
+    if len(parts) != 6:
+        return None
+    m = [float(p) for p in parts]
+    delta = (int(target_deg) - int(base.get("rotation", 0))) % 360
+    composed = _compose_affine(_ROT_AFFINE.get(delta, _ROT_AFFINE[0]), m)
+    return " ".join("%.6g" % v for v in composed)
+
+
 def _write_calibration_rule(matrix):
     """Write the LIBINPUT_CALIBRATION_MATRIX udev rule and reload udev.
 
@@ -1080,10 +1143,27 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             cmd.append("--reboot")
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-            if r.returncode == 0:
-                self._send(200, {"ok": True})
-            else:
+            if r.returncode != 0:
                 self._send(500, {"ok": False, "error": (r.stderr or r.stdout).strip()})
+                return
+            # Follow the rotation with the calibration (9ohp): recompose the
+            # stored fit for the new rotation and reload it, so touch stays
+            # aligned without recalibrating. No-op when nothing is calibrated.
+            recomposed = False
+            if not reboot:
+                matrix = _matrix_for_rotation(degrees)
+                if matrix:
+                    try:
+                        _write_calibration_rule(matrix)
+                        if _service_active("foodassistant-kiosk.service"):
+                            subprocess.run(
+                                ["systemctl", "restart", "foodassistant-kiosk.service"],
+                                timeout=30,
+                            )
+                        recomposed = True
+                    except Exception:
+                        pass
+            self._send(200, {"ok": True, "calibration_recomposed": recomposed})
         except Exception as e:
             self._send(500, {"ok": False, "error": str(e)})
 
@@ -1108,6 +1188,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             # rather than shelling out to a separately installed helper, so this
             # works even on a device whose touch was configured by hand.
             target = _write_calibration_rule(" ".join(parts))
+            # Remember the fit and the rotation it was taken at, so the matrix
+            # can follow a later rotation change without recalibrating (9ohp).
+            _store_base_calibration(" ".join(parts), _read_kiosk_rotation())
             # The compositor (cage/wlroots) holds the touch device open and only
             # reads LIBINPUT_CALIBRATION_MATRIX when the device is added, so a
             # udevadm trigger alone does not change the live mapping. Restart the
@@ -1139,6 +1222,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             existed = os.path.exists(rule)
             if existed:
                 os.remove(rule)
+            # Forget the stored base so a later rotation does not re-apply it.
+            try:
+                os.remove(_CALIB_STORE)
+            except OSError:
+                pass
             subprocess.run(["udevadm", "control", "--reload-rules"], timeout=10)
             subprocess.run(["udevadm", "trigger", "--subsystem-match=input"], timeout=10)
             restarted = False

@@ -322,6 +322,36 @@ def test_hardware_status_nothing_attached(monkeypatch):
     }
 
 
+def test_calibration_recompose_for_rotation(tmp_path, monkeypatch):
+    # The stored fit follows a rotation change by composing the rotation delta
+    # (FoodAssistant-9ohp). Identity at the same rotation; a real rotation at a
+    # different one; and 90 then 270 round-trips back.
+    import json
+    store = tmp_path / "cal.json"
+    monkeypatch.setattr(bridge, "_CALIB_STORE", str(store))
+
+    store.write_text(json.dumps({"matrix": "1 0 0 0 1 0", "rotation": 0}))
+    assert bridge._matrix_for_rotation(0) == "1 0 0 0 1 0"          # delta 0 -> unchanged
+    assert bridge._matrix_for_rotation(90) == "0 -1 1 1 0 0"        # Rot90 . identity
+
+    # A fit taken at 90, asked for 90, is unchanged (delta 0).
+    store.write_text(json.dumps({"matrix": "1.2 0 0 0 1.3 0", "rotation": 90}))
+    assert bridge._matrix_for_rotation(90) == "1.2 0 0 0 1.3 0"
+
+    # No store -> None (panel default applies).
+    store.unlink()
+    assert bridge._matrix_for_rotation(180) is None
+
+
+def test_compose_affine_identity():
+    fit = [1.2, 0.1, -0.05, 0.05, 1.3, -0.1]
+    assert bridge._compose_affine(bridge._ROT_AFFINE[0], fit) == fit
+    # 90 then 270 is a full turn back to the original.
+    r90 = bridge._compose_affine(bridge._ROT_AFFINE[90], fit)
+    back = bridge._compose_affine(bridge._ROT_AFFINE[270], r90)
+    assert [round(v, 6) for v in back] == [round(v, 6) for v in fit]
+
+
 def test_touch_device_name_finds_ads7846(tmp_path):
     # The ADS7846 reports PROP=0 but its name carries "touch"/"ads7846", so the
     # name-hint match finds it for the calibration rule (FoodAssistant-mox4).
