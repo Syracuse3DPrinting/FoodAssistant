@@ -101,6 +101,47 @@ def test_setup_redirect_preserves_kiosk_flag(client, monkeypatch):
     assert r2.headers["location"].endswith("/setup")
 
 
+@pytest.mark.anyio
+async def test_touch_sse_reads_events_in_pure_python():
+    """The calibration stream reads the input device directly (no evtest):
+    feed synthetic input_event records through a pipe and confirm it emits a
+    ranges event then a tap on BTN_TOUCH release (FoodAssistant-mox4)."""
+    import json
+    import os
+    import struct
+    from app.routers import setup as s
+
+    r, w = os.pipe()
+
+    def _ev(etype, code, value):
+        return struct.pack(s._INPUT_EVENT_FORMAT, 0, 0, etype, code, value)
+
+    os.write(w, _ev(s._EV_ABS, s._ABS_X, 123)
+             + _ev(s._EV_ABS, s._ABS_Y, 456)
+             + _ev(s._EV_KEY, s._BTN_TOUCH, 0))
+
+    real_open = os.open
+
+    def _fake_open(path, flags, *a):
+        return r if path == "FAKEDEV" else real_open(path, flags, *a)
+
+    s.os.open = _fake_open
+    try:
+        msgs = []
+        gen = s._evtest_sse("FAKEDEV")
+        async for chunk in gen:
+            msgs.append(json.loads(chunk.removeprefix("data: ").strip()))
+            if len(msgs) >= 2:
+                await gen.aclose()
+                break
+    finally:
+        s.os.open = real_open
+        os.close(w)
+
+    assert msgs[0]["type"] == "ranges"            # ioctl falls back on a pipe
+    assert msgs[1] == {"type": "tap", "x": 123, "y": 456}
+
+
 def test_touchscreen_detection_by_name_and_capability():
     """_looks_like_touchscreen matches named controllers and unnamed direct
     pointers, and rejects a mouse (FoodAssistant-mox4)."""

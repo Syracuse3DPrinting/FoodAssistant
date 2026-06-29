@@ -1,6 +1,11 @@
 import asyncio
+import fcntl
 import json
+import os
 import re
+import select
+import struct
+import threading
 from pathlib import Path
 import httpx
 from fastapi import APIRouter, Request
@@ -1483,69 +1488,107 @@ def _find_touch_device() -> str | None:
     return None
 
 
-async def _evtest_sse(device: str):
-    """Async generator that yields SSE-formatted touch events from evtest."""
+# Linux input-event constants (linux/input-event-codes.h).
+_EV_KEY = 0x01
+_EV_ABS = 0x03
+_ABS_X = 0x00
+_ABS_Y = 0x01
+_BTN_TOUCH = 0x14A
+# struct input_event: a timeval (two longs) then type/code (u16) and value
+# (s32). Native sizing matches the running kernel's word size (8-byte longs on
+# a 64-bit kernel, 4-byte on 32-bit), so this adapts without per-arch branching.
+_INPUT_EVENT_FORMAT = "llHHi"
+_INPUT_EVENT_SIZE = struct.calcsize(_INPUT_EVENT_FORMAT)
+# struct input_absinfo: six s32 (value, min, max, fuzz, flat, resolution).
+_ABSINFO_FORMAT = "6i"
+_ABSINFO_SIZE = struct.calcsize(_ABSINFO_FORMAT)
+
+
+def _eviocgabs(axis: int) -> int:
+    """ioctl request number for EVIOCGABS(axis): _IOR('E', 0x40+axis, absinfo)."""
+    return (2 << 30) | (_ABSINFO_SIZE << 16) | (ord("E") << 8) | (0x40 + axis)
+
+
+def _abs_range(fd: int, axis: int, default_max: int = 4095) -> tuple[int, int]:
+    """Return (min, max) for an absolute axis via EVIOCGABS, or a sane default."""
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "evtest", device,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-    except FileNotFoundError:
-        yield f"data: {json.dumps({'type': 'error', 'msg': 'evtest not found'})}\n\n"
+        buf = bytearray(_ABSINFO_SIZE)
+        fcntl.ioctl(fd, _eviocgabs(axis), buf, True)
+        _value, minimum, maximum, _fuzz, _flat, _res = struct.unpack(_ABSINFO_FORMAT, bytes(buf))
+        if maximum > minimum:
+            return minimum, maximum
+    except OSError:
+        pass
+    return 0, default_max
+
+
+async def _evtest_sse(device: str):
+    """Stream touch axis ranges and taps from a kernel input device as SSE.
+
+    Reads the input device directly in Python rather than shelling out to
+    evtest, so it needs no extra binary in the image (the appliance container
+    mounts /dev/input). A background thread does the blocking reads and hands
+    completed taps to the async generator over a queue. Same shape as before: a
+    ranges event first, then a tap event on each BTN_TOUCH release."""
+    try:
+        fd = os.open(device, os.O_RDONLY | os.O_NONBLOCK)
+    except OSError as e:
+        yield "data: " + json.dumps({"type": "error", "msg": f"cannot open {device}: {e}"}) + "\n\n"
         return
 
-    code_x = None
-    ranges: dict = {}
-    ranges_sent = False
-    x = y = None
+    x_min, x_max = _abs_range(fd, _ABS_X)
+    y_min, y_max = _abs_range(fd, _ABS_Y)
+    yield "data: " + json.dumps({
+        "type": "ranges", "x_min": x_min, "x_max": x_max,
+        "y_min": y_min, "y_max": y_max,
+    }) + "\n\n"
 
-    try:
-        async for raw in proc.stdout:
-            line = raw.decode(errors="replace")
+    loop = asyncio.get_event_loop()
+    queue: asyncio.Queue = asyncio.Queue()
+    stop = threading.Event()
 
-            # Startup banner: parse axis ranges
-            if not ranges_sent:
-                cm = re.search(r"\(ABS_(X|Y)\)", line)
-                if cm:
-                    code_x = cm.group(1)
-                elif re.search(r"Event code \d+", line):
-                    code_x = None
-                mm = re.search(r"(Min|Max)\s+(-?\d+)", line)
-                if mm and code_x:
-                    ranges.setdefault(code_x, {})[mm.group(1)] = int(mm.group(2))
-                if "Testing" in line:
-                    ranges_sent = True
-                    x_range = ranges.get("X", {})
-                    y_range = ranges.get("Y", {})
-                    yield (
-                        "data: " + json.dumps({
-                            "type": "ranges",
-                            "x_min": x_range.get("Min", 0),
-                            "x_max": x_range.get("Max", 4095),
-                            "y_min": y_range.get("Min", 0),
-                            "y_max": y_range.get("Max", 4095),
-                        }) + "\n\n"
-                    )
-                continue
-
-            # Live events: report completed taps (BTN_TOUCH release)
-            mx = re.search(r"\(ABS_X\), value (-?\d+)", line)
-            my = re.search(r"\(ABS_Y\), value (-?\d+)", line)
-            mr = re.search(r"\(BTN_TOUCH\), value 0", line)
-            if mx:
-                x = int(mx.group(1))
-            elif my:
-                y = int(my.group(1))
-            elif mr and x is not None and y is not None:
-                yield (
-                    "data: " + json.dumps({"type": "tap", "x": x, "y": y}) + "\n\n"
-                )
-                x = y = None
-    finally:
+    def _read_loop():
+        x = y = None
         try:
-            proc.terminate()
-        except Exception:
+            while not stop.is_set():
+                # select with a timeout so the thread checks `stop` and exits
+                # promptly when the client disconnects, instead of blocking on a
+                # read until the next physical touch.
+                r, _, _ = select.select([fd], [], [], 0.5)
+                if not r:
+                    continue
+                try:
+                    data = os.read(fd, _INPUT_EVENT_SIZE * 64)
+                except OSError:
+                    break
+                for off in range(0, len(data) - _INPUT_EVENT_SIZE + 1, _INPUT_EVENT_SIZE):
+                    _s, _u, etype, code, value = struct.unpack(
+                        _INPUT_EVENT_FORMAT, data[off:off + _INPUT_EVENT_SIZE])
+                    if etype == _EV_ABS and code == _ABS_X:
+                        x = value
+                    elif etype == _EV_ABS and code == _ABS_Y:
+                        y = value
+                    elif etype == _EV_KEY and code == _BTN_TOUCH and value == 0 \
+                            and x is not None and y is not None:
+                        loop.call_soon_threadsafe(queue.put_nowait, (x, y))
+                        x = y = None
+        finally:
+            loop.call_soon_threadsafe(queue.put_nowait, None)
+
+    t = threading.Thread(target=_read_loop, daemon=True)
+    t.start()
+    try:
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            tx, ty = item
+            yield "data: " + json.dumps({"type": "tap", "x": tx, "y": ty}) + "\n\n"
+    finally:
+        stop.set()
+        try:
+            os.close(fd)
+        except OSError:
             pass
 
 
