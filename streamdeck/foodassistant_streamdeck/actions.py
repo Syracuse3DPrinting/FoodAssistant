@@ -134,6 +134,22 @@ class TimerState:
         self._minutes = minutes
         self._deadline = time.monotonic() + minutes * 60 if minutes else 0.0
 
+    def set_seconds(self, seconds: float) -> None:
+        """Start (or restart) the countdown at a fixed number of seconds.
+
+        Second-granular sibling of ``set_minutes`` used to mirror a running
+        shared server timer onto a recipe timer key, so the key shows the same
+        live countdown whether the timer was started on this deck or from
+        another surface (the recipe page, a satellite). A non-positive value
+        resets to idle. ``_minutes`` is only a nonzero "is set" sentinel here so
+        ``is_running()`` stays True; the actual remaining time comes from the
+        monotonic deadline.
+        """
+        seconds = max(0, int(seconds))
+        self.alerting = False
+        self._minutes = 1 if seconds > 0 else 0
+        self._deadline = time.monotonic() + seconds if seconds else 0.0
+
     def long_press(self) -> None:
         """Reset the timer to idle immediately."""
         self.alerting = False
@@ -1552,6 +1568,60 @@ async def fetch_timer_suggestions(client: Any, base_url: str) -> list[dict]:
     except Exception:  # noqa: BLE001 - surface as no suggestions, never crash
         pass
     return []
+
+
+async def fetch_timers(client: Any, base_url: str) -> list[dict]:
+    """Fetch every running shared timer from the server, or [] on any failure.
+
+    Each entry is the server's timer dict (label, remaining_seconds, running,
+    expired, deadline_epoch, ...). Used to mirror a recipe timer started on
+    another surface onto the matching deck key. A network or service error
+    collapses to [] so the timer keys quietly keep their last state.
+    """
+    base = base_url.rstrip("/")
+    try:
+        r = await client.get(f"{base}/timers")
+        if r.status_code == 200:
+            data = r.json()
+            out = data.get("timers", [])
+            return out if isinstance(out, list) else []
+    except Exception:  # noqa: BLE001 - surface as no timers, never crash
+        pass
+    return []
+
+
+def running_timer_remaining(
+    server_timers: list[dict], label: str, now_epoch: float,
+) -> Optional[int]:
+    """Whole seconds left on a running shared timer matching ``label``, or None.
+
+    Joins a deck recipe timer key to a server timer by their cleaned labels, so
+    a suggestion shown as "Add ginger" on the deck (truncated from the full step
+    text) matches the server timer the recipe page started from that same step.
+    Remaining is computed from the timer's shared ``deadline_epoch`` against the
+    surface's own wall clock, the satellite-shareable formula, so a timer started
+    anywhere shows the same countdown here. Expired, label-mismatched, and
+    already-elapsed timers yield None. Pure, so it is unit-testable without I/O.
+    """
+    want = clean_timer_label(label)
+    if not want:
+        return None
+    for t in server_timers or []:
+        if not isinstance(t, dict) or t.get("expired"):
+            continue
+        if clean_timer_label(t.get("label", "")) != want:
+            continue
+        deadline = t.get("deadline_epoch")
+        if deadline is None:
+            continue
+        try:
+            remaining = float(deadline) - now_epoch
+        except (TypeError, ValueError):
+            continue
+        if remaining <= 0:
+            continue
+        return int(remaining)
+    return None
 
 
 async def fetch_meal_today(client: Any, base_url: str, fallback: str = "No meal") -> str:

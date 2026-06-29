@@ -612,12 +612,19 @@ class Controller:
         recipe_seconds = recipe_spec.get("seconds") if recipe_spec else None
         preset = self._override_timer_minutes(name)
         starting_fresh = not timer.is_running() and not timer.alert_active()
+        # A short press on an already-running recipe timer is a shortcut to the
+        # recipe: jump the kiosk to the Current Recipe page and leave the
+        # countdown untouched (FoodAssistant-y7ud). A long press still resets it.
+        if recipe_spec is not None and timer.is_running() and not long_press:
+            self._navigate_async("ui/current-recipe")
+            return
         if long_press:
             timer.long_press()
         elif recipe_seconds and starting_fresh:
-            # Drive the local countdown from the suggestion (the existing
-            # rendering keeps working) and start the shared server timer too.
-            timer.set_minutes(round(float(recipe_seconds) / 60))
+            # Drive the local countdown from the suggestion at second precision
+            # (the existing rendering keeps working) and start the shared server
+            # timer too so other surfaces show the same countdown.
+            timer.set_seconds(float(recipe_seconds))
             self._start_recipe_server_timer(recipe_spec)
         elif preset > 0 and starting_fresh:
             # A preset key loads its whole duration on one press, so it maps
@@ -709,6 +716,45 @@ class Controller:
                 new_map[name] = spec
         if new_map != self.recipe_timer_specs:
             self.recipe_timer_specs = new_map
+            self._draw_page()
+
+    def _sync_recipe_timer_runtime(self, server_timers: list[dict]) -> bool:
+        """Mirror running shared timers onto their recipe timer keys.
+
+        For each timer key carrying an active-recipe suggestion, find the
+        matching running server timer (joined by cleaned label) and drive the
+        key's local TimerState from its remaining time, so a recipe timer started
+        on another surface (the recipe page, a satellite) shows a live countdown
+        on the deck too (FoodAssistant-y7ud). Re-sync only when the local face is
+        off by more than a second, so a steady countdown does not force a redraw
+        every poll. Returns True when something changed. Pure of I/O: the caller
+        fetches the timer list."""
+        changed = False
+        now = time.time()
+        for name, spec in self.recipe_timer_specs.items():
+            remaining = actions.running_timer_remaining(
+                server_timers, spec.get("label", ""), now
+            )
+            if remaining is None or remaining <= 0:
+                continue
+            timer = self.timers.get(name)
+            if timer is None:
+                timer = self.timers[name] = TimerState()
+            if not timer.is_running() or abs(timer.remaining_seconds() - remaining) > 1:
+                timer.set_seconds(remaining)
+                changed = True
+        return changed
+
+    async def _refresh_recipe_timer_runtime(self) -> None:
+        """Poll the shared timers and reflect any running recipe timer on its key.
+
+        Best-effort and only when a recipe is active (there are suggestion specs
+        to match against), so a deck with no active recipe never pays for the
+        call. Redraws when a face changed."""
+        if self.client is None or not self.recipe_timer_specs:
+            return
+        server_timers = await actions.fetch_timers(self.client, self.config.base_url)
+        if self._sync_recipe_timer_runtime(server_timers):
             self._draw_page()
 
     def _has_kind(self, *kinds: str) -> bool:
@@ -1273,6 +1319,16 @@ class Controller:
             self.page = (self.page - 1) % len(self.pages)
         self._draw_page()
 
+    def _navigate_async(self, path: str) -> None:
+        """Schedule a kiosk navigation from a synchronous key handler.
+
+        Best-effort and only when the event loop is live, so a unit test that
+        calls a press handler without a running loop simply skips the jump.
+        """
+        if self.loop is None or not self.loop.is_running():
+            return
+        self.loop.create_task(self._navigate(path))
+
     async def _navigate(self, path: str) -> bool:
         url = f"{self.config.base_url}/{path.lstrip('/')}"
         if self.config.kiosk_cdp_url and self.client is not None:
@@ -1322,6 +1378,9 @@ class Controller:
         # status counts (sbu3). Defensive inside, so a failure never disturbs the
         # status poll above.
         await self._refresh_recipe_timers()
+        # Reflect any running shared recipe timer (possibly started on another
+        # surface) onto its deck key as a live countdown, same cadence (y7ud).
+        await self._refresh_recipe_timer_runtime()
         # Refresh today's planned meal for any meal_today info key, on the same
         # cadence. Skipped when no such key is shown so the poll stays cheap.
         await self._refresh_meal_today()

@@ -1376,6 +1376,69 @@ def test_start_recipe_timer_tolerates_failure():
     assert ok is False
 
 
+# -- running shared timer sync (FoodAssistant-y7ud) ------------------------
+
+
+def test_set_seconds_starts_second_granular_countdown():
+    t = actions.TimerState()
+    t.set_seconds(95)
+    assert t.is_running()
+    # Remaining is second-granular, not rounded to a whole minute.
+    assert 93 <= t.remaining_seconds() <= 95
+    label = t.label("Add ginger")
+    assert label == "1:35" or label == "1:34"
+    # Zero (or negative) resets the timer to idle.
+    t.set_seconds(0)
+    assert not t.is_running()
+    assert t.label("Add ginger") == "Add ginger"
+
+
+def test_fetch_timers_returns_list():
+    client = _FakeClient(
+        get_map={
+            "/timers": _Resp(
+                200, {"timers": [{"id": 1, "label": "Pasta", "deadline_epoch": 100.0,
+                                  "running": True, "expired": False}]}
+            )
+        }
+    )
+    out = asyncio.run(actions.fetch_timers(client, "http://x"))
+    assert out and out[0]["label"] == "Pasta"
+
+
+def test_fetch_timers_tolerates_errors():
+    assert asyncio.run(actions.fetch_timers(_FakeClient(), "http://x")) == []
+
+
+def test_running_timer_remaining_matches_cleaned_label():
+    # The deck key shows a truncated suggestion; the server timer (started from
+    # the recipe page) carries the full step text. They join on cleaned labels.
+    server = [{"label": "Add ginger and garlic to the pan",
+               "deadline_epoch": 1000.0, "expired": False}]
+    deck_label = actions.clean_timer_label("Add ginger and garlic to the pan")
+    remaining = actions.running_timer_remaining(server, deck_label, now_epoch=940.0)
+    assert remaining == 60
+
+
+def test_running_timer_remaining_none_when_expired_absent_or_elapsed():
+    now = 1000.0
+    # Expired timer is ignored.
+    assert actions.running_timer_remaining(
+        [{"label": "Pasta", "deadline_epoch": 1100.0, "expired": True}], "Pasta", now
+    ) is None
+    # A deadline already in the past yields None.
+    assert actions.running_timer_remaining(
+        [{"label": "Pasta", "deadline_epoch": 900.0, "expired": False}], "Pasta", now
+    ) is None
+    # No label match.
+    assert actions.running_timer_remaining(
+        [{"label": "Rice", "deadline_epoch": 1100.0, "expired": False}], "Pasta", now
+    ) is None
+    # Empty inputs.
+    assert actions.running_timer_remaining([], "Pasta", now) is None
+    assert actions.running_timer_remaining([{"label": "Pasta"}], "", now) is None
+
+
 # -- weather widget ---------------------------------------------------------
 
 
@@ -2237,6 +2300,82 @@ def test_watchdog_retries_until_deck_replugged():
     loop.run_until_complete(ctrl._watchdog_once())
     assert ctrl._deck_live is True
     assert deck.open_calls >= 2
+    loop.close()
+
+
+# -- running recipe timer sync + navigation (FoodAssistant-y7ud) ----------
+
+
+def test_sync_recipe_timer_runtime_drives_local_countdown():
+    import time as _time
+    ctrl, deck, loop = _make_controller()
+    # A recipe is active: timer_1 carries the "Add ginger" suggestion.
+    ctrl.recipe_timer_specs = {
+        "timer_1": {"label": "Add ginger", "seconds": 120, "step_index": 1}
+    }
+    # A running shared timer for that step, started elsewhere, 90s left.
+    server = [{"label": "Add ginger", "deadline_epoch": _time.time() + 90,
+               "expired": False}]
+    assert ctrl._sync_recipe_timer_runtime(server) is True
+    t = ctrl.timers["timer_1"]
+    assert t.is_running()
+    assert 88 <= t.remaining_seconds() <= 90
+    # A steady countdown a moment later does not force another redraw.
+    assert ctrl._sync_recipe_timer_runtime(server) is False
+    loop.close()
+
+
+def test_sync_recipe_timer_runtime_ignores_unmatched():
+    ctrl, deck, loop = _make_controller()
+    ctrl.recipe_timer_specs = {"timer_1": {"label": "Add ginger", "seconds": 120}}
+    # No matching running timer: nothing changes and no idle timer is created.
+    assert ctrl._sync_recipe_timer_runtime([]) is False
+    assert "timer_1" not in ctrl.timers
+    loop.close()
+
+
+def test_press_running_recipe_timer_navigates_to_current_recipe():
+    ctrl, deck, loop = _make_controller()
+    jumped = []
+    ctrl._navigate_async = lambda path: jumped.append(path)
+    ctrl.recipe_timer_specs = {"timer_1": {"label": "Add ginger", "seconds": 120}}
+    # Mark the key as already running (as if synced from the server).
+    t = ctrl.timers["timer_1"] = actions.TimerState()
+    t.set_seconds(90)
+    before = t.remaining_seconds()
+    ctrl._timer_press("timer_1", long_press=False)
+    # The press jumped to the recipe and left the countdown untouched.
+    assert jumped == ["ui/current-recipe"]
+    assert t.is_running()
+    assert abs(t.remaining_seconds() - before) <= 1
+    loop.close()
+
+
+def test_press_idle_recipe_timer_starts_countdown_not_navigation():
+    ctrl, deck, loop = _make_controller()
+    jumped = []
+    ctrl._navigate_async = lambda path: jumped.append(path)
+    ctrl.recipe_timer_specs = {"timer_1": {"label": "Add ginger", "seconds": 120}}
+    ctrl._timer_press("timer_1", long_press=False)
+    # An idle recipe timer starts its countdown (no jump) at second precision.
+    assert jumped == []
+    t = ctrl.timers["timer_1"]
+    assert t.is_running()
+    assert 118 <= t.remaining_seconds() <= 120
+    loop.close()
+
+
+def test_long_press_running_recipe_timer_resets_instead_of_navigating():
+    ctrl, deck, loop = _make_controller()
+    jumped = []
+    ctrl._navigate_async = lambda path: jumped.append(path)
+    ctrl.recipe_timer_specs = {"timer_1": {"label": "Add ginger", "seconds": 120}}
+    t = ctrl.timers["timer_1"] = actions.TimerState()
+    t.set_seconds(90)
+    ctrl._timer_press("timer_1", long_press=True)
+    # A long press resets the timer and never navigates.
+    assert jumped == []
+    assert not t.is_running()
     loop.close()
 
 
