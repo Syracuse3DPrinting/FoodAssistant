@@ -888,6 +888,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._set_rotation()
         elif self.path == "/touch/calibrate":
             self._touch_calibrate()
+        elif self.path == "/touch/calibrate/reset":
+            self._touch_calibrate_reset()
         elif self.path == "/streamdeck/restart":
             self._streamdeck_restart()
         elif self.path == "/kiosk/restart":
@@ -1125,6 +1127,31 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 "message": "Calibration applied to %s." % target,
                 "kiosk_restarted": restarted,
             })
+        except Exception as e:
+            self._send(500, {"ok": False, "error": str(e)})
+
+    def _touch_calibrate_reset(self):
+        # Remove the calibration matrix so touch reverts to the panel/overlay
+        # default. Used when a calibration came out wrong; the bridge runs as
+        # root and can delete the udev rule and reload udev.
+        try:
+            rule = "/etc/udev/rules.d/99-foodassistant-touch.rules"
+            existed = os.path.exists(rule)
+            if existed:
+                os.remove(rule)
+            subprocess.run(["udevadm", "control", "--reload-rules"], timeout=10)
+            subprocess.run(["udevadm", "trigger", "--subsystem-match=input"], timeout=10)
+            restarted = False
+            if _service_active("foodassistant-kiosk.service"):
+                try:
+                    subprocess.run(
+                        ["systemctl", "restart", "foodassistant-kiosk.service"],
+                        timeout=30,
+                    )
+                    restarted = True
+                except Exception:
+                    pass
+            self._send(200, {"ok": True, "removed": existed, "kiosk_restarted": restarted})
         except Exception as e:
             self._send(500, {"ok": False, "error": str(e)})
 

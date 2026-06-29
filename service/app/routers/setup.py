@@ -1656,6 +1656,20 @@ async def calibrate_touch_cancel_pending():
     return {"pending": pending}
 
 
+@router.post("/calibrate/touch/reset")
+async def calibrate_touch_reset():
+    """Remove the calibration matrix (revert to the panel default), via the
+    host bridge. Used to recover from a calibration that came out wrong."""
+    if not is_raspberry_pi():
+        return JSONResponse({"ok": False, "error": "Not available on this platform."})
+    try:
+        async with httpx.AsyncClient(timeout=40.0) as c:
+            r = await c.post(f"{_HOST_BRIDGE}/touch/calibrate/reset")
+        return r.json()
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+
+
 # Kiosk navigate-to-dashboard
 # ---------------------------
 # When the setup wizard is finished from a remote browser, the Pi's attached

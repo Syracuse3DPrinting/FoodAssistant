@@ -2054,7 +2054,11 @@ docker compose up -d</code></pre>
               <button class="btn btn-outline-secondary btn-sm" onclick="startTouchCalibration()">
                 <i class="bi bi-crosshair me-1"></i>Calibrate touchscreen
               </button>
-              <div class="form-text">Launches a four-corner tap test on the Pi's attached touchscreen. Stand at the device and tap each crosshair.</div>
+              <button class="btn btn-outline-secondary btn-sm ms-1" onclick="resetTouchCalibration()"
+                      title="Remove the calibration matrix and revert to the panel default">
+                <i class="bi bi-arrow-counterclockwise me-1"></i>Reset calibration
+              </button>
+              <div class="form-text">Launches a four-corner tap test on the Pi's attached touchscreen. Stand at the device and tap each crosshair. If a calibration comes out wrong, Reset reverts to the panel default.</div>
               <div class="test-result mt-2" id="touch-calibrate-result"></div>
             </div>
             {% endif %}
@@ -6040,6 +6044,24 @@ async function startTouchCalibration() {
     }
   } catch (e) {
     if (el) { el.className = 'test-result mt-2 text-danger'; el.textContent = 'Request failed: ' + e; }
+  }
+}
+
+// Remove the stored calibration matrix and revert touch to the panel default.
+async function resetTouchCalibration() {
+  const el = document.getElementById('touch-calibrate-result');
+  if (el) { el.className = 'test-result mt-2 text-info'; el.textContent = 'Resetting...'; }
+  try {
+    const r = await fetch('/setup/calibrate/touch/reset', { method: 'POST' });
+    const data = await r.json();
+    if (el) {
+      el.className = 'test-result mt-2 ' + (data.ok ? 'text-success' : 'text-danger');
+      el.textContent = data.ok
+        ? 'Calibration reset to the panel default. The kiosk display restarts to apply it.'
+        : 'Reset failed: ' + (data.error || 'unknown error');
+    }
+  } catch (e) {
+    if (el) { el.className = 'test-result mt-2 text-danger'; el.textContent = 'Reset failed: ' + e; }
   }
 }
 
