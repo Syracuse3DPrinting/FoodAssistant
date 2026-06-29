@@ -59,22 +59,34 @@
     { label: 'bottom-left',  tx: 0.05, ty: 0.95 },
   ];
 
-  // The compositor (wlroots) applies the output transform to touch input as
-  // well as the display, so a calibration done in the visible (rotated) frame
-  // would be rotated a second time at runtime. The libinput matrix runs before
-  // the output transform, so we fit it to the pre-transform target: the inverse
-  // of wlroots' apply_output_transform.
-  //   T_90(x,y)  = (y, 1-x)      ->  inv: (u,v) -> (1-v, u)
-  //   T_180(x,y) = (1-x, 1-y)    ->  inv: (u,v) -> (1-u, 1-v)
-  //   T_270(x,y) = (1-y, x)      ->  inv: (u,v) -> (v, 1-u)
   const ROTATION = parseInt({{ rotation | default(0) | tojson }}, 10) || 0;
-  function preTransform(tx, ty) {
-    switch (ROTATION) {
-      case 90:  return [1 - ty, tx];
-      case 180: return [1 - tx, 1 - ty];
-      case 270: return [ty, 1 - tx];
-      default:  return [tx, ty];
-    }
+
+  // Approach: fit the affine straight from raw to the VISIBLE target positions
+  // (this is what works at rotation 0), then compose the result with the inverse
+  // of the compositor's output transform for the current rotation. The
+  // compositor applies its transform to touch at runtime, so composing its
+  // inverse here cancels it and the net mapping stays raw -> visible target at
+  // any rotation. Normalized-coordinate inverse-transform matrices (2x3,
+  // [a b c d e f] mapping (x,y) -> (a*x+b*y+c, d*x+e*y+f)):
+  const INV_OUTPUT_TRANSFORM = {
+    0:   [1, 0, 0, 0, 1, 0],
+    90:  [0, 1, 0, -1, 0, 1],   // (x,y) -> (y, 1-x)
+    180: [-1, 0, 1, 0, -1, 1],  // (x,y) -> (1-x, 1-y)
+    270: [0, -1, 1, 1, 0, 0],   // (x,y) -> (1-y, x)
+  };
+
+  // Compose t (2x3) after m (2x3): returns the affine for t(m(x,y)).
+  function composeAffine(t, m) {
+    const [a, b, c, d, e, f] = m;
+    const [t0, t1, t2, t3, t4, t5] = t;
+    return [
+      t0 * a + t1 * d,
+      t0 * b + t1 * e,
+      t0 * c + t1 * f + t2,
+      t3 * a + t4 * d,
+      t3 * b + t4 * e,
+      t3 * c + t4 * f + t5,
+    ];
   }
 
   let es = null;
@@ -156,7 +168,11 @@
   }
 
   async function applyCalibration() {
-    const coeffs = solveAffine(samples);
+    const fit = solveAffine(samples);
+    // Fold in the inverse of the compositor's rotation so the matrix stays
+    // correct once the compositor transforms touch at runtime.
+    const inv = INV_OUTPUT_TRANSFORM[ROTATION] || INV_OUTPUT_TRANSFORM[0];
+    const coeffs = composeAffine(inv, fit);
     const matrix = coeffs.map(v => v.toFixed(4)).join(' ');
     msgEl.textContent = 'Applying calibration...';
     try {
@@ -200,8 +216,8 @@
         const nx = (d.x - ranges.x_min) / xr;
         const ny = (d.y - ranges.y_min) / yr;
         const c = CORNERS[step];
-        const [fx, fy] = preTransform(c.tx, c.ty);
-        samples.push([nx, ny, fx, fy]);
+        // Fit to the VISIBLE target; the rotation is folded in at apply time.
+        samples.push([nx, ny, c.tx, c.ty]);
         step++;
         if (step < CORNERS.length) {
           showCorner(step);
