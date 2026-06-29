@@ -70,11 +70,14 @@
     <span class="navbar-brand"><i class="bi bi-fridge me-2 text-info"></i>FoodAssistant</span>
     <ul class="navbar-nav flex-row flex-wrap gap-1" id="nav">
       <li class="nav-item"><button class="nav-link active px-2" data-screen="inventory"><i class="bi bi-grid me-1"></i>Inventory</button></li>
+      <li class="nav-item"><button class="nav-link px-2" data-screen="expiring"><i class="bi bi-clock-history me-1"></i>Expiring</button></li>
       <li class="nav-item"><button class="nav-link px-2" data-screen="add"><i class="bi bi-plus-circle me-1"></i>Add Food</button></li>
       <li class="nav-item"><button class="nav-link px-2" data-screen="cook"><i class="bi bi-fire me-1"></i>Cook</button></li>
+      <li class="nav-item"><button class="nav-link px-2" data-screen="mealplan"><i class="bi bi-calendar-week me-1"></i>Meal Plan</button></li>
       <li class="nav-item"><button class="nav-link px-2" data-screen="camera"><i class="bi bi-camera-video me-1"></i>Camera</button></li>
       <li class="nav-item"><button class="nav-link px-2" data-screen="convert"><i class="bi bi-rulers me-1"></i>Convert</button></li>
       <li class="nav-item"><button class="nav-link px-2" data-screen="deck"><i class="bi bi-grid-3x3-gap me-1"></i>Stream Deck</button></li>
+      <li class="nav-item"><button class="nav-link px-2" data-screen="settings"><i class="bi bi-gear me-1"></i>Settings</button></li>
     </ul>
   </div>
 </nav>
@@ -94,6 +97,21 @@
       <span class="text-secondary small">Stock grouped by storage. Items expiring soon are flagged.</span>
     </div>
     <div class="row g-3" id="inv-panels"></div>
+  </section>
+
+  <!-- EXPIRING -->
+  <section class="screen" id="screen-expiring">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 my-3">
+      <h4 class="mb-0"><i class="bi bi-clock-history me-2"></i>Expiring items</h4>
+      <span class="text-secondary small">What needs using up, soonest first.</span>
+    </div>
+    <div class="row g-3 mb-4" id="exp-summary"></div>
+    <div class="table-responsive">
+      <table class="table table-hover align-middle">
+        <thead><tr><th>Item</th><th>Amount</th><th>Location</th><th>Status</th><th></th></tr></thead>
+        <tbody id="exp-rows"></tbody>
+      </table>
+    </div>
   </section>
 
   <!-- ADD / SCAN -->
@@ -118,6 +136,17 @@
     <h4 class="my-3"><i class="bi bi-fire me-2"></i>What can I cook?</h4>
     <p class="text-secondary">Recipes ranked by how much is already in stock. Items expiring soon nudge a recipe up.</p>
     <div id="cook-tiers"></div>
+  </section>
+
+  <!-- MEAL PLAN -->
+  <section class="screen" id="screen-mealplan">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 my-3">
+      <h4 class="mb-0"><i class="bi bi-calendar-week me-2"></i>Meal plan</h4>
+      <span class="text-secondary small">This week, synced with Mealie. Drag recipes onto a slot in the real app.</span>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-bordered align-middle text-center mb-0" id="plan-table"></table>
+    </div>
   </section>
 
   <!-- CAMERA -->
@@ -177,6 +206,13 @@
     <p class="text-secondary">A kitchen control surface. Tap a key to see what it does. The real editor lets you drag your own custom keys onto the grid.</p>
     <div class="deck" id="deck"></div>
     <div class="alert alert-secondary mt-3 mb-0" id="deck-msg">Tap a key&hellip;</div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section class="screen" id="screen-settings">
+    <h4 class="my-3"><i class="bi bi-gear me-2"></i>Settings</h4>
+    <p class="text-secondary">A guided setup wizard connects each service. Everything is optional except Grocy, the inventory backend.</p>
+    <div class="row g-3" id="settings-cards"></div>
   </section>
 
   <footer class="text-secondary small text-center pt-4 mt-4 border-top">
@@ -370,8 +406,74 @@ function renderDeck(){
   d.querySelectorAll('.key').forEach(el=>el.onclick=()=>document.getElementById('deck-msg').innerHTML=`<strong>${el.dataset.l}</strong> &mdash; ${el.dataset.m}`);
 }
 
+// ---- Expiring -------------------------------------------------------------
+function expStatus(d){
+  if (d<=0) return '<span class="badge text-bg-warning">Today</span>';
+  if (d<=3) return `<span class="badge text-bg-warning">${d}d left</span>`;
+  return `<span class="badge text-bg-success">${d}d left</span>`;
+}
+function renderExpiring(){
+  // Derive from the same inventory data; show anything within two weeks.
+  const rows = [];
+  PANELS.forEach(p => p.items.forEach(it => { if (it.d <= 14) rows.push({...it, loc:p.label}); }));
+  rows.sort((a,b)=>a.d-b.d);
+  const counts = {exp:0, today:0, soon:0, later:0};
+  rows.forEach(r => { if (r.d<0) counts.exp++; else if (r.d===0) counts.today++; else if (r.d<=3) counts.soon++; else counts.later++; });
+  const card = (n,v,cls)=>`<div class="col-6 col-md-3"><div class="card text-center ${cls}"><div class="card-body py-2">
+    <div class="fs-3 fw-bold">${v}</div><div class="text-secondary small">${n}</div></div></div></div>`;
+  document.getElementById('exp-summary').innerHTML =
+    card('Expired',counts.exp,'border-danger') + card('Today',counts.today,'border-warning')
+    + card('Within 3 Days',counts.soon,'') + card('Later',counts.later,'');
+  document.getElementById('exp-rows').innerHTML = rows.map(r => `<tr>
+    <td><strong>${esc(r.n)}</strong></td><td>${esc(r.q)}</td>
+    <td><span class="badge bg-secondary">${esc(r.loc)}</span></td><td>${expStatus(r.d)}</td>
+    <td><button class="btn btn-sm btn-outline-success py-0 px-1" title="Mark consumed"><i class="bi bi-check-lg"></i></button></td></tr>`).join('');
+}
+
+// ---- Meal plan ------------------------------------------------------------
+const PLAN_DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+const PLAN = {
+  Breakfast:['Greek yogurt & berries','Oatmeal','Cheesy scrambled eggs','Smoothie','Banana oat pancakes','Avocado toast','Bagels & lox'],
+  Lunch:    ['Tomato pasta','Leftover chicken','Spinach salad','Grain bowl','Soup & bread','Tacos','Sandwiches'],
+  Dinner:   ['Garlic butter chicken','Chicken parmesan','Spaghetti aglio e olio','Stir-fry','Pizza night','Roast & veg','Creamed spinach'],
+};
+function renderMealPlan(){
+  let html = '<thead><tr><th></th>' + PLAN_DAYS.map(d=>`<th class="text-secondary small">${d}</th>`).join('') + '</tr></thead><tbody>';
+  for (const meal of Object.keys(PLAN)){
+    html += `<tr><th class="text-start text-secondary small align-middle">${meal}</th>` + PLAN[meal].map(r =>
+      `<td class="small"><span class="d-inline-block px-2 py-1 rounded bg-body-tertiary">${esc(r)}</span></td>`).join('') + '</tr>';
+  }
+  document.getElementById('plan-table').innerHTML = html + '</tbody>';
+}
+
+// ---- Settings -------------------------------------------------------------
+const SETTINGS = [
+  {icon:'bi-box-seam', name:'Grocy', ok:true, note:'Inventory backend', fields:[['URL','grocy.home.lan'],['Status','Connected']]},
+  {icon:'bi-journal-richtext', name:'Mealie', ok:true, note:'Recipes, meal plan, shopping', fields:[['URL','mealie.home.lan'],['API','v1 detected']]},
+  {icon:'bi-stars', name:'AI provider', ok:true, note:'Vision & recipe generation', fields:[['Provider','Anthropic'],['Model','claude (vision)']]},
+  {icon:'bi-house-gear', name:'Home Assistant', ok:false, note:'Cameras, notifications, voice', fields:[['Status','Not configured']]},
+  {icon:'bi-display', name:'Interface', ok:true, note:'Theme, kiosk, display', fields:[['Theme','Dark'],['Kiosk','Auto on Pi display']]},
+  {icon:'bi-hdd-network', name:'Stream Deck', ok:true, note:'Physical control surface', fields:[['Device','15-key'],['Pages','Kitchen, Home']]},
+];
+function renderSettings(){
+  document.getElementById('settings-cards').innerHTML = SETTINGS.map(s => `
+    <div class="col-md-6 col-xl-4"><div class="card h-100"><div class="card-body">
+      <div class="d-flex align-items-center gap-2 mb-1">
+        <i class="bi ${s.icon} fs-5"></i><span class="fw-semibold">${esc(s.name)}</span>
+        <span class="badge ${s.ok?'text-bg-success':'text-bg-secondary'} ms-auto">${s.ok?'Connected':'Not set up'}</span>
+      </div>
+      <div class="text-secondary small mb-2">${esc(s.note)}</div>
+      <table class="table table-sm table-borderless mb-2 small"><tbody>${
+        s.fields.map(([k,v])=>`<tr><td class="text-secondary">${esc(k)}</td><td class="text-end">${esc(v)}</td></tr>`).join('')
+      }</tbody></table>
+      <button class="btn btn-sm ${s.ok?'btn-outline-secondary':'btn-outline-primary'} w-100">
+        <i class="bi ${s.ok?'bi-pencil':'bi-plug'} me-1"></i>${s.ok?'Edit':'Connect'}</button>
+    </div></div></div>`).join('');
+}
+
 // ---- Init -----------------------------------------------------------------
-renderInventory(); renderPending(); renderCook(); renderCamSwitch(); fillUnits(); buildKeypad(); convert(); renderDeck();
+renderInventory(); renderExpiring(); renderPending(); renderCook(); renderMealPlan();
+renderCamSwitch(); fillUnits(); buildKeypad(); convert(); renderDeck(); renderSettings();
 </script>
 </body>
 </html>
