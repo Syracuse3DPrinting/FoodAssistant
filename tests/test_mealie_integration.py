@@ -176,3 +176,41 @@ async def test_end_to_end_classify_tiering(mealie_env, monkeypatch, tmp_path):
     # Salmon (perishable, expiring) in stock but coconut milk + curry paste missing.
     assert {r["name"] for r in tiers["shopping"]} == {"Salmon Curry"}
     m.reset_staple_cache()
+
+
+@pytest.mark.anyio
+async def test_create_recipe_instructions_carry_ingredient_references(monkeypatch):
+    """Mealie 3.19+ requires ingredientReferences on each instruction, so the
+    create PATCH must include it or the import 500s (FoodAssistant-z2qo)."""
+    monkeypatch.setattr(settings, "mealie_base_url", "http://mealie.test")
+    monkeypatch.setattr(settings, "mealie_api_key", "t")
+    captured = {}
+
+    async def post_recipes(request):
+        return JSONResponse("my-recipe")  # Mealie returns the new slug
+
+    async def patch_recipe(request):
+        captured["body"] = await request.json()
+        return JSONResponse({"slug": "my-recipe"})
+
+    app = Starlette(routes=[
+        Route("/api/recipes", post_recipes, methods=["POST"]),
+        Route("/api/recipes/{slug}", patch_recipe, methods=["PATCH"]),
+    ])
+    original = m._client
+    m._client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://mealie.test")
+    try:
+        slug = await MealieClient().create_recipe({
+            "name": "My Recipe",
+            "ingredients": ["1 cup flour"],
+            "instructions": ["Mix.", "Bake."],
+        })
+        assert slug == "my-recipe"
+        assert captured["body"]["recipeInstructions"] == [
+            {"text": "Mix.", "ingredientReferences": []},
+            {"text": "Bake.", "ingredientReferences": []},
+        ]
+    finally:
+        m._client = original
+        m.reset_cache()

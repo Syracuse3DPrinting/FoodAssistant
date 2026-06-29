@@ -174,7 +174,15 @@ class MealieClient:
             "recipeYield": data.get("servings") or "",
             "totalTime": data.get("total_time") or "",
             "recipeIngredient": [{"note": i} for i in data.get("ingredients") or [] if i.strip()],
-            "recipeInstructions": [{"text": s} for s in data.get("instructions") or [] if s.strip()],
+            # Mealie 3.19+ requires each instruction to carry ingredientReferences
+            # (its RecipeInstruction model has it as a required field), so a bare
+            # {"text": ...} PATCH 500s with a TypeError there. An empty list is
+            # valid on older Mealie too, so this works across versions
+            # (FoodAssistant-z2qo).
+            "recipeInstructions": [
+                {"text": s, "ingredientReferences": []}
+                for s in data.get("instructions") or [] if s.strip()
+            ],
         }
         await self._request("PATCH", f"/recipes/{slug}", body=patch)
         _invalidate_recipe_cache()
