@@ -434,6 +434,7 @@ class Controller:
                     emoji=actions.emoji_for(spec.name),
                     icon_fraction=render.icon_fraction_for(spec.kind),
                     text_only=render.text_only_kind(spec.kind),
+                    feature_face=render.feature_face_kind(spec.kind),
                 )
                 # A camera key paints the latest snapshot over the fallback face
                 # when a frame is cached for its chosen camera; if decoding fails

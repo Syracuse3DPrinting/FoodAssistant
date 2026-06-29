@@ -85,6 +85,24 @@ def text_only_kind(kind: str) -> bool:
     return kind in _TEXT_ONLY_KINDS
 
 
+# Glanceable widget kinds that earn a richer "feature" face: a vertical
+# gradient, a faint corner glyph accent, and a two-tier value layout (a large
+# bright primary number with smaller dim supporting text), drawn the same way
+# regardless of the deck's key_style so the clock and weather tiles never look
+# like flat coloured rectangles (FoodAssistant-bx6v).
+_FEATURE_KINDS = frozenset({"clock", "weather", "forecast"})
+
+
+def feature_face_kind(kind: str) -> str:
+    """Return the kind when it should render as a richer feature face, else "".
+
+    The controller passes the result to ``render_key``; an empty string keeps
+    the plain rendering path for every other kind (including the ``info`` meal
+    tile, which is left alone so its name is not number-emphasised).
+    """
+    return kind if kind in _FEATURE_KINDS else ""
+
+
 def icon_fraction_for(kind: str) -> float:
     """Glyph height fraction for an action kind.
 
@@ -450,6 +468,7 @@ def render_key(
     emoji: str = "",
     icon_fraction: float = _ICON_FRACTION,
     text_only: bool = False,
+    feature_face: str = "",
 ) -> Image.Image:
     """Render one key.
 
@@ -486,10 +505,21 @@ def render_key(
     weather, forecast, today's meal), so their multi-character value gets the
     whole key face instead of being truncated by the glyph above it. Status keys
     (``count`` set) keep their own glyph-free layout and ignore this flag.
+
+    ``feature_face`` (the kind: "clock", "weather", or "forecast") routes the key
+    to the richer feature renderer: a gradient face with a faint glyph accent and
+    an emphasised value, drawn regardless of ``key_style`` so the glanceable
+    widgets never look flat (FoodAssistant-bx6v). Empty keeps the plain path.
     """
     bg = _hex_to_rgb(color)
     if count and alert:
         bg = tuple(min(255, int(c * 1.35) + 25) for c in bg)  # type: ignore[assignment]
+
+    if feature_face in _FEATURE_KINDS and count is None:
+        density = _density_factor(min(width, height), reference_px)
+        return _render_feature_face(
+            width, height, label, bg, feature_face, icon, density=density
+        )
 
     style = key_style if key_style in ("minimal", "rich", "glass", "clean") else "minimal"
     img = _styled_background(width, height, bg, style)
@@ -645,6 +675,117 @@ def _draw_label(
         lw = _text_width(draw, line, font)
         draw.text(((width - lw) / 2, y), line, font=font, fill=fill)
         y += line_h
+
+
+def _feature_lines(label: str, kind: str) -> list[str]:
+    """Split a feature-face label into display lines.
+
+    Most labels already carry their own newlines (e.g. "Feels\n75°F" or the
+    clock's "08:30\nMon 29"). A single-line current-weather label such as
+    "72°F Sunny" is split on its first space so the temperature can lead and the
+    condition sit beneath it. Everything else is returned as-is.
+    """
+    lines = label.split("\n")
+    if kind == "weather" and len(lines) == 1:
+        parts = lines[0].split(" ", 1)
+        if len(parts) == 2 and any(ch.isdigit() for ch in parts[0]):
+            return parts
+    return lines
+
+
+def _feature_primary_index(lines: list[str], kind: str) -> int:
+    """Index of the emphasised value line on a feature face.
+
+    The clock leads with the time (line 0). Weather and forecast lead with the
+    line carrying the number (the temperature or the high/low); when no line has
+    a digit, the first line is emphasised.
+    """
+    if not lines:
+        return 0
+    if kind == "clock":
+        return 0
+    for i, line in enumerate(lines):
+        if any(ch.isdigit() for ch in line):
+            return i
+    return 0
+
+
+def _render_feature_face(
+    width: int,
+    height: int,
+    label: str,
+    bg: tuple[int, int, int],
+    kind: str,
+    icon: str,
+    *,
+    density: float,
+) -> Image.Image:
+    """Render a polished face for a glanceable widget (clock, weather, forecast).
+
+    Unlike the flat text-only path these always get a vertical gradient, a faint
+    corner glyph accent, and a two-tier text layout (a large bright primary value
+    with smaller dim supporting lines), independent of the deck's key_style, so
+    the at-a-glance widgets never look like flat coloured rectangles (bx6v). The
+    corner glyph is deliberately small so it stays clear of the centred value and
+    does not re-truncate it (the concern that drove FoodAssistant-510y).
+    """
+    top = _lighten(bg, 0.32)
+    bottom = _darken(bg, 0.42)
+    img = _vertical_gradient((width, height), top, bottom)
+    draw = ImageDraw.Draw(img)
+    # Thin darker inner border so each tile reads as a distinct face.
+    draw.rectangle([0, 0, width - 1, height - 1], outline=_darken(bg, 0.6), width=1)
+
+    # Contrast the text against the lower-middle of the gradient, where it sits.
+    mid = _mix(top, bottom, 0.6)
+    primary_fill = _hex_to_rgb(text_color_for(_rgb_to_hex(mid)))
+    secondary_fill = _mix(primary_fill, mid, 0.4)
+
+    # Faint glyph accent in the top-left corner.
+    glyph = _icon_char(icon)
+    g_font = _icon_font(_font_px(height, 0.20, density=density, floor=12)) if glyph else None
+    if glyph and g_font is not None:
+        gbox = draw.textbbox((0, 0), glyph, font=g_font)
+        draw.text(
+            (max(2, int(width * 0.06)) - gbox[0], max(2, int(height * 0.05)) - gbox[1]),
+            glyph,
+            font=g_font,
+            fill=_mix(primary_fill, bottom, 0.55),
+        )
+
+    lines = _feature_lines(label, kind) or [label]
+    primary_idx = _feature_primary_index(lines, kind)
+    max_w = int(width * _FIT_FRACTION)
+
+    # Size the primary value to fill; supporting lines a clear step smaller.
+    primary_px = _font_px(height, 0.42, density=density, floor=16)
+    primary_font = _fit_font(draw, lines[primary_idx], primary_px, max_w, floor=14)
+    primary_size = int(getattr(primary_font, "size", primary_px))
+    secondary_size = max(_MIN_FONT_PX, int(primary_size * 0.55))
+
+    fonts: list = []
+    for i, line in enumerate(lines):
+        if i == primary_idx:
+            fonts.append(primary_font)
+        else:
+            fonts.append(_fit_font(draw, line, secondary_size, max_w, floor=_MIN_FONT_PX))
+
+    heights: list[int] = []
+    for line, font in zip(lines, fonts):
+        box = draw.textbbox((0, 0), line or "Ag", font=font)
+        heights.append(box[3] - box[1])
+    gap = max(1, int(height * 0.05))
+    block_h = sum(heights) + gap * (len(lines) - 1)
+    # Centre the value block; bias slightly below centre so the corner glyph has
+    # breathing room above. Clamp on-key so nothing falls off the edge.
+    y = max(int(height * 0.06), (height - block_h) // 2)
+    for i, (line, font, line_h) in enumerate(zip(lines, fonts, heights)):
+        box = draw.textbbox((0, 0), line, font=font)
+        lw = box[2] - box[0]
+        fill = primary_fill if i == primary_idx else secondary_fill
+        draw.text(((width - lw) / 2 - box[0], y - box[1]), line, font=font, fill=fill)
+        y += line_h + gap
+    return img
 
 
 # -- camera snapshot helpers (pure, unit-testable) -------------------------

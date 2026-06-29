@@ -814,6 +814,65 @@ def test_weather_face_renders_with_small_icon():
     assert img.mode == "RGB"
 
 
+# -- feature faces: clock + weather polish (FoodAssistant-bx6v) ------------
+
+
+def test_feature_face_kind_only_for_widgets():
+    assert render.feature_face_kind("clock") == "clock"
+    assert render.feature_face_kind("weather") == "weather"
+    assert render.feature_face_kind("forecast") == "forecast"
+    # The meal info tile and everything else keep the plain path.
+    assert render.feature_face_kind("info") == ""
+    assert render.feature_face_kind("status") == ""
+
+
+def test_feature_lines_splits_single_line_weather():
+    # A one-line current-weather label leads with the temperature, condition below.
+    assert render._feature_lines("72°F Sunny", "weather") == ["72°F", "Sunny"]
+    # A label with no digit in the first token is left whole.
+    assert render._feature_lines("Clear skies", "weather") == ["Clear skies"]
+    # Multi-line stat labels keep their own lines.
+    assert render._feature_lines("Feels\n75°F", "weather") == ["Feels", "75°F"]
+
+
+def test_feature_primary_index_emphasises_value():
+    # Clock leads with the time line.
+    assert render._feature_primary_index(["08:30", "Mon 29"], "clock") == 0
+    # Weather/forecast emphasise the line carrying the number.
+    assert render._feature_primary_index(["Feels", "75°F"], "weather") == 1
+    assert render._feature_primary_index(["Wind", "12", "mph"], "weather") == 1
+    assert render._feature_primary_index(["Today", "H72 L55"], "forecast") == 1
+    # No digit anywhere: fall back to the first line.
+    assert render._feature_primary_index(["No", "signal"], "weather") == 0
+
+
+def test_feature_face_renders_gradient_not_flat():
+    # A clock feature face is a gradient, so the top and bottom rows differ
+    # (a flat fill would make them identical). It also renders without raising.
+    img = render.render_key(
+        96, 96, label="08:30\nMon 29", color="#1f2937",
+        icon="clock", feature_face="clock",
+    )
+    assert img.size == (96, 96) and img.mode == "RGB"
+    # Sample just inside the 1px border, where the gradient (not the border)
+    # shows. A flat fill would make these two rows identical.
+    top_row = img.crop((30, 3, 60, 4)).resize((1, 1)).getpixel((0, 0))
+    bottom_row = img.crop((30, 92, 60, 93)).resize((1, 1)).getpixel((0, 0))
+    assert top_row != bottom_row
+
+
+def test_feature_face_weather_and_forecast_render():
+    for kind, icon, label in (
+        ("weather", "cloud-sun", "72°F Sunny"),
+        ("weather", "cloud-sun", "Feels\n75°F"),
+        ("forecast", "thermometer-half", "Today\nH72 L55"),
+    ):
+        img = render.render_key(
+            72, 72, label=label, color="#1e40af", icon=icon, feature_face=kind,
+        )
+        assert img.size == (72, 72) and img.mode == "RGB"
+
+
 # -- action -> icon mapping ------------------------------------------------
 
 
