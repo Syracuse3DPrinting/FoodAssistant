@@ -1,241 +1,120 @@
-# Recipe backend: Grocy vs Mealie
+# Recipes: do you need Mealie?
 
-Bead: FoodAssistant-0o5
+FoodAssistant always uses Grocy for inventory. Recipes, meal planning, and
+shopping lists are a separate, optional layer that runs on **Mealie**. This page
+explains what you get when you add Mealie, what works without it, and how to
+decide whether it is worth the extra container for your setup.
 
-## Summary
+**Short answer:** if you want the recipe library, "what can I cook from what I
+have" suggestions, the week meal plan, or the shopping list, run Mealie. If you
+only care about tracking what's in your fridge and when it expires, you can skip
+it. Mealie is one more Docker container and a little more RAM, nothing more.
 
-FoodAssistant already requires Grocy for inventory, and Grocy ships a full
-recipes feature: a recipe data model with scalable ingredient lists, a meal
-planner, native stock fulfillment checking, one-click "add missing ingredients
-to shopping list", a stock-aware "Due Score" that ranks recipes by what is about
-to expire, and a "consume recipe" action that decrements stock. Mealie is a
-nicer recipe manager (better editor, URL scraper, OCR import, cookbooks, tags,
-nutrition) but it has no inventory awareness at all. The current app papers over
-that gap by reading Grocy stock itself and running token matching
-(`classify_recipes`) and a manual consume loop in Python.
+## What you get with each setup
 
-Recommendation: make Grocy the default recipe backend so a stock install needs
-no extra container, and keep Mealie as an optional upgrade for households that
-want the richer recipe-authoring experience. This is worth a follow-up
-implementation bead; the setting and the surfaces it touches are sketched at the
-end. Do not implement it under this bead.
+### Grocy only (no Mealie)
 
-## What each integration does today (in this codebase)
+This is the lean setup: FoodAssistant plus Grocy, no second recipe service.
 
-Grocy (`service/app/services/grocy.py`): inventory only. Stock add/consume/move,
-product and location management, expiring lookup, shopping list CRUD, restock
-suggestions, stock log. The client never calls any Grocy recipe or meal-plan
-endpoint, even though Grocy exposes them.
+You get everything inventory-related: the storage panels, drag-and-drop moves,
+expiry tracking and badges, barcode scanning, photo/receipt import, the expiry
+defaults table, and the Home Assistant sensors. The whole "reduce waste" side of
+the app works fully.
 
-Mealie (`service/app/services/mealie.py` plus `service/app/routers/mealie.py`):
-everything recipe-shaped. Recipe search and detail, URL/photo/LLM import, recipe
-create, meal plan CRUD, shopping list CRUD, plus the
-`classify_recipes` inventory matcher. Crucially, the stock-aware behavior is not
-Mealie's: the router fetches `GrocyClient().get_full_stock()` and the Python code
-does the token matching, tiering (ready / staples / shopping), the
-"add missing to shopping list" diff (`/suggest/add-missing`), and the
-"mark cooked -> consume Grocy stock" loop (`/cooked`). Mealie is just the recipe
-store; Grocy stock plus local Python provides the intelligence.
+What you do **not** get: the Recipes, Cook ("what can I cook?"), Meal plan, and
+Shopping list pages. Those tabs depend on Mealie and stay dark until it is
+configured. The Current Recipe tab and timers still work for an imported or
+AI-generated recipe, but there is no recipe library to browse.
 
-So the app has already re-implemented, in Python against Mealie data, the three
-things Grocy does natively: fulfillment checking, add-not-fulfilled to shopping
-list, and consume-on-cook.
+Pick this if you want the smallest footprint, you already plan meals elsewhere,
+or you are running on a tight board (a Pi 4 with 2 GB is comfortable for
+Grocy-only).
 
-## Capability comparison
+### Grocy plus Mealie
 
-### Data model
+Add Mealie and the recipe layer lights up:
 
-Grocy: recipes are first-class objects (`/objects/recipes`) with ingredient rows
-(`/objects/recipes_pos`) that reference real Grocy products and quantity units,
-plus `base_servings` / `desired_servings` for scaling, per-ingredient "only
-check if in stock" / "don't add to shopping list" flags, and recipe nesting.
-Ingredients are linked to inventory products, which is exactly why fulfillment is
-exact rather than fuzzy. Instructions are a single rich-text/markdown field
-rather than structured steps.
+- **Recipes.** A real recipe manager with a good editor, a URL importer, photo
+  and file import, cookbooks, tags, and nutrition. This is where your recipe
+  library lives.
+- **Cook ("What Can I Cook?").** Ranks your Mealie recipes by how much of each
+  one is already in your Grocy stock, and floats items expiring soon to the top.
+  This is the headline feature for a spoilage tracker: it turns "this is about to
+  go off" into "here is what to make with it".
+- **Meal plan.** A week view you can fill from your recipe library.
+- **Shopping list.** Including a one-click "add the ingredients I am missing"
+  from a recipe, with check-off as you shop.
 
-Mealie: richer authoring model. Structured ingredient objects (food, unit, note,
-display), structured instruction steps, description, nutrition, tags, categories,
-cookbooks, ratings, images, source URL. Ingredients are free text or linked to
-Mealie's own "foods", which are not the same entities as Grocy products, so
-matching back to inventory is always approximate.
+How the inventory awareness works is worth knowing, because it shapes the
+tradeoffs below. Mealie itself has no idea what's in your fridge; by design it
+does not track pantry inventory. FoodAssistant bridges that gap itself: it reads
+your Grocy stock, matches it against Mealie's recipe ingredients by name, and
+does the "ready / needs staples / needs shopping" tiering and the "consume stock
+when you cook" step in its own Python code (see
+`service/app/services/mealie.py`). So the matching is by ingredient name, which
+is good but approximate: "unsalted butter" in a recipe and "butter" in your
+stock are matched on shared words, not on a shared product record.
 
-Verdict: Mealie wins on authoring richness; Grocy wins on inventory linkage.
+Pick this (the recommended setup for most people) if you want the cooking and
+planning features, which are a big part of why the app exists. Plan for 4 GB of
+RAM once Mealie is in the mix.
 
-### Meal planning
+## How to choose
 
-Grocy: meal planner with day slots (breakfast/lunch/dinner and custom sections),
-recipe entries, product entries, and free-text notes; meal-plan recipes feed the
-same stock-fulfillment and shopping-list machinery.
+| If you want... | Run |
+|---|---|
+| Just inventory and expiry tracking | Grocy only |
+| Recipe library and a good recipe editor | Add Mealie |
+| "What can I cook from what's expiring?" | Add Mealie |
+| Meal planning and shopping lists | Add Mealie |
+| The smallest possible footprint / a 2 GB board | Grocy only |
+| The full app as advertised | Add Mealie |
 
-Mealie: calendar view, plan rules for random/templated planning, household
-sharing. More polished as a standalone planner.
+You are not locked in. Start Grocy-only and add Mealie later whenever you want
+the recipe features; the recipe tabs light up as soon as Mealie is configured in
+the setup wizard, and your inventory data is untouched.
 
-Verdict: both cover the appliance use case. Mealie's planner UI is nicer; Grocy's
-is tied directly to stock.
+## Adding Mealie
 
-### Shopping-list integration
+Mealie ships as an opt-in Docker Compose profile, so you only run it if you ask
+for it.
 
-Grocy: native and exact. `POST /recipes/{id}/add-not-fulfilled-products-to-shoppinglist`
-adds precisely the missing quantities (recipe need minus current stock) as real
-products. The shopping list and the inventory share the same product catalog.
+On a server or Docker host, add the profile to your `up` command:
 
-Mealie: has shopping lists, but they are recipe-driven, not stock-driven. The app
-currently computes "missing" itself by token-diffing Mealie ingredients against
-Grocy stock and pushing free-text notes (`/suggest/add-missing`). It works but is
-approximate and the items are notes, not catalog products.
+```bash
+docker compose --profile with-grocy --profile with-mealie up -d
+```
 
-Verdict: Grocy wins clearly. Its shopping list closes the loop with stock; this
-is the feature the app most laboriously reconstructs for Mealie.
+On a Raspberry Pi appliance, Mealie is installed by default for the Pi Hosted
+mode. To add it later to a running device:
 
-### Stock-aware suggestions / fulfillment
+```bash
+cd /opt/foodassistant
+docker compose --profile with-mealie up -d
+```
 
-Grocy: native. `GET /recipes/{id}/fulfillment` and `GET /recipes/fulfillment`
-return whether each recipe is cookable from stock, the missing product count, and
-costs. The "Due Score" ranks recipes by how well they use up items that are due
-soon or overdue, which is the same goal as this app's expiring-first tiering and
-`expiring_items_used` scoring.
+Mealie comes up on port 9285. Create an API token inside Mealie, then paste the
+Mealie URL and token into the FoodAssistant setup wizard at `/setup` and test the
+connection. The Recipes, Cook, Meal plan, and Shopping tabs become available once
+the connection succeeds.
 
-Mealie: explicitly out of scope. The maintainers have stated they do not intend
-to track pantry inventory because of the upkeep burden, and community requests
-for "suggest recipes from what I have" remain unimplemented. Any stock awareness
-on top of Mealie must be built outside Mealie, which is exactly what
-`classify_recipes` is.
+See [Platforms](platforms.md) for the full profile and port reference, and the
+[README](../README.md) install section for the one-line installers.
 
-Verdict: Grocy wins decisively, and this is the single most relevant axis for a
-spoilage-tracking appliance. Grocy's Due Score is conceptually what this project
-built by hand.
+## A note on Grocy's own recipe feature
 
-### UI quality
+Grocy ships its own recipe and meal-plan module, with native stock-fulfillment
+checking and a one-click "add missing ingredients to the shopping list". Because
+the ingredients are linked to real Grocy products, Grocy's fulfillment is exact
+rather than name-matched. That is genuinely appealing for a single-box appliance:
+recipes, stock, meal plan, and shopping list would all live in one service with
+one backup and one product catalog, and no second container.
 
-Grocy: functional, dense, dated. Server-rendered, works offline, fine but not
-pretty.
-
-Mealie: modern Vue SPA, attractive recipe cards, good mobile experience, markdown
-editor. Clearly the better cooking-and-browsing surface.
-
-Verdict: Mealie wins. This is the main reason to keep it available as an upgrade.
-
-### API ergonomics
-
-Grocy: one REST API with Swagger UI, a generic `/objects/{entity}` CRUD layer
-plus purpose-built recipe verbs (fulfillment, add-not-fulfilled, consume, copy).
-Single API key. Same base URL the app already talks to for stock, so no new
-service, port, or credential.
-
-Mealie: clean documented REST API, bearer token auth, but version drift (v1
-`/groups` vs v2 `/households`, moved scraper paths) which the client already has
-to probe and work around. Recipe POST then PATCH two-step. Separate service, URL,
-and token to configure.
-
-Verdict: roughly even on raw quality; Grocy wins on "it is already wired up and
-authenticated".
-
-### Operational cost
-
-Grocy: zero additional cost. Already required and running for inventory.
-
-Mealie: an extra Docker container (port 9285, `--profile with-mealie`), its own
-database, memory and disk, plus a second URL and API token in `/setup`. On a Pi
-appliance that is real overhead.
-
-Verdict: Grocy wins. No extra container is the headline benefit.
-
-### Offline / local appliance fit
-
-Both are self-hosted and run fully offline. Grocy's advantage is that recipes,
-stock, meal plan, and shopping list live in one service with one backup, one
-auth, and one catalog of products, which suits a single-box appliance. Mealie
-adds a second moving part for a second backup and a second failure mode.
-
-Verdict: Grocy wins for the appliance default; Mealie remains fine for users who
-accept the extra container.
-
-## Recommendation
-
-Make Grocy the default recipe backend. A fresh install should get working
-recipes, meal planning, stock-aware suggestions, and shopping-list integration
-with no second container, using Grocy endpoints the app does not call yet
-(`/objects/recipes`, `/objects/recipes_pos`, `/objects/meal_plan`,
-`/recipes/{id}/fulfillment`, `/recipes/fulfillment`,
-`/recipes/{id}/add-not-fulfilled-products-to-shoppinglist`,
-`/recipes/{id}/consume`). Keep Mealie as an explicit opt-in upgrade for
-households that want the better editor, URL/OCR import, cookbooks, and nicer UI.
-
-The fit is unusually clean because the app already does, in Python, the exact
-work Grocy does natively. With the Grocy backend, fulfillment tiering, "add
-missing to list", and "mark cooked / consume" can be delegated to Grocy verbs
-instead of being recomputed by token matching, which should be both simpler and
-more accurate (real quantities and real products rather than fuzzy name tokens).
-
-One caveat to record for the implementation bead: external recipe suggestions
-(TheMealDB / Spoonacular) and LLM import/extraction currently save into Mealie.
-With a Grocy backend, "save this external/LLM recipe" must map to Grocy's recipe
-plus recipe_pos model, and free-text ingredients have to be resolved or created
-as Grocy products to get real fulfillment. That mapping is the main new work; it
-is not hard, but it is the piece that does not already exist.
-
-### What a `recipe_backend = grocy | mealie` setting would touch
-
-Scoping notes for a follow-up implementation bead. Do not build this here.
-
-Config (`service/app/config.py`): add a `recipe_backend` field (default
-`grocy`), add it to `_SAVEABLE` and to the satellite-synced key lists alongside
-the existing `mealie_*` and `recipe_source` keys. Mealie keys stay, used only
-when `recipe_backend == "mealie"`. Update `mealie_configured()` callers so the
-recipe/meal-plan/shopping pages light up when either backend is ready, not only
-when Mealie is set.
-
-Service layer: introduce a recipe-backend abstraction (a small interface like the
-existing `VisionProvider` pattern) with two implementations. Add the missing
-recipe/meal-plan methods to `GrocyClient` (list/get/create recipe and positions,
-meal-plan CRUD, fulfillment, add-not-fulfilled-to-list, consume). The Mealie
-implementation already exists in `services/mealie.py`. The
-`classify_recipes` tiering can stay as the Mealie path's stock matcher, and the
-Grocy path can use native fulfillment / Due Score instead.
-
-Router (`service/app/routers/mealie.py`): this is where most change concentrates.
-Today every endpoint instantiates `MealieClient()` directly. Each route
-(`/mealplan`, `/recipes`, `/suggest`, `/suggest/add-missing`, `/cooked`,
-`/shopping*`, the import/create/generate routes, and the
-`/mealplan/summary` and `/shopping/summary` HA sensor routes) needs to branch on
-the configured backend, or call through the abstraction. Consider renaming the
-router prefix from `/mealie` to something backend-neutral like `/recipes`, with a
-redirect for compatibility, since the path name leaks the backend.
-
-UI templates (`service/app/templates/recipes.html`, `mealplan.html`,
-`shopping.html`, and the nav in `base.html`): mostly unchanged if they keep
-hitting the same JSON routes, but any hardcoded "open in Mealie" link
-(`mealie_link_url()`) must become a backend-aware deep link (Grocy recipe URL vs
-Mealie recipe URL), and the setup wizard copy should explain the Grocy default
-versus the Mealie upgrade.
-
-Setup (`service/app/routers/setup.py`): add the `recipe_backend` choice to the
-wizard, show the Mealie URL/token fields only when Mealie is selected, and make
-the default path require no Mealie input.
-
-Home Assistant: the `mealplan/summary` and `shopping/summary` sensor endpoints
-keep their response shape, so HA config is unaffected as long as the routes stay
-available regardless of backend.
-
-## Sources
-
-- Grocy product overview (recipes, meal planner, stock fulfillment, due score,
-  one-click shopping list): https://grocy.info/
-- Grocy cooking tutorial (recipe fulfillment, base/desired servings,
-  per-ingredient stock-check toggle, consume recipe):
-  https://github.com/grocy/grocy-docs/blob/master/tutorials/cooking.md
-- Grocy OpenAPI spec (recipe and meal-plan endpoints:
-  `/recipes/{id}/fulfillment`, `/recipes/fulfillment`,
-  `/recipes/{id}/add-not-fulfilled-products-to-shoppinglist`,
-  `/recipes/{id}/consume`):
-  https://github.com/grocy/grocy/blob/master/grocy.openapi.json
-- Grocy API reference overview:
-  https://deepwiki.com/grocy/grocy/3.4-api-reference
-- Grocy changelog (recipe cost calculation, fulfillment fixes, due score):
-  https://grocy.info/changelog
-- Mealie features (scraper, OCR/AI import, cookbooks, tags, nutrition, Vue UI,
-  meal planner, plan rules): https://docs.mealie.io/documentation/getting-started/features/
-- Mealie repository overview: https://github.com/mealie-recipes/mealie
-- Mealie maintainers on not tracking pantry inventory; community requests for
-  inventory-based recipe suggestions:
-  https://github.com/mealie-recipes/mealie/discussions/2448
+FoodAssistant does **not** use Grocy's recipe module today. The entire recipe,
+cook, meal-plan, and shopping experience in the app is built on Mealie's API, and
+`service/app/services/grocy.py` implements no recipe support. Running the recipe
+features therefore means running Mealie. Using Grocy as the recipe backend
+instead would be a real feature to build, not a setting to flip; it is tracked as
+possible future work, not something you can turn on now. If a Grocy-native recipe
+mode would make your setup simpler, that is useful feedback to raise on the
+[issue tracker](https://github.com/Syracuse3DPrinting/FoodAssistant/issues).
