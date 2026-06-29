@@ -184,6 +184,25 @@
       <span class="tag-pill" data-tag="Budget" onclick="toggleTag(this)">💸 Budget</span>
     </div>
 
+    <!-- Appliance steering (FoodAssistant-q098 part 1). Declare what you can cook
+         with; the AI tailors recipes to that equipment. AI-only, same mechanism
+         as the tags above. -->
+    <div class="pref-section-label">Appliances <span class="ai-only">✨ AI only</span></div>
+    <div class="cuisine-pills" id="appliance-pills">
+      <span class="tag-pill" data-tag="Air Fryer" onclick="toggleTag(this)">🍟 Air Fryer</span>
+      <span class="tag-pill" data-tag="Instant Pot" onclick="toggleTag(this)">⏲️ Instant Pot</span>
+      <span class="tag-pill" data-tag="Slow Cooker" onclick="toggleTag(this)">🍲 Slow Cooker</span>
+      <span class="tag-pill" data-tag="Grill" onclick="toggleTag(this)">🔥 Grill / BBQ</span>
+      <span class="tag-pill" data-tag="Sous Vide" onclick="toggleTag(this)">🌡️ Sous Vide</span>
+      <span class="tag-pill" data-tag="Cast Iron" onclick="toggleTag(this)">🍳 Cast Iron</span>
+      <span class="tag-pill" data-tag="Wok" onclick="toggleTag(this)">🥢 Wok</span>
+      <span class="tag-pill" data-tag="Stand Mixer" onclick="toggleTag(this)">🧁 Stand Mixer</span>
+      <span class="tag-pill" data-tag="Blender" onclick="toggleTag(this)">🥤 Blender</span>
+      <span class="tag-pill" data-tag="Toaster Oven" onclick="toggleTag(this)">🍞 Toaster Oven</span>
+      <span class="tag-pill" data-tag="Microwave Only" onclick="toggleTag(this)">📡 Microwave Only</span>
+      <span class="tag-pill" data-tag="No Oven" onclick="toggleTag(this)">🚫 No Oven</span>
+    </div>
+
     <!-- Ingredient include/exclude filter (FoodAssistant-w3s5). Free-text,
          comma-separated; AI-only steering like the tags above. -->
     <div class="pref-section-label">Ingredients <span class="ai-only">✨ AI only</span></div>
@@ -678,6 +697,18 @@ const TAG_PHRASES = {
   'One Pot': 'one-pot or one-pan, minimal cleanup',
   'No Cook': 'no-cook (no stove or oven required)',
   'Budget': 'budget friendly with inexpensive, common ingredients',
+  'Air Fryer': 'can be made in an air fryer',
+  'Instant Pot': 'can be made in an Instant Pot or electric pressure cooker',
+  'Slow Cooker': 'can be made in a slow cooker / crock pot',
+  'Grill': 'can be cooked on a grill or BBQ',
+  'Sous Vide': 'uses sous vide cooking',
+  'Cast Iron': 'can be made in a cast iron pan',
+  'Wok': 'can be made in a wok',
+  'Stand Mixer': 'practical to make with a stand mixer',
+  'Blender': 'can be made with a blender',
+  'Toaster Oven': 'can be made in a toaster oven',
+  'Microwave Only': 'must be cookable with only a microwave (no stove or oven)',
+  'No Oven': 'must not require an oven',
 };
 const COURSE_TAGS = new Set(['Breakfast', 'Appetizer', 'Soup', 'Salad', 'Main Course',
   'Side Dish', 'Snack', 'Dessert', 'Baked Goods', 'Candy', 'Drink']);
@@ -702,7 +733,7 @@ function buildTagsPhrase() {
   const others  = [...activeTags].filter(t => !COURSE_TAGS.has(t)).map(t => TAG_PHRASES[t] || t);
   const out = [];
   if (courses.length) out.push(`dish type: ${courses.join(', ')}`);
-  if (others.length)  out.push(`it should be ${others.join('; ')}`);
+  if (others.length)  out.push(`additional requirements: ${others.join('; ')}`);
   return out.join('. ');
 }
 
