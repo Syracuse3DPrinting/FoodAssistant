@@ -2171,7 +2171,8 @@ docker compose up -d</code></pre>
               </div>
               <div class="mb-3">
                 <label class="form-label">Key Layout</label>
-                <div class="form-text mb-2">Drag actions from the palette onto grid cells. The grid shape matches your deck orientation. Long-press a timer key to reset it.</div>
+                <div class="form-text mb-2">Drag actions from the palette onto grid cells. The grid shape matches your deck orientation. Long-press a timer key to reset it. When you use more keys than fit, the deck adds a "More" key and continues on the next page.</div>
+                <div id="streamdeck-page-nav" class="d-flex align-items-center gap-2 mb-2 d-none"></div>
                 <div id="streamdeck-grid" class="d-inline-grid gap-1 mb-2" style="grid-template-columns: repeat(5, minmax(0,1fr));"></div>
                 <div id="streamdeck-palette" class="d-flex flex-column gap-1 mt-1" style="max-width:700px;"></div>
               </div>
@@ -4343,6 +4344,7 @@ async function setKmsRotation(reboot) {
 const SD_GRID = { 6: {cols:3, rows:2}, 15: {cols:5, rows:3}, 32: {cols:8, rows:4} };
 let _sdCatalog = null;       // [{name,label,kind,group,color,description}]
 let _sdKeys = [];            // flat, deck-index order; "blank" for empty
+let _sdPage = 0;             // page being edited (the controller paginates _sdKeys)
 let _sdDragSrc = null;       // {type:'grid'|'palette', idx?:number, name:string}
 
 async function _sdLoadCatalog() {
@@ -4401,7 +4403,11 @@ function _sdEffectiveDim(count, rotation) {
   return dim;
 }
 
-function _sdMakeCell(idx, name) {
+function _sdMakeCell(idx, name, displayPos) {
+  // idx is the GLOBAL index into _sdKeys (so drag/drop/swap operate on the full
+  // paginated list); displayPos is the 1-based key position on the physical deck
+  // page shown in the corner badge. Defaults to idx when not paginating.
+  if (displayPos === undefined) displayPos = idx;
   // A custom-key id renders from its override definition; everything else is a
   // built-in catalog action. A custom id whose definition was deleted falls
   // back to an empty cell.
@@ -4455,7 +4461,7 @@ function _sdMakeCell(idx, name) {
 
   const badge = document.createElement('span');
   badge.style.cssText = 'position:absolute;top:2px;right:3px;font-size:0.5rem;color:rgba(255,255,255,0.45);';
-  badge.textContent = String(idx + 1);
+  badge.textContent = String(displayPos + 1);
   cell.appendChild(badge);
 
   cell.addEventListener('dragstart', e => {
@@ -4495,6 +4501,95 @@ function _sdMakeCell(idx, name) {
   return cell;
 }
 
+// Pagination math mirroring layout.build_pages: a flat keys list that fits a
+// deck stays one page; otherwise each page reserves its last key for "More" and
+// holds `count - 1` editable keys. Trailing blanks do not count toward length.
+function _sdPageInfo(count) {
+  let len = _sdKeys.length;
+  while (len > 0 && (_sdKeys[len - 1] === 'blank' || !_sdKeys[len - 1])) len--;
+  if (len <= count) return {usable: count, npages: 1, paginated: false};
+  const usable = count - 1;
+  return {usable, npages: Math.ceil(len / usable), paginated: true};
+}
+
+// The reserved auto "More" key on a paginated page: visible, labelled, but not a
+// drag/drop target (the controller manages it). Clicking it flips the editor to
+// the next page, like pressing it on the deck.
+function _sdMakeMoreCell(displayPos) {
+  const cell = document.createElement('div');
+  cell.className = 'rounded position-relative';
+  cell.style.cssText = [
+    'min-width:60px', 'min-height:44px', 'display:flex', 'flex-direction:column',
+    'align-items:center', 'justify-content:center', 'gap:1px', 'overflow:hidden',
+    'background:#334155', 'cursor:pointer', 'user-select:none',
+    'border:2px dashed rgba(255,255,255,0.35)',
+  ].join(';');
+  cell.title = 'Auto "More" key (cycles pages on the deck)';
+  cell.innerHTML =
+    '<i class="bi bi-arrow-repeat" style="color:#fff;font-size:0.95rem;line-height:1;"></i>' +
+    '<span style="color:#fff;font-size:0.6rem;line-height:1.1;">More</span>' +
+    '<span style="position:absolute;top:2px;right:3px;font-size:0.5rem;color:rgba(255,255,255,0.45);">' +
+    String(displayPos + 1) + '</span>';
+  cell.addEventListener('click', () => _sdGotoPage(1));
+  return cell;
+}
+
+function _sdRenderPageNav(info) {
+  const nav = document.getElementById('streamdeck-page-nav');
+  if (!nav) return;
+  if (!info.paginated && info.npages <= 1) {
+    // Single page: only offer "Add page" so the user can start a second page.
+    nav.classList.remove('d-none');
+    nav.innerHTML = '';
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'btn btn-outline-secondary btn-sm';
+    add.innerHTML = '<i class="bi bi-plus-lg me-1"></i>Add page';
+    add.onclick = _sdAddPage;
+    nav.appendChild(add);
+    return;
+  }
+  nav.classList.remove('d-none');
+  nav.innerHTML =
+    '<button type="button" class="btn btn-outline-secondary btn-sm" ' +
+    (_sdPage <= 0 ? 'disabled' : '') + ' onclick="_sdGotoPage(-1)"><i class="bi bi-chevron-left"></i></button>' +
+    '<span class="small">Page ' + (_sdPage + 1) + ' of ' + info.npages + '</span>' +
+    '<button type="button" class="btn btn-outline-secondary btn-sm" ' +
+    (_sdPage >= info.npages - 1 ? 'disabled' : '') + ' onclick="_sdGotoPage(1)"><i class="bi bi-chevron-right"></i></button>' +
+    '<button type="button" class="btn btn-outline-secondary btn-sm ms-2" onclick="_sdAddPage()"><i class="bi bi-plus-lg me-1"></i>Add page</button>';
+}
+
+function _sdGotoPage(delta) {
+  const total = (() => {
+    const count = parseInt(document.getElementById('streamdeck_key_count')?.value || '15', 10);
+    const rotation = parseInt(document.getElementById('streamdeck_rotation')?.value || '0', 10);
+    const dim = _sdEffectiveDim(count, rotation);
+    return dim.cols * dim.rows;
+  })();
+  const info = _sdPageInfo(total);
+  _sdPage = Math.max(0, Math.min(info.npages - 1, _sdPage + delta));
+  _sdRenderGrid();
+}
+
+// Append a page of empty slots so the user can place keys on a new page. Going
+// from one page to two converts the layout to paginated (the previous last key
+// becomes the first page's "More" neighbour), exactly as the deck would.
+function _sdAddPage() {
+  const count = parseInt(document.getElementById('streamdeck_key_count')?.value || '15', 10);
+  const rotation = parseInt(document.getElementById('streamdeck_rotation')?.value || '0', 10);
+  const dim = _sdEffectiveDim(count, rotation);
+  const total = dim.cols * dim.rows;
+  const usable = total - 1;
+  // Pad so at least one more full editable page exists beyond what is used now.
+  let len = _sdKeys.length;
+  while (len > 0 && (_sdKeys[len - 1] === 'blank' || !_sdKeys[len - 1])) len--;
+  const curPages = len <= total ? 1 : Math.ceil(len / usable);
+  const target = (curPages + 1) * usable;
+  while (_sdKeys.length < target) _sdKeys.push('blank');
+  _sdPage = curPages;   // jump to the new page
+  _sdRenderGrid();
+}
+
 async function _sdRenderGrid() {
   await _sdLoadCatalog();
   const grid = document.getElementById('streamdeck-grid');
@@ -4507,16 +4602,30 @@ async function _sdRenderGrid() {
 
   grid.style.gridTemplateColumns = `repeat(${dim.cols}, minmax(0,1fr))`;
 
-  // The grid shows one deck page (`total` cells), but the controller paginates
-  // the full keys list across pages on a small deck. Pad up to a full page, but
-  // do NOT truncate keys that belong to later pages, or saving would drop them.
+  // The controller paginates _sdKeys across deck pages: when more keys are used
+  // than fit, the LAST key of each page becomes an auto "More" key and the rest
+  // continue on the next page. Mirror that here so the editor can author every
+  // page. `usable` is the editable keys per page (one less when paginated, to
+  // leave room for the More key); `total` is the grid cell count.
   const total = dim.cols * dim.rows;
-  while (_sdKeys.length < total) _sdKeys.push('blank');
+  const info = _sdPageInfo(total);
+  if (_sdPage >= info.npages) _sdPage = info.npages - 1;
+  if (_sdPage < 0) _sdPage = 0;
+  const pageStart = info.paginated ? _sdPage * info.usable : 0;
+  // Make sure every editable slot on this page exists in _sdKeys.
+  while (_sdKeys.length < pageStart + info.usable) _sdKeys.push('blank');
 
   grid.innerHTML = '';
-  for (let i = 0; i < total; i++) {
-    grid.appendChild(_sdMakeCell(i, _sdKeys[i] || 'blank'));
+  for (let pos = 0; pos < total; pos++) {
+    if (info.paginated && pos === total - 1) {
+      // Reserved auto "More" key (page cycle); shown but not editable.
+      grid.appendChild(_sdMakeMoreCell(pos));
+    } else {
+      const globalIdx = pageStart + pos;
+      grid.appendChild(_sdMakeCell(globalIdx, _sdKeys[globalIdx] || 'blank', pos));
+    }
   }
+  _sdRenderPageNav(info);
 
   // Render grouped palette below the grid. A draggable chip is added per built-in
   // action, plus a "Custom" group with one chip per user-defined custom key, so
@@ -5639,6 +5748,7 @@ async function loadHardwareStatus() {
           if (brEl) brEl.value = cfg.brightness.toString();
         }
         _sdKeys = Array.isArray(cfg.keys) ? cfg.keys.slice() : [];
+        _sdPage = 0;
         await _sdRenderGrid();
         if (cfg.weather_location !== undefined) {
           const wlEl = document.getElementById('streamdeck_weather_location');
