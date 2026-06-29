@@ -30,6 +30,24 @@ def test_mdns_rewrite_leaves_non_loopback_untouched(monkeypatch):
     assert config._mdns_rewrite(url, 9383) == url
 
 
+def test_mdns_rewrite_rewrites_docker_service_host(monkeypatch):
+    # The docker-internal default (http://grocy:80) is unreachable from a phone;
+    # the browser link must rewrite to the LAN host:port (FoodAssistant-r9r7).
+    monkeypatch.setattr(config, "_lan_ip", lambda: "192.168.1.50")
+    monkeypatch.setattr(config, "browser_host", lambda: "pi.local")
+    assert config._mdns_rewrite("http://grocy:80", 9383) == "http://192.168.1.50:9383"
+    assert config._mdns_rewrite("http://mealie:9000", 9285) == "http://192.168.1.50:9285"
+
+
+def test_grocy_link_url_rewrites_docker_default(monkeypatch):
+    monkeypatch.setattr(config, "_lan_ip", lambda: "10.0.0.7")
+    monkeypatch.setattr(config, "browser_host", lambda: "pi.local")
+    monkeypatch.setattr(settings, "grocy_public_url", "", raising=False)
+    monkeypatch.setattr(settings, "grocy_base_url", "http://grocy:80", raising=False)
+    monkeypatch.setattr(settings, "deployment_mode", "pi_hosted", raising=False)
+    assert settings.grocy_link_url() == "http://10.0.0.7:9383"
+
+
 def test_grocy_link_url_uses_lan_ip_for_loopback_base(monkeypatch):
     monkeypatch.setattr(config, "_lan_ip", lambda: "10.0.0.7")
     monkeypatch.setattr(config, "browser_host", lambda: "pi.local")

@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.6.94"
+APP_VERSION = "0.6.95"
 
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
@@ -79,7 +79,7 @@ _DEFAULT_DISPLAY_ROTATION = 0
 #                     Hosyond). Bookworm full KMS dropped DSI auto-detection, so
 #                     firstboot writes dtoverlay=vc4-kms-dsi-7inch to light it.
 DISPLAY_TYPES = {
-    "generic":        {"label": "Generic HDMI display"},
+    "generic":        {"label": "Generic display"},
     "waveshare_hdmi": {"label": "Waveshare HDMI touchscreen"},
     "dsi_7inch":      {"label": "MIPI DSI 7-inch touchscreen (official / Hosyond clone)"},
 }
@@ -250,6 +250,13 @@ SECRET_SETTING_KEYS = [
 _DEFAULT_GROCY_URL = "http://grocy:80"
 
 _LOCALHOST_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+# Docker-compose service hostnames for the local stack (pi_hosted / server).
+# These resolve only inside the compose network, so a browser-facing link
+# pointing at one (e.g. http://grocy) is never reachable from a phone or PC.
+# Treat them like localhost when rewriting browser links (FoodAssistant-r9r7):
+# the API wiring still uses the raw base_url, only the browser link is rewritten
+# to the LAN host:port.
+_INTERNAL_SERVICE_HOSTS = {"grocy", "mealie", "ollama"}
 
 # The Pi host bridge (see routers/setup.py) reports the real host hostname. On a
 # pi_hosted appliance the app runs in a host-network container whose own
@@ -354,7 +361,7 @@ def _mdns_rewrite(url: str, port: int) -> str:
     """
     from urllib.parse import urlparse
     parsed = urlparse(url)
-    if parsed.hostname in _LOCALHOST_HOSTS:
+    if parsed.hostname in _LOCALHOST_HOSTS or parsed.hostname in _INTERNAL_SERVICE_HOSTS:
         host = _lan_ip() or browser_host()
         if host:
             return f"http://{host}:{port}"
