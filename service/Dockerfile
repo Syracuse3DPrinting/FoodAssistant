@@ -4,8 +4,11 @@ WORKDIR /app
 
 # rclone powers the optional "push backup to a cloud remote" feature
 # (Settings > Security > Backup). ca-certificates is needed for outbound HTTPS.
+# evtest is used by the touchscreen calibration flow to read raw taps from the
+# panel's /dev/input device (the appliance compose mounts /dev/input in); without
+# it in the image, calibration reports the touch stream as disconnected.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends rclone ca-certificates \
+    && apt-get install -y --no-install-recommends rclone ca-certificates evtest \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
