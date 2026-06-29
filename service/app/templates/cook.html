@@ -21,6 +21,10 @@
     <button class="btn btn-outline-secondary" id="btn-ask-ai" onclick="loadAiSuggestions()">
       <i class="bi bi-stars me-1"></i>Ask AI
     </button>
+    <button class="btn btn-outline-secondary" id="btn-surprise" onclick="surpriseMe()"
+            title="Invent a random recipe from your preferences and inventory">
+      <i class="bi bi-dice-5 me-1"></i>Surprise me
+    </button>
     {% endif %}
     <button class="btn btn-outline-secondary" onclick="loadSuggestions()" title="Refresh">
       <i class="bi bi-arrow-clockwise me-1"></i>Refresh
@@ -139,6 +143,45 @@
       <span class="cuisine-pill" data-cuisine="African American (Soul Food)" onclick="toggleCuisine(this)">🍗 Soul Food</span>
       <span class="cuisine-pill" data-cuisine="Cajun and Creole" onclick="toggleCuisine(this)">🦞 Cajun &amp; Creole</span>
       <span class="cuisine-pill" data-cuisine="British" onclick="toggleCuisine(this)">🇬🇧 British</span>
+    </div>
+
+    <!-- Occasion / dish-type / extra tags (FoodAssistant-stqb, -n9aq, -qaes,
+         -2513, -irxk, -u3rh). These steer the AI suggestion and generation
+         prompts only (there is no clean external-search filter for them). -->
+    <div class="pref-section-label">Occasion <span class="ai-only">✨ AI only</span></div>
+    <div class="cuisine-pills" id="tag-pills">
+      <span class="tag-pill" data-tag="Meal Prep" onclick="toggleTag(this)">🥡 Meal Prep</span>
+      <span class="tag-pill" data-tag="Lunch Box" onclick="toggleTag(this)">🍱 Lunch Box</span>
+      <span class="tag-pill" data-tag="Camping" onclick="toggleTag(this)">⛺ Camping</span>
+      <span class="tag-pill" data-tag="Picnic" onclick="toggleTag(this)">🧺 Picnic</span>
+      <span class="tag-pill" data-tag="Party" onclick="toggleTag(this)">🎉 Party / Crowd</span>
+      <span class="tag-pill" data-tag="Game Day" onclick="toggleTag(this)">🏈 Game Day</span>
+      <span class="tag-pill" data-tag="Holiday" onclick="toggleTag(this)">🎄 Holiday</span>
+      <span class="tag-pill" data-tag="Date Night" onclick="toggleTag(this)">🕯️ Date Night</span>
+    </div>
+
+    <div class="pref-section-label">Dish type <span class="ai-only">✨ AI only</span></div>
+    <div class="cuisine-pills" id="course-pills">
+      <span class="tag-pill" data-tag="Breakfast" onclick="toggleTag(this)">🍳 Breakfast</span>
+      <span class="tag-pill" data-tag="Appetizer" onclick="toggleTag(this)">🥟 Appetizer</span>
+      <span class="tag-pill" data-tag="Soup" onclick="toggleTag(this)">🍲 Soup</span>
+      <span class="tag-pill" data-tag="Salad" onclick="toggleTag(this)">🥗 Salad</span>
+      <span class="tag-pill" data-tag="Main Course" onclick="toggleTag(this)">🍽️ Main</span>
+      <span class="tag-pill" data-tag="Side Dish" onclick="toggleTag(this)">🥔 Side</span>
+      <span class="tag-pill" data-tag="Snack" onclick="toggleTag(this)">🍿 Snack</span>
+      <span class="tag-pill" data-tag="Dessert" onclick="toggleTag(this)">🍰 Dessert</span>
+      <span class="tag-pill" data-tag="Baked Goods" onclick="toggleTag(this)">🥖 Baked Goods</span>
+      <span class="tag-pill" data-tag="Candy" onclick="toggleTag(this)">🍬 Candy</span>
+      <span class="tag-pill" data-tag="Drink" onclick="toggleTag(this)">🍹 Drink</span>
+    </div>
+
+    <div class="pref-section-label">Extras <span class="ai-only">✨ AI only</span></div>
+    <div class="cuisine-pills" id="extra-pills">
+      <span class="tag-pill" data-tag="Cooks With Wine" onclick="toggleTag(this)">🍷 Cooks With Wine</span>
+      <span class="tag-pill" data-tag="Leftover Friendly" onclick="toggleTag(this)">♻️ Leftover Friendly</span>
+      <span class="tag-pill" data-tag="One Pot" onclick="toggleTag(this)">🍲 One Pot</span>
+      <span class="tag-pill" data-tag="No Cook" onclick="toggleTag(this)">🧊 No Cook</span>
+      <span class="tag-pill" data-tag="Budget" onclick="toggleTag(this)">💸 Budget</span>
     </div>
 
     <div class="pref-reset-row">
@@ -376,6 +419,21 @@ input[type=range].pref-slider {
   border-color: var(--bs-info);
   color: #fff;
 }
+.tag-pill {
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--bs-border-color);
+  background: var(--bs-secondary-bg);
+  font-size: 0.78rem;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.tag-pill.active {
+  background: var(--bs-success);
+  border-color: var(--bs-success);
+  color: #fff;
+}
 .pref-reset-row {
   text-align: right;
   margin-top: 0.75rem;
@@ -395,6 +453,7 @@ let cVal = 3, sVal = 3, tVal = 3, pVal = 3;
 let prefOn = {complexity: true, spice: true, time: true, portions: true};
 let activeDiets = new Set();
 let activeCuisines = new Set();
+let activeTags = new Set();
 let prefsOpen = false;
 let prefsDebounce = null;
 
@@ -420,7 +479,7 @@ function updatePrefLabels() {
   document.getElementById('lbl-portions').textContent   = PORTIONS_LABELS[pVal];
   const anyDisabled = Object.values(prefOn).some(on => !on);
   const nonDefault = cVal !== 3 || sVal !== 3 || tVal !== 3 || pVal !== 3
-    || anyDisabled || activeDiets.size > 0 || activeCuisines.size > 0;
+    || anyDisabled || activeDiets.size > 0 || activeCuisines.size > 0 || activeTags.size > 0;
   document.getElementById('prefs-active-badge').classList.toggle('d-none', !nonDefault);
 }
 
@@ -461,11 +520,27 @@ function toggleCuisine(el) {
   scheduleRefresh();
 }
 
+// Occasion / dish-type / extra tags (AI-only steering). These do not change the
+// stock/external search, so toggling one does not trigger a suggestion refresh;
+// they apply the next time the AI path runs (Ask AI, Generate, Surprise me).
+function toggleTag(el) {
+  const t = el.dataset.tag;
+  if (activeTags.has(t)) {
+    activeTags.delete(t);
+    el.classList.remove('active');
+  } else {
+    activeTags.add(t);
+    el.classList.add('active');
+  }
+  savePrefs();
+  updatePrefLabels();
+}
+
 function savePrefs() {
   localStorage.setItem('cookPrefs', JSON.stringify({
     complexity: cVal, spice: sVal, time: tVal, portions: pVal,
     enabled: {...prefOn},
-    diets: [...activeDiets], cuisines: [...activeCuisines],
+    diets: [...activeDiets], cuisines: [...activeCuisines], tags: [...activeTags],
   }));
 }
 
@@ -484,6 +559,7 @@ function loadPrefs() {
     }
     activeDiets = new Set(p.diets || []);
     activeCuisines = new Set(p.cuisines || []);
+    activeTags = new Set(p.tags || []);
   } catch (_) {}
   document.getElementById('pref-complexity').value = cVal;
   document.getElementById('pref-spice').value      = sVal;
@@ -499,6 +575,9 @@ function loadPrefs() {
   document.querySelectorAll('.cuisine-pill').forEach(el => {
     el.classList.toggle('active', activeCuisines.has(el.dataset.cuisine));
   });
+  document.querySelectorAll('.tag-pill').forEach(el => {
+    el.classList.toggle('active', activeTags.has(el.dataset.tag));
+  });
   updatePrefLabels();
 }
 
@@ -507,6 +586,7 @@ function resetPrefs() {
   prefOn = {complexity: true, spice: true, time: true, portions: true};
   activeDiets = new Set();
   activeCuisines = new Set();
+  activeTags = new Set();
   document.getElementById('pref-complexity').value = 3;
   document.getElementById('pref-spice').value      = 3;
   document.getElementById('pref-time').value       = 3;
@@ -517,6 +597,7 @@ function resetPrefs() {
   }
   document.querySelectorAll('.diet-pill').forEach(el => el.classList.remove('active'));
   document.querySelectorAll('.cuisine-pill').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.tag-pill').forEach(el => el.classList.remove('active'));
   savePrefs();
   updatePrefLabels();
   scheduleRefresh();
@@ -543,7 +624,39 @@ function buildPrefsString() {
   if (portions)   parts.push(`serving size: ${portions}`);
   if (diets)      parts.push(`dietary requirements: ${diets}`);
   if (cuisines)   parts.push(`preferred cuisine: ${cuisines}`);
+  const tagPhrase = buildTagsPhrase();
+  if (tagPhrase)  parts.push(tagPhrase);
   return parts.join('. ');
+}
+
+// Map each occasion/dish-type/extra tag to a richer phrase so the AI gets real
+// guidance, not just a keyword. Unmapped tags fall back to their own label.
+const TAG_PHRASES = {
+  'Meal Prep': 'suitable for meal prep (batchable, keeps and reheats well, portionable)',
+  'Lunch Box': 'packable for a lunch box (eats well cold or reheated, not messy)',
+  'Camping': 'campfire/camping friendly (minimal refrigeration, packable, simple gear)',
+  'Picnic': 'picnic friendly (served cold or at room temperature, easy to transport)',
+  'Party': 'a crowd-pleasing party dish (scales up, shareable)',
+  'Game Day': 'game-day food (finger food, snacks, shareable)',
+  'Holiday': 'a festive holiday dish',
+  'Date Night': 'an impressive date-night dish for two',
+  'Cooks With Wine': 'uses wine as a cooking ingredient',
+  'Leftover Friendly': 'leftover friendly (reheats well the next day)',
+  'One Pot': 'one-pot or one-pan, minimal cleanup',
+  'No Cook': 'no-cook (no stove or oven required)',
+  'Budget': 'budget friendly with inexpensive, common ingredients',
+};
+const COURSE_TAGS = new Set(['Breakfast', 'Appetizer', 'Soup', 'Salad', 'Main Course',
+  'Side Dish', 'Snack', 'Dessert', 'Baked Goods', 'Candy', 'Drink']);
+
+function buildTagsPhrase() {
+  if (!activeTags.size) return '';
+  const courses = [...activeTags].filter(t => COURSE_TAGS.has(t));
+  const others  = [...activeTags].filter(t => !COURSE_TAGS.has(t)).map(t => TAG_PHRASES[t] || t);
+  const out = [];
+  if (courses.length) out.push(`dish type: ${courses.join(', ')}`);
+  if (others.length)  out.push(`it should be ${others.join('; ')}`);
+  return out.join('. ');
 }
 
 function buildPrefsParams() {
@@ -924,7 +1037,42 @@ function aiCustomPrompt() {
   return (document.getElementById('ai-custom-prompt')?.value || '').trim();
 }
 
-async function openAiPreview(name) {
+// The full steer for the generate path: the tuned preference pills plus the
+// free-text box, so generated recipes honor diet/cuisine/occasion tags too.
+function combinedAiPrompt() {
+  return [buildPrefsString(), aiCustomPrompt()].filter(Boolean).join('. ');
+}
+
+// Random recipe (FoodAssistant-dazq). Design choice: AI-generated random (not a
+// pick from the Mealie library) so it always honors the active preferences. If
+// a cuisine or dish-type tag is set, the random concept is built from it;
+// otherwise a concept is drawn from a broad pool. The AI then writes and names
+// the full dish, varied by a per-click nonce.
+const SURPRISE_POOL = [
+  'a hearty one-pan dinner', 'a comforting noodle bowl', 'a vibrant grain salad',
+  'a rustic stew', 'a stuffed flatbread', 'a sheet-pan roast', 'a savory hand pie',
+  'a creamy pasta bake', 'a spiced rice skillet', 'a loaded baked potato dish',
+  'a bright citrus salad', 'a warming soup', 'a crispy fritter plate',
+  'a glazed traybake', 'a smoky taco filling', 'a fragrant curry',
+  'a cheesy gratin', 'a quick stir-fry', 'a brothy dumpling bowl', 'a layered casserole',
+];
+
+function surpriseMe() {
+  const courses = [...activeTags].filter(t => COURSE_TAGS.has(t));
+  const cuisines = [...activeCuisines];
+  let concept;
+  if (courses.length || cuisines.length) {
+    const c = cuisines.length ? cuisines[Math.floor(Math.random() * cuisines.length)] : '';
+    const d = courses.length ? courses[Math.floor(Math.random() * courses.length)].toLowerCase() : 'dish';
+    concept = `a surprising ${c} ${d}`.replace(/\s+/g, ' ').trim();
+  } else {
+    concept = SURPRISE_POOL[Math.floor(Math.random() * SURPRISE_POOL.length)];
+  }
+  const nonce = Math.random().toString(36).slice(2, 7);
+  openAiPreview(concept, `Invent ONE creative dish and give it a real, appetizing name (do not call it "${concept}"). Variation seed: ${nonce}.`);
+}
+
+async function openAiPreview(name, extraInstruction) {
   aiGeneratedRecipe = null;
   const modal = new bootstrap.Modal(document.getElementById('aiPreviewModal'));
   document.getElementById('aipv-name').textContent = `Generating "${name}"…`;
@@ -934,9 +1082,10 @@ async function openAiPreview(name) {
   document.getElementById('aipv-error').classList.add('d-none');
   modal.show();
   try {
+    const prompt = [combinedAiPrompt(), extraInstruction].filter(Boolean).join('. ');
     const r = await fetch('mealie/recipes/generate', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name, custom_prompt: aiCustomPrompt()}),
+      body: JSON.stringify({name, custom_prompt: prompt}),
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || r.statusText);
