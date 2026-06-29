@@ -101,6 +101,30 @@ def test_setup_redirect_preserves_kiosk_flag(client, monkeypatch):
     assert r2.headers["location"].endswith("/setup")
 
 
+def test_touchscreen_detection_by_name_and_capability():
+    """_looks_like_touchscreen matches named controllers and unnamed direct
+    pointers, and rejects a mouse (FoodAssistant-mox4)."""
+    from app.routers.setup import _looks_like_touchscreen, _block_handler
+
+    named = 'N: Name="ADS7846 Touchscreen"\nH: Handlers=mouse0 event0\nB: ABS=1000003'
+    assert _looks_like_touchscreen(named)
+    assert _block_handler(named) == "/dev/input/event0"
+
+    # Capacitive panel whose name lacks the word "touch": caught by the known
+    # controller hint and by INPUT_PROP_DIRECT (PROP bit 1) + ABS.
+    capacitive = 'N: Name="generic ft5x06"\nH: Handlers=event4\nB: PROP=2\nB: EV=b\nB: ABS=2658000 3'
+    assert _looks_like_touchscreen(capacitive)
+    assert _block_handler(capacitive) == "/dev/input/event4"
+
+    # Unnamed direct absolute pointer (no known hint) still detected via PROP.
+    unnamed = 'N: Name="Vendor 0416 Device"\nH: Handlers=event6\nB: PROP=2\nB: ABS=3'
+    assert _looks_like_touchscreen(unnamed)
+
+    # A mouse is indirect (PROP=0) with relative axes: must NOT match.
+    mouse = 'N: Name="Logitech USB Mouse"\nH: Handlers=mouse1 event5\nB: PROP=0\nB: EV=17\nB: REL=903'
+    assert not _looks_like_touchscreen(mouse)
+
+
 def test_setup_page_has_rotation_mode_guard(client):
     """Standalone pages (setup/login/pin) must carry data-rotation-mode like
     base.html, or kiosk-display.js applies a CSS rotation on top of the

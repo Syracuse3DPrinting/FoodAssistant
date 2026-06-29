@@ -1436,6 +1436,39 @@ async def ap_disable():
 # calibration matrix. Only meaningful on Pi Remote (venv service) where the
 # process can access /dev/input/event* directly (service user in input group).
 
+# Substrings of common touch-controller device names that do NOT contain the
+# word "touch" (capacitive and resistive panels alike), so name-matching catches
+# them too. The capability check below is the real backstop for anything unnamed.
+_TOUCH_CONTROLLER_HINTS = (
+    "touch", "ads7846", "goodix", "ft5x", "ft6", "edt-ft5", "edt_ft5", "ektf",
+    "ilitek", "ili210", "ili251", "silead", "eeti", "egalax", "hynitron",
+    "st1633", "gslx680", "stmpe", "raspberrypi-ts", "waveshare", "hosyond",
+    "chipone", "icn85", "cst", "zforce",
+)
+
+
+def _block_handler(block: str) -> str | None:
+    m = re.search(r"Handlers=.*?(event\d+)", block)
+    return "/dev/input/" + m.group(1) if m else None
+
+
+def _looks_like_touchscreen(block: str) -> bool:
+    """True when a /proc/bus/input/devices block is a touchscreen.
+
+    Two signals, either is enough: the device name matches a known controller
+    (covers panels that do not say "touch"), or the kernel flags it as a direct
+    absolute pointer, i.e. INPUT_PROP_DIRECT (PROP bit 1) plus absolute axes.
+    The capability check is what catches an oddly named or generic panel."""
+    low = block.lower()
+    if any(hint in low for hint in _TOUCH_CONTROLLER_HINTS):
+        return True
+    prop = re.search(r"^B: PROP=([0-9a-fA-F]+)", block, re.M)
+    has_abs = re.search(r"^B: ABS=[0-9a-fA-F]", block, re.M) is not None
+    # INPUT_PROP_DIRECT (bit 1) marks a screen-mapped device (a touchscreen),
+    # versus an indirect one like a touchpad; require absolute axes too.
+    return bool(prop) and bool(int(prop.group(1), 16) & 0x2) and has_abs
+
+
 def _find_touch_device() -> str | None:
     """Return the first /dev/input/eventN that looks like a touchscreen."""
     try:
@@ -1443,10 +1476,10 @@ def _find_touch_device() -> str | None:
     except OSError:
         return None
     for b in blocks:
-        if re.search(r"touch", b, re.I):
-            m = re.search(r"Handlers=.*?(event\d+)", b)
-            if m:
-                return "/dev/input/" + m.group(1)
+        if _looks_like_touchscreen(b):
+            h = _block_handler(b)
+            if h:
+                return h
     return None
 
 
