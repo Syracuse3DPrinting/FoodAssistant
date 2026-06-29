@@ -6026,14 +6026,32 @@ async function startTouchCalibration() {
     const r = await fetch('/setup/calibrate/touch/request', { method: 'POST' });
     const data = await r.json();
     if (data.ok) {
-      if (el) { el.className = 'test-result mt-2 text-success';
-        el.textContent = 'Calibration started on the Pi touchscreen. Walk to the device and tap each crosshair in turn.'; }
+      if (el) {
+        el.className = 'test-result mt-2 text-success';
+        // The Cancel button lives HERE, on the remote browser, because the Pi
+        // panel is uncalibrated during the test and hard to tap accurately.
+        el.innerHTML = 'Calibration started on the Pi touchscreen. Walk to the device and tap each crosshair in turn.' +
+          ' <button type="button" class="btn btn-outline-danger btn-sm ms-2" onclick="cancelTouchCalibration()">' +
+          '<i class="bi bi-x-circle me-1"></i>Cancel calibration</button>';
+      }
     } else if (el) {
       el.className = 'test-result mt-2 text-danger';
       el.textContent = 'Could not start: ' + (data.error || 'unknown error');
     }
   } catch (e) {
     if (el) { el.className = 'test-result mt-2 text-danger'; el.textContent = 'Request failed: ' + e; }
+  }
+}
+
+// Cancel a calibration in progress from this remote browser: the Pi's
+// fullscreen calibration page polls for this and returns to the dashboard.
+async function cancelTouchCalibration() {
+  const el = document.getElementById('touch-calibrate-result');
+  try {
+    await fetch('/setup/calibrate/touch/cancel', { method: 'POST' });
+    if (el) { el.className = 'test-result mt-2 text-secondary'; el.textContent = 'Calibration cancelled.'; }
+  } catch (e) {
+    if (el) { el.className = 'test-result mt-2 text-danger'; el.textContent = 'Cancel failed: ' + e; }
   }
 }
 </script>

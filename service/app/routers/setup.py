@@ -1609,6 +1609,9 @@ async def calibrate_touch_request():
     try:
         _CAL_FLAG.parent.mkdir(parents=True, exist_ok=True)
         _CAL_FLAG.write_text("1")
+        # Drop any leftover cancel from a previous run so it does not abort this
+        # one before it starts.
+        _CAL_CANCEL_FLAG.unlink(missing_ok=True)
     except OSError as e:
         return JSONResponse({"ok": False, "error": str(e)})
     return {"ok": True, "message": "Calibration started on the Pi touchscreen."}
@@ -1618,6 +1621,39 @@ async def calibrate_touch_request():
 async def calibrate_touch_pending():
     """Polled by the kiosk page; true once a remote browser asks to calibrate."""
     return {"pending": _CAL_FLAG.exists()}
+
+
+# Cancelling calibration belongs on the REMOTE browser, not the Pi touchscreen:
+# the panel is uncalibrated during the test, so a Cancel button on it is hard to
+# hit. The remote UI sets this flag; the fullscreen calibration page polls it and
+# returns to the dashboard. One-shot, cleared on read, same pattern as above.
+_CAL_CANCEL_FLAG = Path(settings.data_dir) / "calibrate_cancel.flag"
+
+
+@router.post("/calibrate/touch/cancel")
+async def calibrate_touch_cancel():
+    """From the remote UI: ask the Pi calibration page to stop and go back."""
+    try:
+        _CAL_CANCEL_FLAG.parent.mkdir(parents=True, exist_ok=True)
+        _CAL_CANCEL_FLAG.write_text("1")
+        # If the kiosk never reached the calibration page, also clear the start
+        # flag so a queued request does not fire later.
+        _CAL_FLAG.unlink(missing_ok=True)
+    except OSError as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+    return {"ok": True}
+
+
+@router.get("/calibrate/touch/cancel/pending")
+async def calibrate_touch_cancel_pending():
+    """Polled by the Pi calibration page; true once the remote asks to cancel."""
+    pending = _CAL_CANCEL_FLAG.exists()
+    if pending:
+        try:
+            _CAL_CANCEL_FLAG.unlink()
+        except OSError:
+            pass
+    return {"pending": pending}
 
 
 # Kiosk navigate-to-dashboard

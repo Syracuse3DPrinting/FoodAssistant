@@ -101,6 +101,17 @@ def test_setup_redirect_preserves_kiosk_flag(client, monkeypatch):
     assert r2.headers["location"].endswith("/setup")
 
 
+def test_touch_calibration_remote_cancel_flag(client):
+    """The remote Cancel sets a one-shot flag the Pi calibration page polls
+    (FoodAssistant-mox4): pending is true once, then cleared."""
+    r = client.post("/setup/calibrate/touch/cancel")
+    assert r.status_code == 200 and r.json().get("ok")
+    first = client.get("/setup/calibrate/touch/cancel/pending").json()
+    assert first["pending"] is True
+    second = client.get("/setup/calibrate/touch/cancel/pending").json()
+    assert second["pending"] is False
+
+
 @pytest.mark.anyio
 async def test_touch_sse_reads_events_in_pure_python():
     """The calibration stream reads the input device directly (no evtest):
