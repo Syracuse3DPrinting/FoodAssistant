@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.6.132"
+APP_VERSION = "0.6.133"
 
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
@@ -197,7 +197,7 @@ _SAVEABLE = [
     "streamdeck_ha_base_url", "streamdeck_ha_token", "streamdeck_ha_slots",
     "ha_events_enabled", "ha_camera_popup_seconds", "convert_custom_rows",
     "floating_nav_position", "floating_nav_orientation", "floating_nav_autohide_streamdeck",
-    "deployment_mode", "remote_server_url", "remote_server_ip", "upstream_api_key", "kiosk_pin", "kiosk_readonly_when_locked",
+    "deployment_mode", "remote_server_url", "remote_server_ip", "remote_server_host", "upstream_api_key", "kiosk_pin", "kiosk_readonly_when_locked",
     "satellite_sync_minutes", "satellite_last_sync", "device_id",
     "secret_key", "auth_password", "totp_secret", "api_key", "extra_api_keys", "auth_required",
     "rclone_remote", "rclone_schedule_hours",
@@ -727,6 +727,11 @@ class Settings(BaseSettings):
     # stops resolving (mDNS down on the network), so the satellite stays wired
     # to its server (FoodAssistant-xwn0). Written only when the IP changes.
     remote_server_ip: str = ""
+    # Satellite only: the main server's hostname, learned from the sync response.
+    # Lets a satellite configured with a bare IP fall back to <host>.local when
+    # DHCP reassigns the server's IP, so it reconnects without a manual edit
+    # (FoodAssistant-k9a8). Written only when it changes.
+    remote_server_host: str = ""
     # Satellite only: an optional numeric PIN that gates the kiosk UI. A
     # satellite turns the UI password off by default (the main server owns
     # access control), so this is a lightweight, touchscreen-friendly lock for

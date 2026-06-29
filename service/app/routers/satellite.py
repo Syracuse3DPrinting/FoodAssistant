@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 import json
 
-from ..config import settings, SATELLITE_PULL_FIELDS
+from ..config import settings, SATELLITE_PULL_FIELDS, device_hostname
 from ..database import SessionLocal
 from ..models.db_models import ExpiryDefault, StreamDeckProfile
 from ..services import devices
@@ -105,6 +105,10 @@ def satellite_config(
     return {
         "ok": True,
         "config": config,
+        # The server's own hostname, so a satellite configured with a bare IP can
+        # learn the mDNS name and fall back to <host>.local when DHCP reassigns
+        # the host's IP (FoodAssistant-k9a8).
+        "server_hostname": device_hostname(),
         "expiry_defaults": _defaults_payload(),
         "streamdeck_profiles": _profiles_payload(),
         "command": command,

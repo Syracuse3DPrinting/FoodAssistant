@@ -275,15 +275,28 @@ def _resolve_host(host: str) -> str:
         return ""
 
 
-def _sync_candidates(url: str, host: str, cached_ip: str) -> list[str]:
-    """The URLs to try, in order: the configured one first, then an IP-based
-    fallback built from the cached server IP when the configured host is a name
-    that differs from that IP. Keeps mDNS as the primary path but survives it
-    going down on the network (FoodAssistant-xwn0)."""
+def _sync_candidates(url: str, host: str, cached_ip: str,
+                     server_host: str = "") -> list[str]:
+    """The URLs to try, in order, so the satellite survives both failure modes:
+
+    1. Configured by mDNS name that stops resolving -> retry the cached server IP
+       (FoodAssistant-xwn0).
+    2. Configured by a bare IP that DHCP reassigns -> retry the server's
+       advertised hostname as ``<host>.local`` (FoodAssistant-k9a8).
+
+    The configured URL is always tried first; fallbacks are appended only when
+    they differ from it, so a healthy setup makes exactly one request."""
     candidates = [url]
     cached_ip = (cached_ip or "").strip()
     if cached_ip and host and host != cached_ip and not _is_ip_literal(host):
         candidates.append(_swap_host(url, cached_ip))
+    server_host = (server_host or "").strip().rstrip(".")
+    if server_host:
+        mdns = server_host if "." in server_host else f"{server_host}.local"
+        if mdns and mdns != host:
+            cand = _swap_host(url, mdns)
+            if cand not in candidates:
+                candidates.append(cand)
     return candidates
 
 
@@ -308,7 +321,8 @@ def _do_sync_from_upstream(timeout: float = 8.0) -> dict:
     host = urlparse(base).hostname or ""
     resp = None
     last_exc = None
-    for cand in _sync_candidates(url, host, settings.remote_server_ip):
+    for cand in _sync_candidates(url, host, settings.remote_server_ip,
+                                 settings.remote_server_host):
         try:
             resp = httpx.get(cand, headers=headers, timeout=timeout)
             break
@@ -339,6 +353,14 @@ def _do_sync_from_upstream(timeout: float = 8.0) -> dict:
             logger.warning("satellite sync: could not cache server IP: %s", exc)
 
     data = resp.json()
+    # Learn the server's hostname so a bare-IP satellite can fall back to
+    # <host>.local after a DHCP IP change (k9a8). Persist only on change.
+    server_host = str(data.get("server_hostname", "") or "").strip().rstrip(".")
+    if server_host and server_host != (settings.remote_server_host or ""):
+        try:
+            settings.save({"remote_server_host": server_host})
+        except Exception as exc:  # non-fatal: the fallback just stays unset
+            logger.warning("satellite sync: could not cache server hostname: %s", exc)
     applied = _apply_config(data.get("config", {}))
     defaults_n = 0
     try:

@@ -63,6 +63,9 @@ def test_config_endpoint_serves_shareable_fields(client, monkeypatch):
     assert "auth_password" not in body["config"]
     assert "api_key" not in body["config"]
     assert isinstance(body["expiry_defaults"], list)
+    # The server advertises its hostname so a bare-IP satellite can learn the
+    # mDNS fallback name (FoodAssistant-k9a8).
+    assert "server_hostname" in body and isinstance(body["server_hostname"], str)
 
 
 # -- pull side: apply config onto live settings ------------------------------
@@ -576,6 +579,26 @@ def test_sync_candidates_adds_ip_fallback_only_when_useful():
     assert _sync_candidates(url, "server.local", "") == [url]
     ip_url = "http://192.168.1.50:9284/x"
     assert _sync_candidates(ip_url, "192.168.1.50", "192.168.1.50") == [ip_url]
+
+
+def test_sync_candidates_adds_mdns_fallback_for_ip_config(monkeypatch):
+    """A satellite configured with a bare IP falls back to the server's
+    advertised <host>.local when the IP stops working (FoodAssistant-k9a8)."""
+    from app.services.satellite import _sync_candidates
+    ip_url = "http://192.168.1.50:9284/api/config/satellite"
+    # Learned server hostname yields a .local candidate after the configured IP.
+    assert _sync_candidates(ip_url, "192.168.1.50", "", "kitchenpi") == [
+        ip_url, "http://kitchenpi.local:9284/api/config/satellite"
+    ]
+    # A hostname that already carries a dot is used verbatim (not double-suffixed).
+    assert _sync_candidates(ip_url, "192.168.1.50", "", "kitchenpi.local") == [
+        ip_url, "http://kitchenpi.local:9284/api/config/satellite"
+    ]
+    # No server hostname means no extra candidate.
+    assert _sync_candidates(ip_url, "192.168.1.50", "") == [ip_url]
+    # When already configured by that same .local name, no duplicate is added.
+    name_url = "http://kitchenpi.local:9284/api/config/satellite"
+    assert _sync_candidates(name_url, "kitchenpi.local", "", "kitchenpi") == [name_url]
 
 
 def test_sync_falls_back_to_cached_ip_when_mdns_fails(satellite_mode, monkeypatch):
