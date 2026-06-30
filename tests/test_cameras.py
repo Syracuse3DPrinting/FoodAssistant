@@ -65,3 +65,32 @@ def test_camera_sources_view_model():
     assert out[0]["snapshot_src"] == "ui/camera/0/snapshot"
     assert out[1]["is_ha"] is False
     assert out[1]["stream_src"] == "http://1.2.3.4/v"
+
+
+# -- resolve_camera_index (FoodAssistant-f230) ------------------------------
+
+_CAMS = [
+    {"name": "Front Door", "ha_entity": "camera.front"},
+    {"name": "Garage", "ha_entity": "camera.garage"},
+    {"name": "Shed", "snapshot_url": "http://1.2.3.4/s.jpg"},
+]
+
+
+def test_resolve_camera_index_by_name_case_insensitive():
+    assert cameras.resolve_camera_index(_CAMS, "garage") == 1
+    assert cameras.resolve_camera_index(_CAMS, "  Shed ") == 2
+
+
+def test_resolve_camera_index_by_position():
+    assert cameras.resolve_camera_index(_CAMS, "2") == 2
+
+
+def test_resolve_camera_index_defaults_to_first():
+    # Empty, unknown name, and out-of-range index all fall back to camera 0.
+    assert cameras.resolve_camera_index(_CAMS, "") == 0
+    assert cameras.resolve_camera_index(_CAMS, "nope") == 0
+    assert cameras.resolve_camera_index(_CAMS, "9") == 0
+
+
+def test_resolve_camera_index_empty_list():
+    assert cameras.resolve_camera_index([], "Garage") == 0

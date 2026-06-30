@@ -8,7 +8,7 @@
   <div class="btn-group btn-group-sm" role="group" id="cameraSwitcher">
     {% for cam in cameras %}
     <button type="button"
-            class="btn btn-outline-info{% if loop.first %} active{% endif %}"
+            class="btn btn-outline-info{% if loop.index0 == initial_index %} active{% endif %}"
             data-cam-index="{{ loop.index0 }}"
             onclick="selectCamera({{ loop.index0 }})">
       {{ cam.name or ("Camera " ~ loop.index) }}
@@ -159,8 +159,12 @@
   });
   videoEl.addEventListener('error', () => { if (!snapTimer) _showError(); });
 
-  // Start on the first configured camera.
-  if (CAMERAS.length) selectCamera(0);
+  // Start on the requested camera (the server resolved ?cam=index|name to an
+  // index, defaulting to 0), so a Stream Deck camera key opens its own feed.
+  const INITIAL_INDEX = {{ initial_index|default(0) }};
+  if (CAMERAS.length) {
+    selectCamera(INITIAL_INDEX >= 0 && INITIAL_INDEX < CAMERAS.length ? INITIAL_INDEX : 0);
+  }
 </script>
 {% endif %}
 {% endblock %}

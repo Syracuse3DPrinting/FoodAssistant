@@ -113,3 +113,31 @@ def camera_sources(cameras: list) -> list[dict]:
                 "is_ha": False,
             })
     return out
+
+
+def resolve_camera_index(cameras: list, cam: str) -> int:
+    """Resolve a requested camera selector to a list index, defaulting to 0.
+
+    ``cam`` may be a zero-based index ("0", "2") or a camera name (matched
+    case-insensitively against the ``name`` field). An empty selector, an
+    out-of-range index, or an unknown name falls back to the first camera (0),
+    so the kiosk always shows something. Returns 0 when no cameras exist. Pure,
+    so it is unit-testable without the app or a request.
+    """
+    cams = cameras or []
+    if not cams:
+        return 0
+    want = (cam or "").strip()
+    if not want:
+        return 0
+    # A bare integer selects by position.
+    if want.lstrip("-").isdigit():
+        idx = int(want)
+        if 0 <= idx < len(cams):
+            return idx
+        return 0
+    low = want.lower()
+    for i, entry in enumerate(cams):
+        if isinstance(entry, dict) and str(entry.get("name", "")).strip().lower() == low:
+            return i
+    return 0

@@ -101,6 +101,23 @@ def test_camera_popup_no_cameras(client, monkeypatch):
     assert client.post("/events/camera-popup", json={}).json()["ok"] is False
 
 
+def test_camera_page_opens_requested_camera(client, monkeypatch):
+    # FoodAssistant-f230: /ui/camera?cam= picks the initial camera (by name or
+    # index) so a Stream Deck camera key opens the requested feed, not camera 0.
+    monkeypatch.setattr(settings, "streamdeck_cameras", [
+        {"name": "Front Door", "ha_entity": "camera.front"},
+        {"name": "Garage", "ha_entity": "camera.garage"},
+    ], raising=False)
+    body = client.get("/ui/camera?cam=Garage").text
+    assert "const INITIAL_INDEX = 1;" in body
+    # Selecting by index works too.
+    assert "const INITIAL_INDEX = 1;" in client.get("/ui/camera?cam=1").text
+    # No selector falls back to the first camera.
+    assert "const INITIAL_INDEX = 0;" in client.get("/ui/camera").text
+    # An unknown name also falls back to the first camera.
+    assert "const INITIAL_INDEX = 0;" in client.get("/ui/camera?cam=nope").text
+
+
 def test_navigate_event_queued_and_polled(client):
     r = client.post("/events/navigate", json={"path": "ui/cook"}).json()
     assert r["ok"] is True and r["path"] == "ui/cook"

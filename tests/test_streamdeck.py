@@ -3124,6 +3124,37 @@ def test_camera_action_run_opens_feed():
     assert opened == ["ui/camera"]
 
 
+def test_camera_target_path_carries_requested_camera():
+    # FoodAssistant-f230: a named camera key must carry its camera through to the
+    # kiosk as a ?cam= param so the page opens that feed, not always camera 0.
+    assert actions.camera_target_path("ui/camera", "") == "ui/camera"
+    assert actions.camera_target_path("ui/camera", "Garage") == "ui/camera?cam=Garage"
+    # A name needing escaping is URL-encoded.
+    assert actions.camera_target_path("ui/camera", "Front Door") == "ui/camera?cam=Front+Door"
+    # An existing query string keeps its params and gets cam appended.
+    assert actions.camera_target_path("ui/camera?x=1", "Shed") == "ui/camera?x=1&cam=Shed"
+
+
+def test_camera_action_run_opens_requested_camera():
+    # A camera override naming "Garage" opens ui/camera?cam=Garage on the kiosk
+    # (FoodAssistant-f230), instead of defaulting to the first camera.
+    opened = []
+
+    async def navigate(path):
+        opened.append(path)
+        return True
+
+    ctx = actions.ActionContext(
+        client=None, base_url="http://x", refresh=lambda: asyncio.sleep(0),
+        navigate=navigate, cycle_brightness=lambda: 0,
+        page_next=lambda: None, page_prev=lambda: None,
+    )
+    spec = actions.override_to_spec(2, {"type": "camera", "camera": "Garage"})
+    msg = asyncio.run(actions.run_action(spec, ctx))
+    assert msg == "opened"
+    assert opened == ["ui/camera?cam=Garage"]
+
+
 def test_camera_full_action_is_marker():
     ctx = actions.ActionContext(
         client=None, base_url="http://x", refresh=lambda: asyncio.sleep(0),

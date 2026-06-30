@@ -313,12 +313,18 @@ async def audit_page(request: Request):
 
 
 @router.get("/camera", response_class=HTMLResponse)
-async def camera_page(request: Request):
-    from ..services.cameras import camera_sources
+async def camera_page(request: Request, cam: str = ""):
+    # ``cam`` selects which camera to open on load (by index or name); a Stream
+    # Deck camera key passes it so pressing the key pulls up the requested feed
+    # rather than always camera 0 (FoodAssistant-f230). It falls back to the
+    # first camera when empty, out of range, or unknown.
+    from ..services.cameras import camera_sources, resolve_camera_index
+    cams = settings.streamdeck_cameras
     resp = templates.TemplateResponse(request, "camera.html", {
         "request": request,
         "active": "camera",
-        "cameras": camera_sources(settings.streamdeck_cameras),
+        "cameras": camera_sources(cams),
+        "initial_index": resolve_camera_index(cams, cam),
     })
     # Never let a kiosk serve a stale copy of this page: the camera list and the
     # display logic change, and a cached page would keep showing an old (broken)

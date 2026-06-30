@@ -1582,6 +1582,24 @@ def camera_snapshot_target(cam: dict, ha_base: str, ha_token: str) -> tuple[str,
     return snap, None
 
 
+def camera_target_path(base_path: str, camera_name: str) -> str:
+    """Build the kiosk URL a camera key opens, carrying the requested camera.
+
+    A camera key names which configured camera it shows; that name must travel
+    to the kiosk so the camera page opens that feed rather than the first one
+    (FoodAssistant-f230). When a name is set, append it as a ``?cam=`` query
+    param (the page resolves a name or index to a camera). An empty name leaves
+    the path untouched, so the page falls back to camera 0. Pure and testable.
+    """
+    path = (base_path or "ui/camera").strip()
+    name = (camera_name or "").strip()
+    if not name:
+        return path
+    from urllib.parse import urlencode
+    sep = "&" if "?" in path else "?"
+    return f"{path}{sep}{urlencode({'cam': name})}"
+
+
 def _truthy(value: Any) -> bool:
     """Loosely interpret a JSON/TOML flag as a boolean.
 
@@ -2216,8 +2234,11 @@ async def run_action(spec: ActionSpec, ctx: ActionContext, long_press: bool = Fa
 
     if spec.kind == "camera":
         # The key face is a live snapshot the controller paints; a press opens
-        # the full feed on the kiosk display. A missing display is not an error.
-        target = spec.target_path or "ui/camera"
+        # the full feed on the kiosk display. The configured camera name is
+        # carried through as a ?cam= query param so the kiosk opens the requested
+        # camera rather than always camera 0 (FoodAssistant-f230). A missing
+        # display is not an error.
+        target = camera_target_path(spec.target_path or "ui/camera", spec.camera_name)
         opened = await ctx.navigate(target)
         return "opened" if opened else "no display"
 
