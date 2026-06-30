@@ -39,6 +39,30 @@ def _wmo_desc(code) -> str:
         return ""
 
 
+def icon_for(desc: str) -> str:
+    """Map a condition description to a Bootstrap Icons glyph (no 'bi-' prefix),
+    so the page can show a weather icon (FoodAssistant-q9du). Works for both the
+    Open-Meteo and wttr.in descriptions since they share vocabulary. Pure."""
+    d = (desc or "").lower()
+    if "thunder" in d:
+        return "cloud-lightning-rain"
+    if any(w in d for w in ("snow", "sleet", "blizzard", "ice", "grains")):
+        return "cloud-snow"
+    if "heavy" in d and ("rain" in d or "shower" in d):
+        return "cloud-rain-heavy"
+    if any(w in d for w in ("rain", "shower", "drizzle")):
+        return "cloud-rain"
+    if "fog" in d or "mist" in d:
+        return "cloud-fog2"
+    if "partly" in d:
+        return "cloud-sun"
+    if "clear" in d or "sunny" in d:
+        return "sun"
+    if "cloud" in d or "overcast" in d:
+        return "clouds"
+    return "cloud"
+
+
 def _round(value) -> str:
     """Render a number as a clean integer string, or '?' when missing."""
     try:
@@ -71,13 +95,15 @@ def parse_open_meteo(data: Any, units: str = "f", location: str = "") -> dict | 
     daily = data.get("daily") or {}
     if not isinstance(cur, dict) or "temperature_2m" not in cur:
         return None
+    cur_desc = _wmo_desc(cur.get("weather_code"))
     current = {
         "temp": _round(cur.get("temperature_2m")),
         "feels": _round(cur.get("apparent_temperature", cur.get("temperature_2m"))),
         "humidity": _round(cur.get("relative_humidity_2m")),
         "wind": _round(cur.get("wind_speed_10m")),
         "wind_unit": "mph" if units == "f" else "km/h",
-        "desc": _wmo_desc(cur.get("weather_code")),
+        "desc": cur_desc,
+        "icon": icon_for(cur_desc),
         "unit": u,
     }
     times = daily.get("time") or []
@@ -87,12 +113,14 @@ def parse_open_meteo(data: Any, units: str = "f", location: str = "") -> dict | 
     tags = ("Today", "Tomorrow")
     days: list[dict] = []
     for i, date in enumerate(times):
+        day_desc = _wmo_desc(codes[i]) if i < len(codes) else ""
         days.append({
             "label": tags[i] if i < len(tags) else str(date),
             "date": str(date),
             "hi": _round(highs[i]) if i < len(highs) else "?",
             "lo": _round(lows[i]) if i < len(lows) else "?",
-            "desc": _wmo_desc(codes[i]) if i < len(codes) else "",
+            "desc": day_desc,
+            "icon": icon_for(day_desc),
             "unit": u,
         })
     return {"location": location, "units": units, "current": current, "days": days}
@@ -198,13 +226,15 @@ def parse_forecast(data: Any, units: str = "f") -> dict | None:
     if not cc or not isinstance(cc, list) or not isinstance(cc[0], dict):
         return None
     cond = cc[0]
+    cur_desc = _desc(cond)
     current = {
         "temp": cond.get("temp_F" if units == "f" else "temp_C", "?"),
         "feels": cond.get("FeelsLikeF" if units == "f" else "FeelsLikeC", "?"),
         "humidity": cond.get("humidity", "?"),
         "wind": cond.get("windspeedMiles" if units == "f" else "windspeedKmph", "?"),
         "wind_unit": "mph" if units == "f" else "km/h",
-        "desc": _desc(cond),
+        "desc": cur_desc,
+        "icon": icon_for(cur_desc),
         "unit": u,
     }
     tags = ("Today", "Tomorrow")
@@ -214,12 +244,14 @@ def parse_forecast(data: Any, units: str = "f") -> dict | None:
             continue
         hourly = day.get("hourly") or []
         mid = hourly[len(hourly) // 2] if hourly else {}
+        day_desc = _desc(mid) if isinstance(mid, dict) else ""
         days.append({
             "label": tags[i] if i < len(tags) else str(day.get("date", "")),
             "date": str(day.get("date", "")),
             "hi": day.get("maxtempF" if units == "f" else "maxtempC", "?"),
             "lo": day.get("mintempF" if units == "f" else "mintempC", "?"),
-            "desc": _desc(mid) if isinstance(mid, dict) else "",
+            "desc": day_desc,
+            "icon": icon_for(day_desc),
             "unit": u,
         })
     if not days and not current.get("temp"):

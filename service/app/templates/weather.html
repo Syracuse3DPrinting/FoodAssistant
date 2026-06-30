@@ -13,18 +13,28 @@
   <span class="spinner-border spinner-border-sm me-2"></span>Loading the forecast…
 </div>
 
+<style>
+  .wx-hero { background: linear-gradient(135deg, #1e3a5f 0%, #2c5282 50%, #1a365d 100%); border: 0; }
+  .wx-hero, .wx-hero .text-secondary { color: #e8eef5 !important; }
+  .wx-hero-icon { font-size: 4.5rem; line-height: 1; }
+  .wx-temp { font-size: 4rem; font-weight: 600; line-height: 1; }
+  .wx-stat { background: rgba(255,255,255,0.10); border-radius: .6rem; padding: .5rem .75rem; }
+  .wx-day-icon { font-size: 1.9rem; }
+</style>
+
 <div id="weatherBody" class="d-none">
-  <!-- Current conditions -->
-  <div class="card mb-3">
-    <div class="card-body d-flex align-items-center flex-wrap gap-4">
+  <!-- Current conditions hero -->
+  <div class="card wx-hero mb-3 shadow-sm">
+    <div class="card-body d-flex align-items-center flex-wrap gap-4 py-4">
+      <i class="bi wx-hero-icon" id="wxIcon"></i>
       <div>
-        <div class="display-3 fw-semibold" id="wxTemp">--</div>
-        <div class="text-secondary" id="wxDesc"></div>
+        <div class="wx-temp" id="wxTemp">--</div>
+        <div class="fs-5" id="wxDesc"></div>
       </div>
-      <div class="row row-cols-2 g-3 small flex-grow-1" style="max-width:420px;">
-        <div class="col"><span class="text-secondary">Feels like</span><div class="fs-5" id="wxFeels">--</div></div>
-        <div class="col"><span class="text-secondary">Humidity</span><div class="fs-5" id="wxHumidity">--</div></div>
-        <div class="col"><span class="text-secondary">Wind</span><div class="fs-5" id="wxWind">--</div></div>
+      <div class="row row-cols-3 g-2 ms-auto text-center" style="min-width:280px;max-width:380px;">
+        <div class="col"><div class="wx-stat"><div class="small text-secondary">Feels</div><div class="fs-6 fw-semibold" id="wxFeels">--</div></div></div>
+        <div class="col"><div class="wx-stat"><div class="small text-secondary">Humidity</div><div class="fs-6 fw-semibold" id="wxHumidity">--</div></div></div>
+        <div class="col"><div class="wx-stat"><div class="small text-secondary">Wind</div><div class="fs-6 fw-semibold" id="wxWind">--</div></div></div>
       </div>
     </div>
   </div>
@@ -36,7 +46,7 @@
   <i class="bi bi-cloud-slash fs-1 d-block mb-2"></i>
   <div>Forecast unavailable{% if not weather_location %}. Set a weather location under Settings (the Stream Deck weather card){% endif %}.</div>
   <div class="small mt-2" id="weatherErrorDetail"></div>
-  <div class="small text-secondary mt-1">The forecast is fetched by the server running FoodAssistant; that machine needs to reach wttr.in.</div>
+  <div class="small text-secondary mt-1">The forecast is fetched by the server running FoodAssistant; that machine needs internet access to the weather service.</div>
 </div>
 {% endblock %}
 
@@ -53,9 +63,10 @@
 
   function render(fc) {
     const c = fc.current || {};
-    document.getElementById('wxTemp').textContent = `${c.temp}°${c.unit}`;
+    document.getElementById('wxIcon').className = 'bi wx-hero-icon bi-' + (c.icon || 'cloud');
+    document.getElementById('wxTemp').innerHTML = `${esc(c.temp)}&deg;${esc(c.unit)}`;
     document.getElementById('wxDesc').textContent = c.desc || '';
-    document.getElementById('wxFeels').textContent = `${c.feels}°${c.unit}`;
+    document.getElementById('wxFeels').innerHTML = `${esc(c.feels)}&deg;`;
     document.getElementById('wxHumidity').textContent = `${c.humidity}%`;
     document.getElementById('wxWind').textContent = `${c.wind} ${c.wind_unit}`;
     const days = fc.days || [];
@@ -63,9 +74,10 @@
       <div class="col-6 col-md-4 col-lg-3">
         <div class="card h-100 text-center">
           <div class="card-body py-3">
-            <div class="fw-semibold">${esc(d.label)}</div>
+            <div class="fw-semibold mb-1">${esc(d.label)}</div>
+            <i class="bi bi-${esc(d.icon || 'cloud')} wx-day-icon text-info d-block mb-1"></i>
             <div class="small text-secondary mb-2">${esc(d.desc)}</div>
-            <div class="fs-4">${esc(d.hi)}°<span class="text-secondary fs-6"> / ${esc(d.lo)}°${esc(d.unit)}</span></div>
+            <div class="fs-4">${esc(d.hi)}&deg;<span class="text-secondary fs-6"> / ${esc(d.lo)}&deg;${esc(d.unit)}</span></div>
           </div>
         </div>
       </div>`).join('');

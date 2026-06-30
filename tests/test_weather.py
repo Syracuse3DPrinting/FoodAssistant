@@ -39,6 +39,25 @@ def test_parse_open_meteo_fahrenheit():
     assert fc["days"][1]["label"] == "Tomorrow" and fc["days"][1]["desc"] == "Light rain"
 
 
+def test_icon_for_maps_conditions():
+    assert weather.icon_for("Clear") == "sun"
+    assert weather.icon_for("Sunny") == "sun"
+    assert weather.icon_for("Partly cloudy") == "cloud-sun"
+    assert weather.icon_for("Overcast") == "clouds"
+    assert weather.icon_for("Light rain") == "cloud-rain"
+    assert weather.icon_for("Heavy rain") == "cloud-rain-heavy"
+    assert weather.icon_for("Snow") == "cloud-snow"
+    assert weather.icon_for("Thunderstorm") == "cloud-lightning-rain"
+    assert weather.icon_for("Fog") == "cloud-fog2"
+    assert weather.icon_for("") == "cloud"
+
+
+def test_parse_includes_icon():
+    fc = weather.parse_open_meteo(_OM, "f", "X")
+    assert fc["current"]["icon"] == "cloud-sun"   # WMO 2 = Partly cloudy
+    assert fc["days"][0]["icon"] == "sun"          # WMO 0 = Clear
+
+
 def test_parse_open_meteo_rejects_garbage():
     assert weather.parse_open_meteo(None) is None
     assert weather.parse_open_meteo({}, "f") is None          # no current
