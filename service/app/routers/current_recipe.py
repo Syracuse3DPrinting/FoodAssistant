@@ -195,6 +195,22 @@ def list_all_recipes():
     return {"recipes": current_recipe.list_all()}
 
 
+@recipe_router.get("/equipment")
+def recipe_equipment(slot: int = 0):
+    """Cookware and utensils a recipe likely needs, plus any appliances the user
+    has not marked as owned (FoodAssistant-ooq3)."""
+    from ..services import utensils
+    recipe = current_recipe.get_recipe(slot)
+    if recipe is None:
+        return JSONResponse({"detail": "No recipe in that slot"}, status_code=404)
+    equipment = utensils.detect_equipment(recipe)
+    return {
+        "equipment": equipment,
+        "missing_appliances": utensils.missing_appliances(
+            equipment, settings.kitchen_appliances),
+    }
+
+
 @recipe_router.post("/courses")
 def add_course(payload: RecipeIn):
     """Add another concurrent recipe (a course) without clearing the others."""

@@ -88,6 +88,13 @@
     </div>
   </div>
 
+  <!-- Equipment the recipe likely needs (FoodAssistant-ooq3). -->
+  <div id="cr-equipment-wrap" class="mt-3 d-none">
+    <h6 class="text-info"><i class="bi bi-tools me-1"></i>Equipment you'll likely need</h6>
+    <div id="cr-equipment" class="d-flex flex-wrap gap-1"></div>
+    <div id="cr-equipment-missing" class="small text-warning mt-1 d-none"></div>
+  </div>
+
   <hr>
 
   <h6 class="text-warning"><i class="bi bi-stopwatch me-1"></i>Timers</h6>
@@ -154,6 +161,7 @@ async function loadCurrentRecipe() {
     renderCourseStrip();
     renderRecipe();
     show('cr-active');
+    loadEquipment();
     // Timers come from the primary (slot 0); show them only when it is focused.
     if (crFocus === 0) { await loadTimerSuggestions(); startTimerPolling(); }
     else { document.getElementById('cr-timer-suggestions').innerHTML =
@@ -164,6 +172,35 @@ async function loadCurrentRecipe() {
     document.getElementById('cr-empty').querySelector('p').innerHTML =
       `<span class="text-danger">Could not load the active recipe: ${escHtml(e.message)}</span>`;
   }
+}
+
+async function loadEquipment() {
+  const wrap = document.getElementById('cr-equipment-wrap');
+  const list = document.getElementById('cr-equipment');
+  const miss = document.getElementById('cr-equipment-missing');
+  wrap.classList.add('d-none');
+  let data = { equipment: [], missing_appliances: [] };
+  try {
+    const r = await fetch('current-recipe/equipment?slot=' + crFocus);
+    if (r.ok) data = await r.json();
+  } catch (e) { return; }
+  const eq = data.equipment || [];
+  if (!eq.length) return;
+  const missing = new Set(data.missing_appliances || []);
+  list.innerHTML = '';
+  eq.forEach(item => {
+    const chip = document.createElement('span');
+    const lacking = missing.has(item.name);
+    chip.className = 'badge ' + (lacking ? 'text-bg-warning' : 'text-bg-secondary');
+    chip.textContent = item.name + (lacking ? ' ?' : '');
+    list.appendChild(chip);
+  });
+  if (missing.size) {
+    miss.textContent = 'You may not have: ' + [...missing].join(', ') +
+      '. Update your kitchen in Settings > Recipes > My Kitchen Appliances.';
+    miss.classList.remove('d-none');
+  } else { miss.classList.add('d-none'); }
+  wrap.classList.remove('d-none');
 }
 
 function renderCourseStrip() {
