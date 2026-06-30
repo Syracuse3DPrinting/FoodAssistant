@@ -1319,7 +1319,12 @@ async def update_server():
             "Automatic updater not configured. Start the watchtower service "
             "(it is in the production compose) or run the commands below.")})
     try:
-        async with httpx.AsyncClient(timeout=180.0) as c:
+        # Fail fast on connect so a missing/stopped watchtower returns a clear
+        # message in a couple of seconds instead of hanging until a reverse proxy
+        # cuts the request (which surfaced as a generic "could not reach the
+        # server"). Watchtower itself replies to /v1/update quickly.
+        timeout = httpx.Timeout(connect=4.0, read=30.0, write=10.0, pool=4.0)
+        async with httpx.AsyncClient(timeout=timeout) as c:
             r = await c.post(f"{url}/v1/update",
                              headers={"Authorization": f"Bearer {token}"})
         if r.status_code == 200:
@@ -1330,8 +1335,10 @@ async def update_server():
             {"ok": False, "error": f"Updater returned HTTP {r.status_code}."})
     except Exception as e:
         return JSONResponse({"ok": False, "error": (
-            f"Could not reach the updater ({e.__class__.__name__}). "
-            "Is the watchtower service running?")})
+            "Could not reach the Watchtower updater, so it is probably not "
+            "running on this server. Add the watchtower service from the current "
+            "docker-compose.prod.yml and run docker compose up -d, or use the "
+            f"commands below. ({e.__class__.__name__})")})
 
 
 class _RestoreReq(BaseModel):
