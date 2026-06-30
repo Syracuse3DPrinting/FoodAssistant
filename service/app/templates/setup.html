@@ -1639,12 +1639,19 @@
                 <div class="form-text">Stream path appended to the address. The snapshot path is derived where the brand has one.</div>
               </div>
             </div>
-            <div class="d-flex gap-2 mt-2">
+            <div class="d-flex gap-2 mt-2 flex-wrap align-items-center">
               <button type="button" class="btn btn-outline-info btn-sm" onclick="_camAddFromIp()">
                 <i class="bi bi-plus-lg me-1"></i>Add camera from IP
               </button>
+              <!-- Scan the LAN for cameras, like the HA discovery (d9rx). -->
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="cam-scan-btn" onclick="_camScanLan(this)">
+                <i class="bi bi-search me-1"></i>Scan network for cameras
+              </button>
+              <input type="text" class="form-control form-control-sm" id="cam-scan-cidr" style="max-width:200px"
+                     placeholder="192.168.1.0/24 (optional)" autocomplete="off">
             </div>
             <div class="test-result mt-2" id="cam-ip-result"></div>
+            <div id="cam-scan-results" class="mt-2"></div>
           </div>
           {% endif %}
 
@@ -5633,6 +5640,63 @@ function _camPresetChanged() {
   if (wrap) wrap.classList.toggle('d-none', !p.showPath);
   const pathEl = document.getElementById('cam-ip-path');
   if (pathEl && p.showPath) pathEl.value = p.streamPath || '';
+}
+
+// Scan the LAN for IP cameras and list them with Preview + Add, like the HA
+// camera discovery (FoodAssistant-d9rx).
+async function _camScanLan(btn) {
+  const out = document.getElementById('cam-scan-results');
+  const cidr = document.getElementById('cam-scan-cidr')?.value.trim() || '';
+  const orig = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Scanning...';
+  out.innerHTML = '<span class="text-secondary small">Scanning the network, this can take up to a minute...</span>';
+  try {
+    const data = await fetch('setup/cameras/scan', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cidr }),
+    }).then(r => r.json());
+    if (!data.ok) { out.innerHTML = `<span class="text-danger small">${data.error || 'Scan failed.'}</span>`; return; }
+    const cams = data.cameras || [];
+    if (!cams.length) { out.innerHTML = '<span class="text-secondary small">No cameras found on ' + data.cidr + '.</span>'; return; }
+    const list = document.createElement('div');
+    list.className = 'list-group';
+    cams.forEach(cam => {
+      const item = document.createElement('div');
+      item.className = 'list-group-item d-flex justify-content-between align-items-center py-1 flex-wrap gap-2';
+      const label = document.createElement('span');
+      label.className = 'small';
+      const detail = cam.snapshot_url ? 'snapshot found' :
+        (cam.rtsp ? 'RTSP only (needs a snapshot/MJPEG path or a bridge)' : 'open ports ' + cam.ports.join(', '));
+      label.textContent = cam.ip + ' — ' + detail;
+      const btns = document.createElement('div');
+      btns.className = 'd-flex gap-1';
+      if (cam.snapshot_url) {
+        const prev = document.createElement('button');
+        prev.type = 'button'; prev.className = 'btn btn-sm btn-outline-info';
+        prev.innerHTML = '<i class="bi bi-eye"></i> Preview';
+        prev.onclick = () => _camPreview({ name: cam.name, snapshot_url: cam.snapshot_url });
+        btns.appendChild(prev);
+      }
+      const add = document.createElement('button');
+      add.type = 'button'; add.className = 'btn btn-sm btn-outline-success';
+      add.innerHTML = '<i class="bi bi-plus-lg"></i> Add';
+      add.onclick = () => {
+        _sdAddCameraRow({ name: cam.name, snapshot_url: cam.snapshot_url || '',
+                          stream_url: cam.snapshot_url ? '' : '' });
+        add.disabled = true; add.className = 'btn btn-sm btn-outline-secondary';
+        add.innerHTML = '<i class="bi bi-check2"></i> Added';
+      };
+      btns.appendChild(add);
+      item.appendChild(label); item.appendChild(btns);
+      list.appendChild(item);
+    });
+    out.innerHTML = '';
+    out.appendChild(list);
+  } catch (e) {
+    out.innerHTML = `<span class="text-danger small">${e}</span>`;
+  } finally {
+    btn.disabled = false; btn.innerHTML = orig;
+  }
 }
 
 function _camAddFromIp() {

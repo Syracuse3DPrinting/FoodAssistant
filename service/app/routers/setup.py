@@ -1291,6 +1291,28 @@ class HaCameraDiscoverPayload(BaseModel):
     token: str = ""
 
 
+class CameraScanPayload(BaseModel):
+    cidr: str = ""   # blank = this server's own /24
+
+
+@router.post("/cameras/scan")
+async def scan_ip_cameras(payload: CameraScanPayload = CameraScanPayload()):
+    """Scan the LAN for IP cameras (FoodAssistant-d9rx).
+
+    Probes each host for common camera ports and, for HTTP hosts, well-known
+    snapshot paths, returning candidates the user can preview and add. Runs the
+    blocking sweep in a thread so the event loop stays free."""
+    import anyio
+    from ..services import camera_scan
+    cidr = (payload.cidr or "").strip() or camera_scan.default_cidr()
+    if not cidr:
+        return {"ok": False, "error": "Could not determine the local network; enter a CIDR like 192.168.1.0/24."}
+    results = await anyio.to_thread.run_sync(lambda: camera_scan.scan_for_cameras(cidr))
+    if results and isinstance(results[0], dict) and results[0].get("error"):
+        return {"ok": False, "error": results[0]["error"]}
+    return {"ok": True, "cidr": cidr, "cameras": results}
+
+
 @router.post("/ha/cameras")
 async def ha_discover_cameras(payload: HaCameraDiscoverPayload):
     """Discover Home Assistant camera entities and build their feed URLs.
