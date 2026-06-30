@@ -17,6 +17,11 @@ services:
         required: false
     environment:
       - TZ=${TZ:-America/New_York}
+      # Lets the Updates page trigger an immediate update via the watchtower
+      # service below. Same token as that service. WATCHTOWER_URL points at it on
+      # the compose network; the app degrades gracefully if watchtower is off.
+      - WATCHTOWER_URL=${WATCHTOWER_URL:-http://watchtower:8080}
+      - WATCHTOWER_HTTP_API_TOKEN=${WATCHTOWER_HTTP_API_TOKEN:-foodassistant-update}
     volumes:
       - ./data:/app/data
     ports:
@@ -90,6 +95,14 @@ services:
       - WATCHTOWER_LABEL_ENABLE=true
       - WATCHTOWER_CLEANUP=true
       - WATCHTOWER_POLL_INTERVAL=${WATCHTOWER_POLL_INTERVAL:-86400}
+      # Manual "Update now" support: the app posts to the HTTP API to apply an
+      # update immediately instead of waiting for the next poll. PERIODIC_POLLS
+      # keeps the scheduled daily check running alongside the API (enabling the
+      # API alone would otherwise disable it). The token is shared with the app
+      # service below so it can authenticate the trigger.
+      - WATCHTOWER_HTTP_API_UPDATE=true
+      - WATCHTOWER_HTTP_API_PERIODIC_POLLS=true
+      - WATCHTOWER_HTTP_API_TOKEN=${WATCHTOWER_HTTP_API_TOKEN:-foodassistant-update}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
