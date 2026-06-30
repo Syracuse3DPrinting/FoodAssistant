@@ -27,6 +27,24 @@ defined in `service/app/config.py`:
   (via a Python venv, or optionally Docker) and pulls its backend config from the
   main server. This is what makes a low-spec board like a Pi Zero useful.
 
+For exactly which settings are editable, inherited from the server, or
+device-local in each mode, see the [Settings visibility matrix](settings-matrix.md).
+
+## Updates across the fleet
+
+A single "Install updates automatically" setting (on by default) drives updates
+for the whole deployment:
+
+- A `server` install applies updates through the bundled Watchtower container,
+  which checks for a new FoodAssistant image and recreates the service container
+  when one is published.
+- A `pi_hosted` appliance applies updates through the host-bridge over-the-air
+  helper, and the in-app update control on its Settings page can check and apply
+  on demand.
+- A `pi_remote` satellite inherits the flag from its main server (it is one of
+  the `SATELLITE_PULL_FIELDS`), so a server and its satellites converge on the
+  same version rather than drifting apart.
+
 ## Hosting the server stack
 
 The `server` and `pi_hosted` modes run the stack with Docker and Docker Compose

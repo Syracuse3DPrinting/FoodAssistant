@@ -48,6 +48,7 @@ All AI features are optional. You can run FoodAssistant without any AI provider 
 - **Unit converter and kitchen guide**: a Convert tab with a measurement cheat sheet, a calculator, and your own saved conversions, plus a Kitchen Guide reference page
 - **Meal planning and shopping lists**: optional [Mealie](https://mealie.io) integration with a week view, shopping list with check-off, and inventory-aware recipe suggestions
 - **Custom storage locations**: add buckets beyond the four built-ins (Wine Cellar, Garage Fridge, etc.) from the setup wizard
+- **Custom navigation**: reorder or hide tabs, add your own top-level entries (label, icon, and a local or external URL), and nest tabs into dropdown submenus, all from Settings > Interface; navigation layout is per-device so each kiosk can arrange its own menu
 - **Camera feeds**: configure network cameras (from Home Assistant, by IP with brand templates, or by hand) and view them on an on-screen Camera page; a connected Stream Deck can show a camera snapshot on a key or splash it across the whole deck
 - **Home Assistant integration**: REST sensors, notification automations, a Lovelace dashboard with inventory panels, plus Stream Deck keys that toggle HA entities, run media_player transport controls, and discover cameras (the HA URL/token are stored once on the main server and shared with satellites)
 - **Stream Deck kiosk**: kitchen control surface with large-text buttons, auto-rotation, and a drag-and-drop key editor; build your own custom keys (HA actions, timers, weather, cameras, media, macros) in a library and drop them onto the grid; a scan-mode key flips the barcode scanner between adding to inventory, consuming stock, adding to the shopping list, and running a read-only pantry audit
@@ -175,6 +176,10 @@ On a Pi appliance, a full Grocy and Mealie snapshot restore runs via the host br
 
 For automated cloud backup, configure an [rclone](https://rclone.org) remote in **Settings > Security**. Rclone supports S3, Backblaze B2, SFTP, Google Drive, Dropbox, and 40+ other backends.
 
+## Troubleshooting logs
+
+For support, turn on **Settings > Security > Debug logging** to raise the log level and write a rotating log file under the data directory, then use the Download control to grab that log. Secret values are redacted from the download. Leave it off in normal use.
+
 ## Home Assistant
 
 **Running Home Assistant OS or Supervised?** Install FoodAssistant as an add-on so it lives in the HA sidebar with no separate login - HA authenticates the UI through Ingress. In HA go to **Settings > Add-ons > Add-on Store**, open the menu, choose Repositories, and add `https://github.com/Syracuse3DPrinting/FoodAssistant`, then install FoodAssistant. Full instructions: [homeassistant/addon/foodassistant/DOCS.md](homeassistant/addon/foodassistant/DOCS.md).
@@ -237,6 +242,7 @@ Check each project's release notes before a major bump - Mealie in particular ha
 
 - [docs/hardware.md](docs/hardware.md) - supported boards, displays and touch panels, Stream Deck models, accelerometer, and barcode scanners.
 - [docs/platforms.md](docs/platforms.md) - deployment modes (server, Pi Hosted, Pi Remote), hosting, pinned versions and ports, AI providers, and Home Assistant.
+- [docs/settings-matrix.md](docs/settings-matrix.md) - which settings are editable, inherited from the server, or device-local in each deployment mode.
 - [docs/hardware/supported-hardware.md](docs/hardware/supported-hardware.md) - minimum specs and the board test matrix.
 - [docs/hardware/sd-image.md](docs/hardware/sd-image.md) - flashing the ready-made SD-card image.
 - [docs/api.md](docs/api.md) - REST endpoint reference.

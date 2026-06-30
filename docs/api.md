@@ -42,6 +42,9 @@ Interactive docs (Swagger UI) are available at `/docs` when the app is running.
 | `POST /admin/restore` | Restore app data from an uploaded backup zip |
 | `POST /admin/backup/remote` | Push backup to configured rclone remote |
 | `POST /admin/backup/test-remote` | Test that rclone can reach the configured remote |
+| `GET /admin/logging` | Report whether debug logging is on |
+| `POST /admin/logging` | Turn debug logging on or off |
+| `GET /admin/logs/download` | Download the debug log bundle with secret values redacted |
 
 ## Current Recipe and Timers
 
