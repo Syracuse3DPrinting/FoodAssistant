@@ -238,6 +238,20 @@ docker compose up -d grocy   # or mealie / ollama
 
 Check each project's release notes before a major bump - Mealie in particular has had breaking schema migrations between major versions. FoodAssistant's own image is versioned separately via `FOODASSISTANT_TAG` (see above).
 
+### Dependencies
+
+The Docker image installs from `service/requirements.txt`, which uses `==` pins for direct dependencies. A fully hash-locked file resolving the entire transitive tree lives alongside it at `service/requirements.lock` for reproducible, verifiable builds. The lockfile is additive; the build still reads `requirements.txt`.
+
+Regenerate the lockfile after changing `requirements.txt` with either [uv](https://docs.astral.sh/uv/) or [pip-tools](https://github.com/jazzband/pip-tools):
+
+```bash
+uv pip compile service/requirements.txt --generate-hashes -o service/requirements.lock
+# or, with pip-tools:
+pip-compile --generate-hashes -o service/requirements.lock service/requirements.txt
+```
+
+To install exactly the locked set in a venv: `uv pip sync service/requirements.lock` (or `pip install --require-hashes -r service/requirements.lock`).
+
 ## Documentation
 
 - [docs/hardware.md](docs/hardware.md) - supported boards, displays and touch panels, Stream Deck models, accelerometer, and barcode scanners.
@@ -247,6 +261,13 @@ Check each project's release notes before a major bump - Mealie in particular ha
 - [docs/hardware/sd-image.md](docs/hardware/sd-image.md) - flashing the ready-made SD-card image.
 - [docs/api.md](docs/api.md) - REST endpoint reference.
 - [docs/AI_DECLARATIONS.md](docs/AI_DECLARATIONS.md) - how AI tools were used to build FoodAssistant.
+
+These pages are also wired into an MkDocs site (`mkdocs.yml`) for browsable local docs. MkDocs and its theme are dev-only tools and are not part of the runtime requirements. To preview the site:
+
+```bash
+pip install mkdocs mkdocs-material
+mkdocs serve   # then open http://127.0.0.1:8000
+```
 
 ## API
 

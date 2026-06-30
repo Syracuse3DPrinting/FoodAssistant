@@ -1,0 +1,34 @@
+site_name: FoodAssistant
+site_description: Self-hosted food spoilage tracker built on Grocy, with optional Mealie and Ollama.
+repo_url: https://github.com/Syracuse3DPrinting/FoodAssistant
+repo_name: Syracuse3DPrinting/FoodAssistant
+docs_dir: docs
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+
+nav:
+  - Platforms and deployment: platforms.md
+  - Settings matrix: settings-matrix.md
+  - API reference: api.md
+  - Hardware:
+      - Overview: hardware.md
+      - Supported hardware: hardware/supported-hardware.md
+      - SD-card image: hardware/sd-image.md
+      - Waveshare barcode scanner: hardware/waveshare-barcode-scanner.md
+  - Recipe backend comparison: recipe-backend-comparison.md
+  - AI declarations: AI_DECLARATIONS.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences

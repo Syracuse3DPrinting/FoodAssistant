@@ -76,6 +76,10 @@ All notable changes to FoodAssistant are recorded here. The format is based on
 - **AI Declarations moved.** The standalone AI Declarations page is gone; the same content now lives in a section of the About page and in `docs/AI_DECLARATIONS.md`.
 - **Cook icon unified.** Cook uses a flame icon consistently across the web UI and the Stream Deck.
 
+### Build
+- **Hash-locked dependency file for reproducible builds.** A new `service/requirements.lock` resolves the full transitive dependency tree with `--generate-hashes`, so installs can be verified against known checksums. It also pins the previously floating `anthropic` dependency to a concrete version. The lockfile is additive: the Docker image still installs from `service/requirements.txt`. The README documents how to regenerate it with uv or pip-tools.
+- **MkDocs site over the existing docs.** A root `mkdocs.yml` wires the files under `docs/` into a browsable site with the Material theme and a nav. It does not change any documentation content. MkDocs and its theme are dev-only tools and are not added to the runtime requirements; preview locally with `mkdocs serve`.
+
 ## [0.6.0] - 2026-06-26
 
 This is the first version under the project's pre-1.0 scheme. Earlier `1.x`
