@@ -31,14 +31,36 @@ _EXTRA_ACTIONS = [
     {"key": "settings", "label": "Settings", "icon": "bi-gear",       "href": "setup"},
 ]
 
+# Grouping + tile colours so the Start Page grid and palette render like the
+# Stream Deck (colored keys, grouped palette). Each action takes its group's
+# colour; the group also labels the palette row. Keys not listed fall in "More".
+_ACTION_GROUPS = [
+    ("Inventory", "#2563eb", ("inventory", "expiring", "add", "pending", "audit", "shopping", "nutrition")),
+    ("Recipes",   "#c2410c", ("recipes", "cook", "current_recipe", "mealplan")),
+    ("Tools",     "#0d9488", ("convert", "weather", "camera", "guide", "shop", "defaults", "timers")),
+    ("System",    "#475569", ("about", "settings", "start")),
+]
+_DEFAULT_GROUP = ("More", "#374151")
+
+
+def _group_for(key: str) -> tuple[str, str]:
+    for name, color, keys in _ACTION_GROUPS:
+        if key in keys:
+            return name, color
+    return _DEFAULT_GROUP
+
 
 def builtin_actions() -> list[dict]:
-    """All built-in launcher actions: every navigation tab plus a few extras."""
+    """All built-in launcher actions: every navigation tab plus a few extras,
+    each tagged with a palette group and tile colour so the editor renders like
+    the Stream Deck."""
     out: list[dict] = []
     for tab in navigation.NAV_TABS:
         out.append({"key": tab["key"], "label": tab["label"],
                     "icon": tab["icon"], "href": tab["href"]})
     out.extend(_EXTRA_ACTIONS)
+    for a in out:
+        a["group"], a["color"] = _group_for(a["key"])
     return out
 
 

@@ -2452,9 +2452,8 @@ docker compose up -d</code></pre>
             </div>
             <div class="mb-2 fw-semibold small"><i class="bi bi-grid me-1"></i>Layout</div>
             <p class="text-secondary small mb-2">Drag an action from the palette onto a key, drag keys to rearrange them, or click a key to clear it. Custom buttons are shared with the Stream Deck.</p>
-            <div id="start-grid" class="mb-3" style="display:grid; gap:6px; max-width:520px"></div>
-            <div class="mb-2 fw-semibold small"><i class="bi bi-collection me-1"></i>Palette</div>
-            <div id="start-palette" class="d-flex flex-wrap gap-1 mb-3"></div>
+            <div id="start-grid" class="d-inline-grid gap-1 mb-2" style="grid-template-columns: repeat(5, minmax(0,1fr));"></div>
+            <div id="start-palette" class="d-flex flex-column gap-1 mt-1 mb-3" style="max-width:700px;"></div>
 
             <div class="mb-2 fw-semibold small"><i class="bi bi-sliders me-1"></i>Custom keys</div>
             <p class="text-secondary small mb-2">Build your own keys (Home Assistant actions, timers, weather, cameras, media, macros), the same as the Stream Deck. Each one appears as a chip in the palette above; drag it onto a key to place it. Custom keys are shared with the Stream Deck both ways.</p>
@@ -4169,14 +4168,14 @@ function _startCustomMeta(def) {
   try { return _sdDefMeta(def); } catch (e) { return { label: def.label || 'Custom', icon: def.icon || 'bi-grid-1x2' }; }
 }
 function _startTokenInfo(tok) {
-  if (!tok) return { kind: 'blank' };
+  if (!tok) return { kind: 'blank', color: '#1f2937' };
   if (tok.indexOf('custom:') === 0) {
     const def = _startCustomDefs().find(d => d.id === tok.slice(7));
-    if (def) { const m = _startCustomMeta(def); return { kind: 'custom', icon: m.icon, label: m.label }; }
-    return { kind: 'blank' };
+    if (def) { const m = _startCustomMeta(def); return { kind: 'custom', icon: m.icon, label: m.label, color: m.color || '#374151' }; }
+    return { kind: 'blank', color: '#1f2937' };
   }
   const a = START_ACTIONS.find(x => x.key === tok);
-  return a ? { kind: 'builtin', icon: a.icon, label: a.label } : { kind: 'blank' };
+  return a ? { kind: 'builtin', icon: a.icon, label: a.label, color: a.color || '#374151' } : { kind: 'blank', color: '#1f2937' };
 }
 // Build a Start Page custom-key editor row from the deck's shared row builder,
 // rewiring its delete + change handlers to refresh the Start Page palette.
@@ -4218,18 +4217,46 @@ function _startRenderPalette() {
   const wrap = document.getElementById('start-palette');
   if (!wrap) return;
   wrap.innerHTML = '';
-  const add = (tok, icon, label, cls) => {
-    const chip = document.createElement('span');
-    chip.className = 'badge rounded-pill border ' + (cls || 'text-bg-secondary') + ' d-inline-flex align-items-center gap-1';
-    chip.style.cursor = 'grab'; chip.draggable = true; chip.dataset.tok = tok;
-    chip.innerHTML = '<i class="bi ' + icon + '"></i> ' + label;
-    chip.addEventListener('dragstart', e => { _startDragTok = tok; _startDragCell = null; e.dataTransfer.effectAllowed = 'copy'; });
-    chip.addEventListener('click', () => { _startDragTok = tok; chip.classList.add('border-info'); setTimeout(() => chip.classList.remove('border-info'), 600); });
-    wrap.appendChild(chip);
+  // Coloured draggable chips + group rows, identical in style to the Stream
+  // Deck palette so the two editors look the same.
+  const makeChip = (tok, label, color, icon) => {
+    const chip = document.createElement('div');
+    chip.style.cssText = [
+      'background:' + (color || '#374151'), 'color:#fff', 'border-radius:4px',
+      'padding:2px 8px', 'font-size:0.7rem', 'cursor:grab', 'user-select:none',
+      'border:1px solid rgba(255,255,255,0.2)',
+    ].join(';');
+    chip.draggable = true; chip.dataset.tok = tok;
+    chip.innerHTML = (icon ? '<i class="bi ' + icon + ' me-1"></i>' : '') + label;
+    chip.addEventListener('dragstart', e => { _startDragTok = tok; _startDragCell = null; e.dataTransfer.effectAllowed = 'copy'; chip.style.opacity = '0.5'; });
+    chip.addEventListener('dragend', () => { chip.style.opacity = '1'; });
+    chip.addEventListener('click', () => { _startDragTok = tok; chip.style.outline = '2px solid #0dcaf0'; setTimeout(() => chip.style.outline = '', 600); });
+    return chip;
   };
-  START_ACTIONS.forEach(a => add(a.key, a.icon, a.label, 'text-bg-secondary'));
-  // Custom-key chips from the live Start Page library (shared with the deck).
-  _startCustomDefs().forEach(def => { const m = _startCustomMeta(def); add('custom:' + def.id, m.icon, m.label, 'text-bg-primary'); });
+  const makeRow = (gname) => {
+    const row = document.createElement('div');
+    row.className = 'd-flex align-items-center gap-1 flex-wrap';
+    const lbl = document.createElement('span');
+    lbl.className = 'text-secondary small';
+    lbl.style.cssText = 'min-width:90px;font-size:0.65rem;';
+    lbl.textContent = gname + ':';
+    row.appendChild(lbl);
+    return row;
+  };
+  // Custom keys first (shared with the deck), then grouped built-in actions.
+  const customDefs = _startCustomDefs();
+  if (customDefs.length) {
+    const row = makeRow('Custom');
+    customDefs.forEach(def => { const m = _startCustomMeta(def); row.appendChild(makeChip('custom:' + def.id, m.label, m.color || '#374151', m.icon)); });
+    wrap.appendChild(row);
+  }
+  const groups = {};
+  START_ACTIONS.forEach(a => { (groups[a.group || 'More'] = groups[a.group || 'More'] || []).push(a); });
+  Object.keys(groups).forEach(gname => {
+    const row = makeRow(gname);
+    groups[gname].forEach(a => row.appendChild(makeChip(a.key, a.label, a.color, a.icon)));
+    wrap.appendChild(row);
+  });
 }
 function _startEditorRender() {
   const grid = document.getElementById('start-grid');
@@ -4240,21 +4267,29 @@ function _startEditorRender() {
   if (_startState.length > n) _startState = _startState.slice(0, n);
   while (_startState.length < n) _startState.push('');
   const [cols] = _START_SHAPES[n] || [5];
-  grid.style.gridTemplateColumns = 'repeat(' + cols + ', 1fr)';
+  // Match the Stream Deck grid: same column sizing and coloured square keys.
+  grid.style.gridTemplateColumns = 'repeat(' + cols + ', minmax(0,1fr))';
   grid.innerHTML = '';
   _startState.forEach((tok, i) => {
     const info = _startTokenInfo(tok);
+    const blank = info.kind === 'blank';
     const cell = document.createElement('div');
-    cell.className = 'border rounded d-flex flex-column align-items-center justify-content-center text-center p-1' +
-      (info.kind === 'blank' ? ' border-secondary-subtle' : '');
-    cell.style.cssText = 'aspect-ratio:1; font-size:0.7rem; overflow:hidden; cursor:pointer; min-height:54px;' +
-      (info.kind === 'blank' ? 'opacity:0.5;border-style:dashed;' : '');
-    cell.draggable = info.kind !== 'blank';
+    cell.className = 'rounded position-relative';
+    cell.style.cssText = [
+      'aspect-ratio:1', 'min-width:60px', 'min-height:44px', 'display:flex',
+      'flex-direction:column', 'align-items:center', 'justify-content:center',
+      'gap:1px', 'overflow:hidden', 'background:' + (info.color || '#1f2937'),
+      'cursor:' + (blank ? 'pointer' : 'grab'), 'user-select:none',
+      'transition:filter 0.1s', 'border:2px solid rgba(255,255,255,0.15)',
+      blank ? 'opacity:0.55;border-style:dashed' : '',
+    ].join(';');
+    cell.draggable = !blank;
     cell.dataset.idx = i;
-    cell.innerHTML = info.kind === 'blank'
-      ? '<i class="bi bi-plus" style="opacity:0.6"></i>'
-      : '<i class="bi ' + info.icon + '" style="font-size:1.1rem"></i><span style="line-height:1;margin-top:2px">' + info.label + '</span>';
-    cell.title = info.kind === 'blank' ? 'Drop an action here' : (info.label + ' — click to clear');
+    cell.innerHTML = blank
+      ? '<i class="bi bi-plus" style="color:#fff;opacity:0.6;font-size:1.1rem"></i>'
+      : '<i class="bi ' + info.icon + '" style="color:#fff;font-size:0.95rem;line-height:1"></i>' +
+        '<span style="color:#fff;font-size:0.6rem;line-height:1.1;text-align:center;word-break:break-word;padding:0 3px">' + info.label + '</span>';
+    cell.title = blank ? 'Drop an action here' : (info.label + ' — click to clear');
     cell.addEventListener('click', () => {
       if (_startDragTok) { _startState[i] = _startDragTok; _startDragTok = null; }
       else { _startState[i] = ''; }   // click a filled cell with nothing selected clears it
