@@ -71,6 +71,41 @@ def test_pi_offers_pi_modes_hides_server(client, monkeypatch):
     assert 'id="mode-server"' not in html
 
 
+def test_low_ram_pi_restricts_to_pi_remote(client, monkeypatch):
+    # A weak Pi (low board tier / low RAM) drops Pi Hosted: the local stack
+    # cannot run, so only the thin-client Pi Remote mode is offered.
+    _as_pi(monkeypatch, "Raspberry Pi 3 Model B")
+    monkeypatch.setattr(setup_router, "supports_local_stack", lambda: False)
+    html = client.get("/setup").text
+    assert 'id="mode-pi_remote"' in html
+    assert 'id="mode-pi_hosted"' not in html
+    assert 'id="mode-server"' not in html
+    # The wizard explains why Pi Hosted is gone.
+    assert "Pi Hosted is hidden" in html
+
+
+def test_capable_pi_offers_both_pi_modes(client, monkeypatch):
+    _as_pi(monkeypatch, "Raspberry Pi 5 Model B")
+    monkeypatch.setattr(setup_router, "supports_local_stack", lambda: True)
+    html = client.get("/setup").text
+    assert 'id="mode-pi_hosted"' in html
+    assert 'id="mode-pi_remote"' in html
+    assert "Pi Hosted is hidden" not in html
+
+
+def test_uncertain_pi_detection_keeps_both_modes(client, monkeypatch):
+    # supports_local_stack defaults True on an uncertain reading, so a real Pi
+    # whose model could not be classified (unknown tier) and whose RAM is
+    # unreadable still sees both Pi modes rather than being over-restricted.
+    from app import hardware
+    _as_pi(monkeypatch, "Raspberry Pi")
+    monkeypatch.setattr(hardware, "board_model", lambda: "Raspberry Pi")
+    monkeypatch.setattr(hardware, "total_ram_mb", lambda: None)
+    html = client.get("/setup").text
+    assert 'id="mode-pi_hosted"' in html
+    assert 'id="mode-pi_remote"' in html
+
+
 def test_non_pi_offers_server_only(client, monkeypatch):
     _as_server(monkeypatch)
     html = client.get("/setup").text

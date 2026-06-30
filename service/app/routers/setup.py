@@ -28,7 +28,7 @@ from ..config import (
 )
 from ..database import SessionLocal
 from ..dependencies import reset_providers
-from ..hardware import is_raspberry_pi, board_model
+from ..hardware import is_raspberry_pi, board_model, supports_local_stack
 from ..models.db_models import StreamDeckProfile
 from ..navigation import all_tabs, normalize_custom_tabs, NAV_TABS, CUSTOM_PREFIX
 from ..storage_categories import custom_categories, _normalize_custom, storable
@@ -434,9 +434,18 @@ def available_modes() -> dict:
 
     On a Raspberry Pi we offer the two Pi modes and hide "Server hosted"
     (which targets a general server). Elsewhere only "Server hosted" applies.
+
+    On a Pi we also drop Pi Hosted when the board is too weak to run the local
+    stack (a low-tier family such as a Pi 3/Zero, or a board with less RAM than
+    hardware.MIN_HOSTED_RAM_MB), leaving Pi Remote as the only offered Pi mode.
+    Detection is deliberately conservative: an uncertain reading keeps both
+    modes so a capable board is never restricted by a misdetect.
     """
     pi = is_raspberry_pi()
-    return {k: v for k, v in DEPLOYMENT_MODES.items() if v["pi"] == pi}
+    modes = {k: v for k, v in DEPLOYMENT_MODES.items() if v["pi"] == pi}
+    if pi and not supports_local_stack():
+        modes = {k: v for k, v in modes.items() if not v["local_stack"]}
+    return modes
 
 
 @router.get("", response_class=HTMLResponse)
@@ -489,6 +498,9 @@ async def setup_page(request: Request):
         # For the Updates card's release-notes link.
         "github_repo": GITHUB_REPO,
         "board_model": board_model(),
+        # When True the board is a Pi too weak for the local stack, so Pi Hosted
+        # was dropped from the picker; the template shows a short why-line.
+        "hosted_unavailable": is_raspberry_pi() and not supports_local_stack(),
         "pi_mdns_host": _pi_mdns_host() if is_raspberry_pi() else "",
         # On the attached kiosk display the wizard's many text inputs are painful
         # to fill with a touchscreen, so when the page is opened in kiosk mode and
