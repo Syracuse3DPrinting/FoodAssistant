@@ -185,3 +185,50 @@ def test_manual_pull_then_helper_still_deploys_deck_change(tmp_path, git_env):
         ctx["deploy"] / "foodassistant_streamdeck" / "actions.py"
     ).read_text()
     assert "flame" in deployed  # the manual-pull change was deployed
+
+
+def _make_fake_docker(bin_dir: Path, log_path: Path) -> None:
+    """A fake `docker` that logs its args and succeeds. `compose images -q`
+    prints a constant id so the helper's before/after comparison is stable."""
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    p = bin_dir / "docker"
+    p.write_text(
+        "#!/bin/sh\n"
+        f'printf "docker %s\\n" "$*" >> "{log_path}"\n'
+        'if [ "$1 $2" = "compose images" ]; then echo sha256:constid; fi\n'
+        "exit 0\n"
+    )
+    p.chmod(0o755)
+
+
+def test_pi_hosted_updates_via_docker(tmp_path, git_env):
+    """On a Pi Hosted box (compose project at INSTALL_DIR + docker present) the
+    helper pulls and recreates the service container instead of the venv deploy
+    (FoodAssistant-tu0i)."""
+    ctx = _scaffold(tmp_path, git_env)
+
+    install_dir = tmp_path / "install"
+    install_dir.mkdir()
+    (install_dir / "docker-compose.yml").write_text("services: {}\n")
+
+    docker_bin = tmp_path / "dockerbin"
+    docker_log = tmp_path / "docker.log"
+    _make_fake_docker(docker_bin, docker_log)
+
+    env = dict(ctx["env"])
+    env["INSTALL_DIR"] = str(install_dir)
+    env["PATH"] = f"{docker_bin}:{env['PATH']}"
+
+    r = _run([str(HELPER)], env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    res = _last_json(r.stdout)
+    assert res["ok"] is True
+
+    log = docker_log.read_text()
+    assert "compose pull service" in log
+    assert "compose up -d --no-deps service" in log
+
+    # The Docker path exits before the venv deploy, so the venv app dir is not
+    # synced from the checkout.
+    assert not (ctx["deploy"] / "service" / "app" / "config.py").exists()
+    assert res["service_synced"] is False

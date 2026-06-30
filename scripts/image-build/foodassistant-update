@@ -127,6 +127,79 @@ svc_synced=0
 sd_synced=0
 deps=0
 
+# Keep the installed helper scripts current so future runs use the latest
+# version. A plain git pull does not refresh /usr/local/bin, and overwriting the
+# running script in place is safe (the open inode keeps executing). Done before
+# the deploy branches so both the Docker (Pi Hosted) and venv (Pi Remote) paths
+# pick up newer helpers.
+for _h in foodassistant-update foodassistant-restore; do
+  _hsrc="$REPO/scripts/image-build/$_h"
+  if [ -f "$_hsrc" ]; then
+    install -m 755 "$_hsrc" "/usr/local/bin/$_h" 2>/dev/null \
+      && log "Refreshed /usr/local/bin/$_h" || true
+  fi
+done
+
+# --- Pi Hosted (Docker) deployment -----------------------------------------
+# On a Pi Hosted appliance the app runs from a prebuilt image (see
+# docker-compose.appliance.yml: only ./data is mounted, the code lives in the
+# image), NOT a volume-mounted checkout, so "update" means pulling the new image
+# and recreating the service container. The git fast-forward above still matters
+# because it refreshes the local build-from-source fallback and the Stream Deck
+# package. We detect this layout by the compose project at INSTALL_DIR and exit
+# through this branch so the venv path below never runs on a hosted box.
+INSTALL_DIR="${INSTALL_DIR:-/opt/foodassistant}"
+COMPOSE_FILE="$INSTALL_DIR/docker-compose.yml"
+if [ -f "$COMPOSE_FILE" ] && command -v docker >/dev/null 2>&1; then
+  log "Pi Hosted deployment detected at $INSTALL_DIR; updating via Docker."
+  if ! cd "$INSTALL_DIR"; then
+    _result 0 "Could not enter $INSTALL_DIR to run the Docker update." "$before" "$after" 0 0 0 0
+  fi
+
+  img_before="$(docker compose images -q service 2>/dev/null | head -n1)"
+
+  # Prefer the published image. Fall back to building from the on-device source
+  # we just fast-forwarded if the pull fails (image not public, offline, or no
+  # auth). The build context resolves through REPO_DIR (see the compose file).
+  built_from_source=0
+  if pull_log="$(docker compose pull service 2>&1)"; then
+    log "$pull_log"
+  else
+    log "Image pull failed; building from the on-device source instead:"
+    log "$pull_log"
+    if build_log="$(REPO_DIR="$REPO" docker compose build service 2>&1)"; then
+      log "$build_log"
+      built_from_source=1
+    else
+      log "$build_log"
+      _result 0 "Image pull and local build both failed; the running version is unchanged." "$before" "$after" 0 0 0 0
+    fi
+  fi
+
+  # Recreate only the service container so Grocy and Mealie keep running.
+  if up_log="$(REPO_DIR="$REPO" docker compose up -d --no-deps service 2>&1)"; then
+    log "$up_log"
+  else
+    log "$up_log"
+    _result 0 "Could not recreate the service container; the running version may be unchanged." "$before" "$after" 0 0 0 0
+  fi
+
+  img_after="$(docker compose images -q service 2>/dev/null | head -n1)"
+  # Reload the on-screen kiosk so the new UI shows (absent on headless boxes).
+  _restart_unit "$KIOSK_SERVICE" && restarted=1
+
+  changed=0
+  if [ "$built_from_source" = "1" ]; then changed=1; fi
+  if [ -n "$img_after" ] && [ "$img_before" != "$img_after" ]; then changed=1; fi
+  if [ "$changed" = "1" ]; then
+    log "Pi Hosted update complete (service image refreshed)."
+    _result 1 "" "$before" "$after" 1 1 0 0
+  else
+    log "Pi Hosted already up to date (service image unchanged)."
+    _result 1 "" "$before" "$after" "$restarted" 0 0 0
+  fi
+fi
+
 # --- Web app service --------------------------------------------------------
 svc_src="$REPO/service"
 if [ -d "$svc_src" ]; then
@@ -202,18 +275,6 @@ if [ -d "$sd_src" ]; then
 else
   log "No streamdeck package in the checkout; skipping deck sync."
 fi
-
-# Keep the installed helper scripts current so future runs use the latest
-# version. A plain git pull does not refresh /usr/local/bin, and overwriting the
-# running script in place is safe (the open inode keeps executing). This closes
-# the loop so the operator never has to reinstall the helper by hand again.
-for _h in foodassistant-update foodassistant-restore; do
-  _hsrc="$REPO/scripts/image-build/$_h"
-  if [ -f "$_hsrc" ]; then
-    install -m 755 "$_hsrc" "/usr/local/bin/$_h" 2>/dev/null \
-      && log "Refreshed /usr/local/bin/$_h" || true
-  fi
-done
 
 # --- Restart the services we actually refreshed -----------------------------
 if [ "$svc_synced" = "1" ] || [ "$deps" = "1" ]; then

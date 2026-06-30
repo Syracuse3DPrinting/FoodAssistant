@@ -2002,10 +2002,11 @@
           <div class="section-card">
             <div class="section-title"><i class="bi bi-arrow-repeat text-success"></i> Updates
               <span class="badge bg-secondary">v{{ version }}</span></div>
-            {% if is_satellite %}
-            <p class="text-secondary small">This device runs from a local checkout. Updating pulls the
-              latest FoodAssistant source, refreshes dependencies if they changed, and restarts the app. A failed pull
-              leaves the running version untouched.</p>
+            {% if is_pi_appliance %}
+            <p class="text-secondary small">Check for a newer version, then update in place. Updating downloads the
+              latest FoodAssistant and restarts the app (no SSH needed). On a Pi Hosted box it refreshes the Docker
+              image; on a Pi Remote it refreshes the local install. A failed update leaves the running version
+              untouched.</p>
             <div class="test-result mb-2" id="update-avail"></div>
             <button class="btn btn-outline-secondary btn-sm" id="update-check-btn" onclick="checkSatelliteUpdate(this)">
               <i class="bi bi-cloud-arrow-down me-1"></i>Check for updates
@@ -4391,9 +4392,10 @@ function showKioskWizard() {
   {% if not is_satellite %}
   tunnelModeChanged();
   _initTunnelStatus();
-  {% else %}
-  // Surface an available update on a Pi Remote as soon as Settings opens, so the
-  // device shows new software is ready without the user pressing anything.
+  {% endif %}
+  {% if is_pi_appliance %}
+  // Surface an available update on a Pi appliance as soon as Settings opens, so
+  // the device shows new software is ready without the user pressing anything.
   if (typeof checkSatelliteUpdate === 'function') checkSatelliteUpdate(null);
   {% endif %}
 

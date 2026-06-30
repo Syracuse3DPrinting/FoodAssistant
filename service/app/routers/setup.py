@@ -442,6 +442,9 @@ async def setup_page(request: Request):
         "current_mode": current_mode,
         "is_pi": is_raspberry_pi(),
         "is_satellite": settings.is_satellite(),
+        # Pi appliance (Pi Hosted or Pi Remote): both run the host bridge, so both
+        # offer the in-app OTA update. Mode based so it is stable off-device too.
+        "is_pi_appliance": settings.is_pi_appliance(),
         "board_model": board_model(),
         "pi_mdns_host": _pi_mdns_host() if is_raspberry_pi() else "",
         # On the attached kiosk display the wizard's many text inputs are painful
@@ -1174,19 +1177,21 @@ async def kiosk_install():
 
 @router.post("/update")
 async def update_software():
-    """Pull the latest source and restart the service, via the host bridge.
+    """Pull the latest version and restart the service, via the host bridge.
 
-    Only meaningful on a Pi Remote (satellite): that device runs the app from a
-    Python venv with no Docker image to re-pull, so the host bridge shells out
-    to foodassistant-update (git pull, venv pip when requirements changed, then
-    a service restart). The bridge runs the work synchronously and returns
-    {ok, before, after, restarted, log}; a failed pull leaves the running
-    version untouched and reports the error. The pull plus a pip install can
+    Available on any Pi appliance (both Pi Remote and Pi Hosted) since both run
+    the host bridge. The bridge shells out to foodassistant-update, which adapts
+    to the device: a Pi Remote runs from a Python venv (git pull, venv pip when
+    requirements changed, service restart), while a Pi Hosted box runs from a
+    Docker image (docker compose pull + recreate the service container, with a
+    build-from-source fallback). Either way the bridge runs the work
+    synchronously and returns {ok, before, after, restarted, log}; a failure
+    leaves the running version untouched and reports the error. The work can
     take a couple of minutes on a Pi, so the proxy timeout is generous.
     """
-    if not settings.is_satellite():
+    if not settings.is_pi_appliance():
         return JSONResponse(
-            {"ok": False, "error": "Updates are only available on Pi Remote devices."})
+            {"ok": False, "error": "In-app updates are only available on Pi appliances."})
     try:
         async with httpx.AsyncClient(timeout=620.0) as c:
             r = await c.post(f"{_HOST_BRIDGE}/update")

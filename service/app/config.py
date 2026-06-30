@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.6.166"
+APP_VERSION = "0.6.167"
 
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
@@ -771,6 +771,12 @@ class Settings(BaseSettings):
     # Clearer name for the same thing: pi_remote == a satellite of a main server.
     def is_satellite(self) -> bool:
         return self.deployment_mode == "pi_remote"
+
+    def is_pi_appliance(self) -> bool:
+        """True for the Pi appliance modes (Pi Hosted or Pi Remote), which run
+        the host bridge and so support the in-app OTA update. Mode based, not
+        hardware detected, so it is stable in tests and headless contexts."""
+        return self.deployment_mode in ("pi_hosted", "pi_remote")
 
     def manages_local_stack(self) -> bool:
         """True when this device runs/controls its own Grocy/Mealie Docker

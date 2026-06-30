@@ -111,12 +111,25 @@ def test_satellite_updates_card_detects_availability(client, monkeypatch):
 
 
 def test_non_satellite_updates_card_keeps_manual_check(client, monkeypatch):
-    """The non-satellite card uses the manual checkUpdate button and shows the
-    copy-paste update commands, not the satellite OTA wiring."""
+    """A plain server (non-Pi) uses the manual checkUpdate button and shows the
+    copy-paste update commands, not the appliance OTA wiring."""
     html = _render_setup(client, monkeypatch, satellite=False)
     assert 'onclick="checkUpdate(this)"' in html
     assert "checkSatelliteUpdate(null)" not in html
     assert 'onclick="checkForUpdates()"' not in html
+
+
+def test_pi_hosted_gets_the_in_app_ota(client, monkeypatch):
+    """Pi Hosted appliances must also get the one-button in-app updater
+    (FoodAssistant-tu0i), not just Pi Remote: both run the host bridge."""
+    monkeypatch.setattr(settings, "deployment_mode", "pi_hosted")
+    with patch.object(type(settings), "is_configured", lambda self: True):
+        html = client.get("/setup").text
+    assert 'onclick="checkForUpdates()"' in html        # Update now (OTA)
+    assert 'onclick="checkSatelliteUpdate(this)"' in html
+    assert "checkSatelliteUpdate(null)" in html         # auto-check on load
+    # Pi Hosted is not a satellite, so its other panes stay editable.
+    assert 'onclick="savePaneAi(this)"' in html
 
 
 def _attr_present(html: str, element_id: str, attr: str) -> bool:
