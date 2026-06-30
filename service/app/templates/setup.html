@@ -3704,6 +3704,10 @@ function savePaneSecurity(btn) {
     api_key:       document.getElementById('api_key') ? secretVal('api_key') : undefined,
     kiosk_pin:     document.getElementById('kiosk_pin') ? secretVal('kiosk_pin') : undefined,
     kiosk_readonly_when_locked: chk('kiosk_readonly_when_locked'),
+    // The Add satellite key rows live in this pane, so its Save must post them or
+    // a newly added satellite key is collected but never persisted (the satellite
+    // then gets a 401 because the server never stored its key).
+    extra_api_keys: document.querySelector('.satellite-extra-keys') ? collectSatelliteKeys() : undefined,
   }, btn, 'security-save-result');
 }
 
@@ -6854,10 +6858,16 @@ async function scanLan() {
     const found = d.found || [];
     const where = d.cidr ? ` on ${escapeHtml(d.cidr)}` : '';
     if (out) {
-      out.className = 'test-result text-success';
-      out.textContent = found.length
+      // A Docker-bridge default means we scanned the container network, not the
+      // LAN, so tell the user to enter their real range (their satellites live
+      // there, not on 172.x).
+      const dockerHint = (!found.length && d.dockerish)
+        ? ' That looks like a Docker network, not your LAN. Enter your LAN range above (for example 192.168.1.0/24) and scan again.'
+        : '';
+      out.className = 'test-result ' + (found.length ? 'text-success' : (d.dockerish ? 'text-warning' : 'text-secondary'));
+      out.textContent = (found.length
         ? `Found ${found.length} instance(s)${where}.`
-        : `No instances found${where}.`;
+        : `No instances found${where}.`) + dockerHint;
     }
     loadDevices();
   } catch (e) {

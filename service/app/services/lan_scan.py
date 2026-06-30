@@ -126,13 +126,42 @@ def _local_ips() -> set[str]:
     return ips
 
 
-def default_cidr() -> str | None:
-    """Best-effort guess of this server's own /24, or None if it cannot be found."""
-    ip = _outbound_ip()
-    if not ip:
-        return None
+def _rank_ip(ip: str) -> int:
+    """Lower rank = more likely to be a real home/office LAN. Docker's default
+    bridge lives in 172.16/12, so that range is ranked last so a containerized
+    server prefers a real LAN interface when it has one (FoodAssistant)."""
+    if ip.startswith("192.168."):
+        return 0
+    if ip.startswith("10."):
+        return 1
+    if ip.startswith("172."):
+        return 3  # Docker bridge range: least likely the user's LAN
+    return 2
+
+
+def looks_dockerish(cidr: str) -> bool:
+    """True when a CIDR is in Docker's default bridge range (172.16/12), so the
+    UI can hint that the user should enter their real LAN range instead."""
     try:
-        net = ipaddress.ip_network(f"{ip}/24", strict=False)
+        net = ipaddress.ip_network(cidr, strict=False)
+        return net.subnet_of(ipaddress.ip_network("172.16.0.0/12"))
+    except (ValueError, TypeError):
+        return False
+
+
+def default_cidr() -> str | None:
+    """Best-effort guess of this host's own LAN /24, or None if none is found.
+
+    Prefers a real LAN interface (192.168/10) over a Docker bridge address, so a
+    containerized server does not default to scanning its 172.x Docker network.
+    A bridge-only container still only sees its Docker IP; the caller can pass an
+    explicit CIDR to scan the LAN through the host in that case.
+    """
+    cands = {ip for ip in _local_ips() if not ip.startswith("127.")}
+    if not cands:
+        return None
+    ip = sorted(cands, key=lambda x: (_rank_ip(x), x))[0]
+    try:
+        return str(ipaddress.ip_network(f"{ip}/24", strict=False))
     except ValueError:
         return None
-    return str(net)

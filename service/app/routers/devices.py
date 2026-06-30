@@ -57,7 +57,10 @@ async def scan_lan(body: ScanBody = Body(default=ScanBody())):
             version=r.get("version"),
             deployment_mode=r.get("mode"),
         )
-    return {"ok": True, "found": results, "cidr": cidr}
+    # On a Docker bridge the auto-detected CIDR is the container network, not the
+    # user's LAN, so flag it: the UI tells the user to enter their real LAN range.
+    return {"ok": True, "found": results, "cidr": cidr,
+            "dockerish": lan_scan.looks_dockerish(cidr)}
 
 
 @router.post("/{device_id}/command")
