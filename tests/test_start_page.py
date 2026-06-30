@@ -87,6 +87,36 @@ def test_start_page_disabled_shows_notice(client, monkeypatch):
     assert "Start Page is turned off" in r.text
 
 
+def test_start_save_merges_custom_keys_into_shared_store(client, monkeypatch):
+    # A custom key built on the Start Page is merged into the shared deck store.
+    monkeypatch.setattr(settings, "streamdeck_key_overrides", [])
+    client.post("/setup/save", json={
+        "start_page_enabled": True, "start_page_keys": 6,
+        "start_page_layout": ["custom:c1"],
+        "start_custom_defs": [{"id": "c1", "type": "timer", "label": "Tea", "minutes": 3}],
+        "start_loaded_ids": [],
+    })
+    ov = settings.streamdeck_key_overrides
+    assert len(ov) == 1 and ov[0]["id"] == "c1" and ov[0]["slot"] == -1
+
+
+def test_start_save_preserves_deck_keys_and_slots(client, monkeypatch):
+    # A key placed on the deck (slot 4) that the Start Page editor did not load
+    # is preserved; a key the editor loaded but dropped is removed.
+    monkeypatch.setattr(settings, "streamdeck_key_overrides", [
+        {"id": "c1", "type": "timer", "minutes": 3, "slot": -1},
+        {"id": "c2", "type": "weather", "slot": 4},
+    ])
+    client.post("/setup/save", json={
+        "start_page_enabled": True, "start_page_keys": 6, "start_page_layout": [],
+        "start_custom_defs": [],          # user removed c1 on the Start Page
+        "start_loaded_ids": ["c1"],       # ...and only c1 was loaded here
+    })
+    ov = {o["id"]: o for o in settings.streamdeck_key_overrides}
+    assert "c1" not in ov                      # removed on the Start Page
+    assert ov["c2"]["slot"] == 4               # deck key + slot preserved
+
+
 def test_start_page_enabled_renders_grid(client, monkeypatch):
     monkeypatch.setattr(settings, "start_page_enabled", True)
     monkeypatch.setattr(settings, "start_page_keys", 6)

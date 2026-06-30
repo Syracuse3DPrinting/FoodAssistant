@@ -243,6 +243,10 @@ class SetupPayload(BaseModel):
     start_page_enabled: bool = False
     start_page_keys: int = 15
     start_page_layout: list | None = None
+    # Custom-key definitions built in the Start Page editor; merged into the
+    # shared streamdeck_key_overrides store (deck slots preserved) by the handler.
+    start_custom_defs: list | None = None
+    start_loaded_ids: list | None = None
     # These were previously sent by the setup page but dropped here (BaseModel
     # ignores unknown fields), so idle timeouts, key overrides, and the Stream
     # Deck weather never persisted through /save. Declared so they round-trip.
@@ -824,6 +828,37 @@ async def save_setup(payload: SetupPayload):
         data["start_page_keys"] = 15
     if data.get("start_page_layout") is None:
         data.pop("start_page_layout", None)  # absent = keep stored layout
+    # Merge custom-key definitions built on the Start Page into the shared deck
+    # store (FoodAssistant). Custom keys are shared both ways without the Start
+    # Page needing the deck's slots:
+    #   * update an existing key by id, keeping its Stream Deck slot;
+    #   * add a new key unplaced (slot -1);
+    #   * drop a key ONLY when the editor that opened it (start_loaded_ids) no
+    #     longer lists it, so a key added on the deck since this page loaded is
+    #     never clobbered by a stale Start Page save.
+    defs = data.pop("start_custom_defs", None)
+    loaded_ids = set(data.pop("start_loaded_ids", None) or [])
+    if isinstance(defs, list):
+        existing = settings.streamdeck_key_overrides or []
+        defs_by_id = {d["id"]: d for d in defs
+                      if isinstance(d, dict) and d.get("id")}
+        result, kept = [], set()
+        for o in existing:
+            if not isinstance(o, dict) or not o.get("id"):
+                continue
+            oid = o["id"]
+            if oid in defs_by_id:
+                entry = dict(defs_by_id[oid]); entry["slot"] = o.get("slot", -1)
+                result.append(entry)
+            elif oid in loaded_ids:
+                continue  # the user removed it on the Start Page
+            else:
+                result.append(o)  # untouched by this editor; keep as-is
+            kept.add(oid)
+        for d in defs:
+            if isinstance(d, dict) and d.get("id") and d["id"] not in kept:
+                entry = dict(d); entry["slot"] = -1; result.append(entry)
+        data["streamdeck_key_overrides"] = result
     # Background image (FoodAssistant-e2t6): clamp opacity to 0-100 and only
     # accept an http(s) or the internal serve route as the image URL, so a saved
     # value can never inject a javascript:/data: URL into the CSS background.

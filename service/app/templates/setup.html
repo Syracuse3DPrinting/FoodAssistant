@@ -2455,9 +2455,17 @@ docker compose up -d</code></pre>
             <div id="start-grid" class="mb-3" style="display:grid; gap:6px; max-width:520px"></div>
             <div class="mb-2 fw-semibold small"><i class="bi bi-collection me-1"></i>Palette</div>
             <div id="start-palette" class="d-flex flex-wrap gap-1 mb-3"></div>
-            <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneStartPage(this)">
-              <i class="bi bi-check-lg me-1"></i>Save Start Page
+
+            <div class="mb-2 fw-semibold small"><i class="bi bi-sliders me-1"></i>Custom keys</div>
+            <p class="text-secondary small mb-2">Build your own keys (Home Assistant actions, timers, weather, cameras, media, macros), the same as the Stream Deck. Each one appears as a chip in the palette above; drag it onto a key to place it. Custom keys are shared with the Stream Deck both ways.</p>
+            <div id="start-overrides" class="d-flex flex-column gap-2 mb-2"></div>
+            <button type="button" class="btn btn-outline-secondary btn-sm mb-3" onclick="_startAddOverrideRow()">
+              <i class="bi bi-plus-lg me-1"></i>Add custom key
             </button>
+
+            <div><button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneStartPage(this)">
+              <i class="bi bi-check-lg me-1"></i>Save Start Page
+            </button></div>
             <div class="test-result mt-2" id="start-page-result"></div>
           </div>
         </div>
@@ -2891,6 +2899,9 @@ window.TABS_DEFAULT = {{ tabs_default | tojson }};
 const START_ACTIONS = {{ start_actions | tojson }};
 const START_CUSTOMS = {{ start_customs | tojson }};
 window.START_LAYOUT = {{ (s.start_page_layout or []) | tojson }};
+// Full shared custom-key definitions (same store as the Stream Deck), so the
+// Start Page can render editable custom-key rows identical to the deck's.
+window.START_OVERRIDES = {{ (s.streamdeck_key_overrides or []) | tojson }};
 const HAS_AUTH_PASSWORD = {{ 'true' if has.auth_password else 'false' }};
 const IS_CONFIGURED = {{ 'true' if configured else 'false' }};
 // Server-side API base for a co-hosted Grocy. Always loopback so the app
@@ -4140,14 +4151,48 @@ const _START_SHAPES = { 6: [3, 2], 15: [5, 3], 32: [8, 4] };
 function _startKeyCount() {
   return parseInt(document.getElementById('start_page_keys')?.value || '15', 10) || 15;
 }
+// Live custom-key definitions from the Start Page's own editor rows (shared
+// builder with the deck via _sdOverrideRow / _sdDefFromRow).
+function _startCustomDefs() {
+  const wrap = document.getElementById('start-overrides');
+  if (!wrap) return [];
+  const out = [];
+  for (const row of wrap.querySelectorAll('.sd-override-row')) {
+    const def = _sdDefFromRow(row);
+    if (def) out.push(def);
+  }
+  return out;
+}
+function _startCustomMeta(def) {
+  // Reuse the deck's face metadata (label/icon) so a custom key looks identical
+  // on the Start Page and the Stream Deck.
+  try { return _sdDefMeta(def); } catch (e) { return { label: def.label || 'Custom', icon: def.icon || 'bi-grid-1x2' }; }
+}
 function _startTokenInfo(tok) {
   if (!tok) return { kind: 'blank' };
   if (tok.indexOf('custom:') === 0) {
-    const c = START_CUSTOMS.find(x => x.id === tok.slice(7));
-    return c ? { kind: 'custom', icon: c.icon, label: c.label } : { kind: 'blank' };
+    const def = _startCustomDefs().find(d => d.id === tok.slice(7));
+    if (def) { const m = _startCustomMeta(def); return { kind: 'custom', icon: m.icon, label: m.label }; }
+    return { kind: 'blank' };
   }
   const a = START_ACTIONS.find(x => x.key === tok);
   return a ? { kind: 'builtin', icon: a.icon, label: a.label } : { kind: 'blank' };
+}
+// Build a Start Page custom-key editor row from the deck's shared row builder,
+// rewiring its delete + change handlers to refresh the Start Page palette.
+function _startBuildRow(o) {
+  const row = _sdOverrideRow(o || {});
+  const del = row.querySelector('.btn-outline-danger');
+  if (del) del.onclick = function () { row.remove(); _startRenderPalette(); _startEditorRender(); };
+  row.addEventListener('input', () => { _startRenderPalette(); _startEditorRender(); });
+  row.addEventListener('change', () => { _startRenderPalette(); _startEditorRender(); });
+  return row;
+}
+function _startAddOverrideRow() {
+  const wrap = document.getElementById('start-overrides');
+  if (!wrap) return;
+  wrap.appendChild(_startBuildRow({}));
+  _startRenderPalette();
 }
 function _startEditorInit() {
   if (_startState) { _startEditorRender(); return; }   // keep edits across pane switches
@@ -4155,6 +4200,17 @@ function _startEditorInit() {
   _startState = [];
   const saved = window.START_LAYOUT || [];
   for (let i = 0; i < n; i++) _startState.push(saved[i] || '');
+  // Populate the shared custom-key library into the Start Page's own editor.
+  const wrap = document.getElementById('start-overrides');
+  if (wrap && !wrap.dataset.loaded) {
+    const seen = new Set();
+    for (const o of (window.START_OVERRIDES || [])) {
+      if (!o || !_sdIsCustomId(o.id) || seen.has(o.id)) continue;
+      seen.add(o.id);
+      wrap.appendChild(_startBuildRow(o));
+    }
+    wrap.dataset.loaded = '1';
+  }
   _startRenderPalette();
   _startEditorRender();
 }
@@ -4172,7 +4228,8 @@ function _startRenderPalette() {
     wrap.appendChild(chip);
   };
   START_ACTIONS.forEach(a => add(a.key, a.icon, a.label, 'text-bg-secondary'));
-  START_CUSTOMS.forEach(c => add('custom:' + c.id, c.icon, c.label, 'text-bg-primary'));
+  // Custom-key chips from the live Start Page library (shared with the deck).
+  _startCustomDefs().forEach(def => { const m = _startCustomMeta(def); add('custom:' + def.id, m.icon, m.label, 'text-bg-primary'); });
 }
 function _startEditorRender() {
   const grid = document.getElementById('start-grid');
@@ -4225,6 +4282,12 @@ function savePaneStartPage(btn) {
     start_page_enabled: chk('start_page_enabled'),
     start_page_keys:    _startKeyCount(),
     start_page_layout:  _startState.slice(),
+    // The custom-key definitions are merged into the shared store (preserving
+    // any Stream Deck slot placements) by the server, so a key built here also
+    // shows up on the deck. start_loaded_ids lets the server tell a key the user
+    // removed here from one added on the deck since this page loaded.
+    start_custom_defs:  _startCustomDefs(),
+    start_loaded_ids:   (window.START_OVERRIDES || []).map(o => o && o.id).filter(Boolean),
   }, btn, 'start-page-result');
 }
 
