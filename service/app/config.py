@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.7.12"
+APP_VERSION = "0.7.13"
 
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
@@ -22,7 +22,7 @@ GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
 # is the project's), NOT a per-user setting. Set it here once. Empty leaves the
 # links working but unmonetized. An AMAZON_ASSOCIATES_TAG env var overrides it.
 import os as _os
-AMAZON_ASSOCIATES_TAG = _os.environ.get("AMAZON_ASSOCIATES_TAG", "").strip()
+AMAZON_ASSOCIATES_TAG = _os.environ.get("AMAZON_ASSOCIATES_TAG", "improvisedeng-20").strip()
 
 # UI themes. Each entry carries the Bootstrap 5.3 colour mode (data-bs-theme)
 # and an optional vendored Bootswatch stylesheet served from /static. When
