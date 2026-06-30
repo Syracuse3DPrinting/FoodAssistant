@@ -30,7 +30,7 @@ from ..database import SessionLocal
 from ..dependencies import reset_providers
 from ..hardware import is_raspberry_pi, board_model
 from ..models.db_models import StreamDeckProfile
-from ..navigation import all_tabs, normalize_custom_tabs, NAV_TABS
+from ..navigation import all_tabs, normalize_custom_tabs, NAV_TABS, CUSTOM_PREFIX
 from ..storage_categories import custom_categories, _normalize_custom, storable
 from ..templating import templates
 
@@ -57,7 +57,8 @@ def _clean_custom_nav_tabs(submitted) -> list[dict]:
     """
     cleaned = normalize_custom_tabs(submitted if isinstance(submitted, list) else [])
     return [{"id": t["key"], "label": t["label"], "icon": t["icon"],
-             "url": t["href"], "parent": t.get("parent", "")} for t in cleaned]
+             "url": t["href"], "parent": t.get("parent", ""),
+             "heading": bool(t.get("heading"))} for t in cleaned]
 
 
 def _clean_nav_parents(submitted) -> dict:
@@ -73,7 +74,11 @@ def _clean_nav_parents(submitted) -> dict:
     out: dict = {}
     for child, parent in submitted.items():
         child, parent = str(child), str(parent or "").strip()
-        if child in keys and parent in keys and child != parent:
+        # The child is always a built-in tab. The parent may be another built-in
+        # OR a custom heading/folder (a custom_-prefixed key the editor created),
+        # so a built-in page can be filed under a user-made folder.
+        parent_ok = parent in keys or parent.startswith(CUSTOM_PREFIX)
+        if child in keys and parent_ok and child != parent:
             out[child] = parent
     return out
 

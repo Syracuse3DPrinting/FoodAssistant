@@ -350,12 +350,17 @@
             <i class="bi {{ tab.icon }} me-1"></i>{{ tab.label }}
           </a>
           <ul class="dropdown-menu" aria-labelledby="navSub_{{ tab.key }}">
+            {# A heading (folder) has no page of its own, so its toggle is just a
+               label and there is no "open the parent" item. A normal parent that
+               also has its own page keeps that page as the first dropdown item. #}
+            {%- if not tab.heading %}
             <li>
               <a class="dropdown-item {% if active == tab.key %}active{% endif %}" href="{{ tab.href }}">
                 <i class="bi {{ tab.icon }} me-2"></i>{{ tab.label }}
               </a>
             </li>
             <li><hr class="dropdown-divider"></li>
+            {%- endif %}
             {% for child in tab.children %}
             <li>
               <a class="dropdown-item {% if active == child.key %}active{% endif %}"
@@ -430,7 +435,9 @@
             <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="moreMenu">
               {# Every page tab is also listed here as a redundant way to reach it,
                  in addition to the always-visible primary nav. #}
-              {% for tab in nav_tabs() if tab.key not in ['about', 'defaults'] %}
+              {# Headings (folders) have no page, so they are not reachable links
+                 and are skipped here; their children appear in their own right. #}
+              {% for tab in nav_tabs() if tab.key not in ['about', 'defaults'] and not tab.heading %}
               <li>
                 <a class="dropdown-item {% if active == tab.key %}active{% endif %}" href="{{ tab.href }}"{% if tab.custom and '://' in tab.href %} target="_blank" rel="noopener"{% endif %}>
                   <i class="bi {{ tab.icon }} me-2"></i>{{ tab.label }}
@@ -465,7 +472,8 @@
        data-position="{{ floating_nav_position }}"
        data-autohide-streamdeck="{{ '1' if floating_nav_autohide_streamdeck else '0' }}"
        data-has-streamdeck="{{ '1' if has_streamdeck else '0' }}">
-    {% for tab in nav_tabs() if tab.key not in ['about', 'defaults'] %}
+    {# Headings (folders) have no page, so they are skipped in the flat float nav. #}
+    {% for tab in nav_tabs() if tab.key not in ['about', 'defaults'] and not tab.heading %}
     <a class="float-nav-link {% if active == tab.key %}active{% endif %}" href="{{ tab.href }}"
        title="{{ tab.label }}"{% if tab.custom and '://' in tab.href %} target="_blank" rel="noopener"{% endif %}>
       <i class="bi {{ tab.icon }}"></i>

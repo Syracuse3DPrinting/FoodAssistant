@@ -108,9 +108,11 @@ def custom_nav_tabs() -> list[dict]:
 def normalize_custom_tabs(raw) -> list[dict]:
     """Coerce stored custom-tab dicts into render-ready tabs.
 
-    Drops anything without a usable label and url. Assigns a stable, prefixed,
-    de-duplicated key (from the stored id, else the label), so two custom tabs
-    never share a key. No settings access, so this is unit-testable in isolation.
+    Drops anything without a usable label. A normal tab needs a url; a heading
+    (folder) is allowed to have no url and is treated as a pure parent (it gets
+    href="" and heading=True). Assigns a stable, prefixed, de-duplicated key
+    (from the stored id, else the label), so two custom tabs never share a key.
+    No settings access, so this is unit-testable in isolation.
     """
     out: list[dict] = []
     seen: set[str] = set()
@@ -121,14 +123,19 @@ def normalize_custom_tabs(raw) -> list[dict]:
             continue
         label = str(entry.get("label", "")).strip()
         url = str(entry.get("url", "")).strip()
-        if not label or not url:
+        heading = bool(entry.get("heading")) or not url
+        if not label:
+            continue
+        # A non-heading entry must carry a url; a heading is a label-only folder.
+        if not heading and not url:
             continue
         key = _custom_key(entry.get("id") or label, seen)
         seen.add(key)
         icon = str(entry.get("icon", "")).strip() or _DEFAULT_CUSTOM_ICON
         parent = str(entry.get("parent", "")).strip()
         out.append({"key": key, "label": label, "icon": icon,
-                    "href": url, "parent": parent, "custom": True})
+                    "href": "" if heading else url, "parent": parent,
+                    "custom": True, "heading": heading})
     return out
 
 
@@ -210,7 +217,10 @@ def build_nav_tree(tabs: list[dict] | None = None, parents: dict | None = None) 
             nodes[p]["children"].append(nodes[t["key"]])
         else:
             tree.append(nodes[t["key"]])
-    return tree
+    # A heading (folder) has no page of its own, so a heading with no children is
+    # a dead end: drop it from the rendered tree. Its pages are reachable because
+    # any orphaned child already fell back to top level above.
+    return [n for n in tree if not (n.get("heading") and not n["children"])]
 
 
 def auto_hidden_groups() -> list[dict]:

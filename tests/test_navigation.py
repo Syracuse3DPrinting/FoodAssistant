@@ -61,15 +61,18 @@ def test_normalize_custom_tabs_drops_invalid_and_assigns_keys():
     raw = [
         {"label": "Home Assistant", "url": "https://ha.local", "icon": "bi-house"},
         {"label": "", "url": "https://x"},          # no label, dropped
-        {"label": "No URL"},                          # no url, dropped
+        {"label": "No URL"},                          # no url -> a heading (kept)
         "not a dict",                                 # dropped
         {"label": "Docs", "url": "ui/about"},         # default icon
     ]
     out = navigation.normalize_custom_tabs(raw)
-    assert [t["label"] for t in out] == ["Home Assistant", "Docs"]
+    # A label-only entry (no url) is kept as a heading/folder, not dropped.
+    assert [t["label"] for t in out] == ["Home Assistant", "No URL", "Docs"]
     assert out[0]["key"].startswith(navigation.CUSTOM_PREFIX)
     assert out[0]["icon"] == "bi-house" and out[0]["custom"] is True
-    assert out[1]["icon"] == navigation._DEFAULT_CUSTOM_ICON
+    assert out[0]["heading"] is False
+    assert out[1]["heading"] is True and out[1]["href"] == ""
+    assert out[2]["icon"] == navigation._DEFAULT_CUSTOM_ICON
 
 
 def test_normalize_custom_tabs_dedupes_keys():
@@ -252,5 +255,75 @@ def test_navbar_renders_dropdown_for_parent_with_children(monkeypatch, tmp_path)
         html = client.get("/ui/about").text
         assert 'id="navSub_inventory"' in html
         assert "dropdown-toggle" in html
+    finally:
+        os.chdir(cwd)
+
+
+# -- headings / folders (FoodAssistant-81yi) --------------------------------
+
+def test_heading_with_child_renders_as_label_dropdown_without_own_page():
+    # A heading (no href) holding a child renders as a dropdown; it must NOT emit
+    # a leading "open the parent's page" item, because it has no page.
+    tabs = [
+        {"key": "custom_tools", "label": "Tools", "icon": "bi-folder",
+         "href": "", "parent": "", "custom": True, "heading": True},
+        {"key": "convert", "label": "Convert", "icon": "bi-rulers",
+         "href": "ui/convert"},
+    ]
+    tree = navigation.build_nav_tree(tabs, parents={"convert": "custom_tools"})
+    assert [n["key"] for n in tree] == ["custom_tools"]
+    folder = tree[0]
+    assert folder["heading"] is True and folder["href"] == ""
+    assert [c["key"] for c in folder["children"]] == ["convert"]
+
+
+def test_empty_heading_is_dropped_from_tree():
+    # A heading with no children is a dead end and is not rendered.
+    tabs = [
+        {"key": "custom_empty", "label": "Empty", "icon": "bi-folder",
+         "href": "", "parent": "", "custom": True, "heading": True},
+        {"key": "convert", "label": "Convert", "icon": "bi-rulers",
+         "href": "ui/convert"},
+    ]
+    tree = navigation.build_nav_tree(tabs, parents={})
+    assert [n["key"] for n in tree] == ["convert"]
+
+
+def test_normalize_explicit_heading_flag_kept_even_with_url():
+    # An explicit heading flag wins: the entry is a folder and its url is cleared.
+    out = navigation.normalize_custom_tabs(
+        [{"label": "Group", "url": "ui/about", "heading": True}])
+    assert out[0]["heading"] is True and out[0]["href"] == ""
+
+
+def test_navbar_renders_heading_dropdown_label_only(monkeypatch, tmp_path):
+    import os
+    cwd = os.getcwd()
+    os.chdir(SERVICE)
+    try:
+        monkeypatch.setattr(settings, "data_dir", str(tmp_path), raising=False)
+        monkeypatch.setattr(settings, "auth_required", False, raising=False)
+        monkeypatch.setattr(settings, "deployment_mode", "server", raising=False)
+        monkeypatch.setattr(settings, "grocy_base_url", "http://grocy.test", raising=False)
+        monkeypatch.setattr(settings, "grocy_api_key", "k", raising=False)
+        monkeypatch.setattr(settings, "nav_order", "", raising=False)
+        monkeypatch.setattr(settings, "nav_hidden", "", raising=False)
+        # A custom heading "Tools" holding the built-in Convert tab.
+        monkeypatch.setattr(settings, "nav_parents",
+                            {"convert": "custom_tools"}, raising=False)
+        monkeypatch.setattr(settings, "custom_nav_tabs",
+                            [{"id": "custom_tools", "label": "Tools",
+                              "icon": "bi-folder", "url": "", "parent": "",
+                              "heading": True}], raising=False)
+        from fastapi.testclient import TestClient
+        from app.main import app
+        client = TestClient(app)
+        html = client.get("/ui/about").text
+        # The heading renders as a dropdown toggle...
+        assert 'id="navSub_custom_tools"' in html
+        # ...whose menu does NOT link to a page for the heading itself (no href
+        # pointing at the heading; the toggle stays href="#").
+        assert 'href="ui/convert"' in html
+        assert 'href="custom_tools"' not in html
     finally:
         os.chdir(cwd)
