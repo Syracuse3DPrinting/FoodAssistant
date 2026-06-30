@@ -493,6 +493,25 @@ async def camera_stream(idx: int):
     return JSONResponse({"detail": "Camera has no stream."}, status_code=404)
 
 
+@router.get("/start", response_class=HTMLResponse)
+async def start_page(request: Request):
+    """Optional full-screen on-screen Start Page (FoodAssistant): a launcher grid
+    that works like an on-screen Stream Deck. Off by default; when disabled it
+    still renders (so the Settings preview link works) but is plain."""
+    from ..services import start_page as sp
+    keys = sp.normalize_key_count(settings.start_page_keys)
+    cols, rows = sp.GRID_SHAPES[keys]
+    layout = sp.resolve_layout(settings.start_page_layout, keys)
+    return templates.TemplateResponse(request, "start.html", {
+        "request": request,
+        "enabled": settings.start_page_enabled,
+        "keys": keys,
+        "cols": cols,
+        "rows": rows,
+        "layout": layout,
+    })
+
+
 @router.get("/weather", response_class=HTMLResponse)
 async def weather_page(request: Request):
     # Full-screen forecast for the kiosk. Opened by the Stream Deck weather and

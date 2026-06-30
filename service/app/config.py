@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.7.30"
+APP_VERSION = "0.7.31"
 
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
@@ -277,6 +277,7 @@ _SAVEABLE = [
     "ui_scale", "display_rotation",
     "display_type",
     "has_streamdeck", "streamdeck_key_count", "display_touch",
+    "start_page_enabled", "start_page_keys", "start_page_layout",
     "display_idle_timeout", "streamdeck_idle_timeout", "streamdeck_key_overrides",
     "streamdeck_weather_location", "streamdeck_weather_units", "weather_api_base",
     "streamdeck_key_style", "streamdeck_icon_color",
@@ -781,6 +782,16 @@ class Settings(BaseSettings):
     has_streamdeck: bool = False
     streamdeck_key_count: int = 0
     display_touch: bool = False
+
+    # On-screen Start Page (FoodAssistant): an optional full-screen launcher that
+    # works like an on-screen Stream Deck. start_page_enabled turns it on (off by
+    # default); start_page_keys is the grid size (6, 15, or 32); start_page_layout
+    # is an ordered list of slot tokens, each a built-in action key, a
+    # "custom:<id>" reference into streamdeck_key_overrides (shared with the
+    # physical deck), or "" for a blank key. The keys scale to fill the screen.
+    start_page_enabled: bool = False
+    start_page_keys: int = 15
+    start_page_layout: list = []
 
     # Idle timeouts (minutes). 0 = disabled. display_idle_timeout puts the
     # kiosk display to sleep after N minutes without user interaction.

@@ -240,6 +240,9 @@ class SetupPayload(BaseModel):
     kitchen_appliances: list[str] | None = None
     has_streamdeck: bool = False
     streamdeck_key_count: int = 0
+    start_page_enabled: bool = False
+    start_page_keys: int = 15
+    start_page_layout: list | None = None
     # These were previously sent by the setup page but dropped here (BaseModel
     # ignores unknown fields), so idle timeouts, key overrides, and the Stream
     # Deck weather never persisted through /save. Declared so they round-trip.
@@ -507,6 +510,10 @@ async def setup_page(request: Request):
         "ai_models": AI_MODELS,
         "tabs": all_tabs(),
         "tabs_default": default_tabs(),
+        # On-screen Start Page editor (FoodAssistant): the built-in launcher
+        # actions and the shared custom buttons (same store as the Stream Deck).
+        "start_actions": _start_actions(),
+        "start_customs": _start_customs(),
         "version": APP_VERSION,
         "custom_categories": custom_categories(),
         "themes": THEMES,
@@ -555,6 +562,17 @@ async def setup_page(request: Request):
         # each item's current checked state from the saved selection.
         "appliance_groups": _appliance_groups(),
     })
+
+
+def _start_actions() -> list[dict]:
+    from ..services import start_page
+    return start_page.builtin_actions()
+
+
+def _start_customs() -> list[dict]:
+    from ..services import start_page
+    return [{"id": c["id"], "label": c["label"], "icon": c["icon"], "type": c["type"]}
+            for c in start_page.custom_buttons()]
 
 
 def _appliance_groups() -> dict:
@@ -801,6 +819,11 @@ async def save_setup(payload: SetupPayload):
         data["extra_api_keys"], data["extra_api_key_names"] = merged_sat
     if data.get("display_rotation") not in DISPLAY_ROTATIONS:
         data["display_rotation"] = _DEFAULT_DISPLAY_ROTATION
+    # On-screen Start Page: only 6/15/32 keys are valid (Stream Deck sizes).
+    if "start_page_keys" in data and data["start_page_keys"] not in (6, 15, 32):
+        data["start_page_keys"] = 15
+    if data.get("start_page_layout") is None:
+        data.pop("start_page_layout", None)  # absent = keep stored layout
     # Background image (FoodAssistant-e2t6): clamp opacity to 0-100 and only
     # accept an http(s) or the internal serve route as the image URL, so a saved
     # value can never inject a javascript:/data: URL into the CSS background.

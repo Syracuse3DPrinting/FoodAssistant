@@ -1001,6 +1001,9 @@
             <i class="bi bi-cloud-sun me-2"></i>Weather
           </button>
           {% endif %}
+          <button class="nav-link d-flex align-items-center" data-mgroup="p" data-bs-toggle="pill" data-bs-target="#pane-start-page" type="button" onclick="_startEditorInit()">
+            <i class="bi bi-grid-3x3-gap me-2"></i>Start Page
+          </button>
 
           {# --- System: maintenance that is not day-to-day config --------- #}
           {{ menu_header('System') }}
@@ -2421,6 +2424,38 @@ docker compose up -d</code></pre>
         </div>
         {% endif %}
 
+        <!-- Personalization: on-screen Start Page (FoodAssistant) -->
+        <div class="tab-pane fade" id="pane-start-page">
+          <p class="pane-intro">An optional full-screen launcher that works like an on-screen Stream Deck. It opens at <a href="ui/start" target="_blank">/ui/start</a> and replaces the fixed and floating menus while shown.</p>
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-grid-3x3-gap text-success"></i> Start Page</div>
+            <div class="form-check form-switch mb-3">
+              <input class="form-check-input" type="checkbox" role="switch" id="start_page_enabled"
+                     {{ 'checked' if s.start_page_enabled else '' }}>
+              <label class="form-check-label" for="start_page_enabled">Enable the Start Page</label>
+              <div class="form-text">Off by default. When on, open it at /ui/start (or point the kiosk there).</div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="start_page_keys">Keys</label>
+              <select class="form-select form-select-sm" id="start_page_keys" style="max-width:240px" onchange="_startEditorRender()">
+                <option value="6"  {{ 'selected' if s.start_page_keys == 6 else '' }}>6 keys (3 x 2)</option>
+                <option value="15" {{ 'selected' if s.start_page_keys == 15 else '' }}>15 keys (5 x 3)</option>
+                <option value="32" {{ 'selected' if s.start_page_keys == 32 else '' }}>32 keys (8 x 4)</option>
+              </select>
+              <div class="form-text">The keys scale to fill the screen without scrolling.</div>
+            </div>
+            <div class="mb-2 fw-semibold small"><i class="bi bi-grid me-1"></i>Layout</div>
+            <p class="text-secondary small mb-2">Drag an action from the palette onto a key, drag keys to rearrange them, or click a key to clear it. Custom buttons are shared with the Stream Deck.</p>
+            <div id="start-grid" class="mb-3" style="display:grid; gap:6px; max-width:520px"></div>
+            <div class="mb-2 fw-semibold small"><i class="bi bi-collection me-1"></i>Palette</div>
+            <div id="start-palette" class="d-flex flex-wrap gap-1 mb-3"></div>
+            <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneStartPage(this)">
+              <i class="bi bi-check-lg me-1"></i>Save Start Page
+            </button>
+            <div class="test-result mt-2" id="start-page-result"></div>
+          </div>
+        </div>
+
         <!-- Hardware: barcode scanner (all devices) -->
         <div class="tab-pane fade" id="pane-hardware">
           <p class="pane-intro">Physical input devices connected to this machine.</p>
@@ -2841,6 +2876,11 @@ docker compose up -d</code></pre>
 const TABS = {{ tabs | tojson }};
 // Pristine built-in layout for the nav editor's Reset to defaults (FoodAssistant-oret).
 window.TABS_DEFAULT = {{ tabs_default | tojson }};
+// On-screen Start Page editor data (FoodAssistant): built-in launcher actions,
+// the shared custom buttons (same store as the Stream Deck), and the saved layout.
+const START_ACTIONS = {{ start_actions | tojson }};
+const START_CUSTOMS = {{ start_customs | tojson }};
+window.START_LAYOUT = {{ (s.start_page_layout or []) | tojson }};
 const HAS_AUTH_PASSWORD = {{ 'true' if has.auth_password else 'false' }};
 const IS_CONFIGURED = {{ 'true' if configured else 'false' }};
 // Server-side API base for a co-hosted Grocy. Always loopback so the app
@@ -4059,6 +4099,105 @@ function resetNavEditor(btn) {
   renderNavEditor();
   const out = document.getElementById('interface-save-result');
   if (out) out.innerHTML = '<span class="text-secondary"><i class="bi bi-info-circle me-1"></i>Reset to defaults. Click Save Navigation to keep it.</span>';
+}
+
+// -- On-screen Start Page editor (FoodAssistant) ---------------------------
+// _startState is a flat token array (one per key): a built-in action key, a
+// "custom:<id>" reference into the shared custom-button store, or "" for blank.
+let _startState = null;
+let _startDragTok = null;     // token being dragged from the palette
+let _startDragCell = null;    // cell index being dragged within the grid
+const _START_SHAPES = { 6: [3, 2], 15: [5, 3], 32: [8, 4] };
+
+function _startKeyCount() {
+  return parseInt(document.getElementById('start_page_keys')?.value || '15', 10) || 15;
+}
+function _startTokenInfo(tok) {
+  if (!tok) return { kind: 'blank' };
+  if (tok.indexOf('custom:') === 0) {
+    const c = START_CUSTOMS.find(x => x.id === tok.slice(7));
+    return c ? { kind: 'custom', icon: c.icon, label: c.label } : { kind: 'blank' };
+  }
+  const a = START_ACTIONS.find(x => x.key === tok);
+  return a ? { kind: 'builtin', icon: a.icon, label: a.label } : { kind: 'blank' };
+}
+function _startEditorInit() {
+  if (_startState) { _startEditorRender(); return; }   // keep edits across pane switches
+  const n = _startKeyCount();
+  _startState = [];
+  const saved = window.START_LAYOUT || [];
+  for (let i = 0; i < n; i++) _startState.push(saved[i] || '');
+  _startRenderPalette();
+  _startEditorRender();
+}
+function _startRenderPalette() {
+  const wrap = document.getElementById('start-palette');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  const add = (tok, icon, label, cls) => {
+    const chip = document.createElement('span');
+    chip.className = 'badge rounded-pill border ' + (cls || 'text-bg-secondary') + ' d-inline-flex align-items-center gap-1';
+    chip.style.cursor = 'grab'; chip.draggable = true; chip.dataset.tok = tok;
+    chip.innerHTML = '<i class="bi ' + icon + '"></i> ' + label;
+    chip.addEventListener('dragstart', e => { _startDragTok = tok; _startDragCell = null; e.dataTransfer.effectAllowed = 'copy'; });
+    chip.addEventListener('click', () => { _startDragTok = tok; chip.classList.add('border-info'); setTimeout(() => chip.classList.remove('border-info'), 600); });
+    wrap.appendChild(chip);
+  };
+  START_ACTIONS.forEach(a => add(a.key, a.icon, a.label, 'text-bg-secondary'));
+  START_CUSTOMS.forEach(c => add('custom:' + c.id, c.icon, c.label, 'text-bg-primary'));
+}
+function _startEditorRender() {
+  const grid = document.getElementById('start-grid');
+  if (!grid) return;
+  const n = _startKeyCount();
+  if (!_startState) { _startEditorInit(); return; }
+  // Resize the token array to the chosen key count (truncate or pad with blanks).
+  if (_startState.length > n) _startState = _startState.slice(0, n);
+  while (_startState.length < n) _startState.push('');
+  const [cols] = _START_SHAPES[n] || [5];
+  grid.style.gridTemplateColumns = 'repeat(' + cols + ', 1fr)';
+  grid.innerHTML = '';
+  _startState.forEach((tok, i) => {
+    const info = _startTokenInfo(tok);
+    const cell = document.createElement('div');
+    cell.className = 'border rounded d-flex flex-column align-items-center justify-content-center text-center p-1' +
+      (info.kind === 'blank' ? ' border-secondary-subtle' : '');
+    cell.style.cssText = 'aspect-ratio:1; font-size:0.7rem; overflow:hidden; cursor:pointer; min-height:54px;' +
+      (info.kind === 'blank' ? 'opacity:0.5;border-style:dashed;' : '');
+    cell.draggable = info.kind !== 'blank';
+    cell.dataset.idx = i;
+    cell.innerHTML = info.kind === 'blank'
+      ? '<i class="bi bi-plus" style="opacity:0.6"></i>'
+      : '<i class="bi ' + info.icon + '" style="font-size:1.1rem"></i><span style="line-height:1;margin-top:2px">' + info.label + '</span>';
+    cell.title = info.kind === 'blank' ? 'Drop an action here' : (info.label + ' — click to clear');
+    cell.addEventListener('click', () => {
+      if (_startDragTok) { _startState[i] = _startDragTok; _startDragTok = null; }
+      else { _startState[i] = ''; }   // click a filled cell with nothing selected clears it
+      _startEditorRender();
+    });
+    cell.addEventListener('dragstart', e => { _startDragCell = i; _startDragTok = null; e.dataTransfer.effectAllowed = 'move'; });
+    cell.addEventListener('dragover', e => { e.preventDefault(); cell.classList.add('border-info'); });
+    cell.addEventListener('dragleave', () => cell.classList.remove('border-info'));
+    cell.addEventListener('drop', e => {
+      e.preventDefault(); cell.classList.remove('border-info');
+      if (_startDragCell !== null) {            // swap two cells
+        const tmp = _startState[i]; _startState[i] = _startState[_startDragCell]; _startState[_startDragCell] = tmp;
+        _startDragCell = null;
+      } else if (_startDragTok) {               // place from palette
+        _startState[i] = _startDragTok; _startDragTok = null;
+      }
+      _startEditorRender();
+    });
+    grid.appendChild(cell);
+  });
+}
+function savePaneStartPage(btn) {
+  if (!_startState) _startEditorInit();
+  return savePane({
+    start_page_enabled: chk('start_page_enabled'),
+    start_page_keys:    _startKeyCount(),
+    start_page_layout:  _startState.slice(),
+  }, btn, 'start-page-result');
 }
 
 function savePaneSecurity(btn) {

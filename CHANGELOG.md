@@ -11,6 +11,7 @@ All notable changes to FoodAssistant are recorded here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **On-screen Start Page (optional).** A new full-screen launcher that works like an on-screen Stream Deck, at /ui/start. Choose 6, 15, or 32 keys (the keys scale to fill the screen without scrolling), arrange them by dragging actions from a palette onto the grid, and it replaces the fixed and floating menus while shown. Custom buttons are shared with the physical Stream Deck. Off by default; enable it in Settings, Personalization, Start Page.
 - **Weather page and settings.** The Stream Deck Weather settings are now just "Weather" and add an advanced weather-server option (the Open-Meteo API base, default the public service, so you can point it at a self-hosted instance). Weather also has its own navigation tab, so the forecast page is reachable without a Stream Deck.
 - **Camera scan shows brand and resolution, and handles logins.** Scanning for IP cameras now labels each result with the detected brand and snapshot resolution, and a password-protected camera gets an inline username and password form that finds a working snapshot and lets you preview and add it.
 - **Background image.** Set a photo behind the whole UI from Theme settings: upload an image or paste a URL, with an opacity slider so the interface stays readable. Applies on every page and device.
