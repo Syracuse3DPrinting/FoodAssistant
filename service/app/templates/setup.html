@@ -804,6 +804,17 @@
     <a href="ui/" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Back to app</a>
   </div>
 
+  {# Top toggle: switch the side menu between everyday Personalization and the
+     set-and-forget Settings, so the two never crowd one long list. #}
+  <div class="btn-group mb-3" role="group" aria-label="Choose Settings or Personalization">
+    <button type="button" class="btn btn-outline-primary" id="menu-toggle-p" onclick="showSettingsMenu('p')">
+      <i class="bi bi-sliders me-1"></i>Personalization
+    </button>
+    <button type="button" class="btn btn-outline-primary" id="menu-toggle-s" onclick="showSettingsMenu('s')">
+      <i class="bi bi-gear me-1"></i>Settings
+    </button>
+  </div>
+
   {% set _inv_ok = features.satellite or (s.grocy_api_key and s.grocy_base_url and s.grocy_base_url != 'http://grocy:80') %}
   {% set _sec_ok = (not s.auth_required) or s.auth_password %}
   {% if not _inv_ok or not _sec_ok %}
@@ -829,9 +840,11 @@
         {% set sec_ok = (not s.auth_required) or s.auth_password %}
         {% set rem_ok = s.remote_server_url and s.upstream_api_key %}
         <div class="nav flex-column nav-pills gap-1" role="tablist">
-          {# Group header style, reused below so the menu reads as logical sections. #}
-          {% macro menu_header(label) %}
-          <div class="nav-link text-secondary px-2 mt-2 mb-0" style="font-size:0.7rem;letter-spacing:.06em;text-transform:uppercase;">{{ label }}</div>
+          {# Group header style, reused below so the menu reads as logical
+             sections. data-mgroup ('s'=Settings, 'p'=Personalization) lets the
+             top toggle show one menu at a time. #}
+          {% macro menu_header(label, group='s') %}
+          <div class="nav-link text-secondary px-2 mt-2 mb-0 menu-section" data-mgroup="{{ group }}" style="font-size:0.7rem;letter-spacing:.06em;text-transform:uppercase;">{{ label }}</div>
           {% endmacro %}
 
           {# --- Services: the backends this device talks to --------------- #}
@@ -898,18 +911,18 @@
 
           {# --- Personalization: the commonly-changed, taste-level settings,
                  separated from the set-and-forget Settings above. ---------- #}
-          {{ menu_header('Personalization') }}
-          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-interface" type="button">
+          {{ menu_header('Personalization', 'p') }}
+          <button class="nav-link d-flex align-items-center" data-mgroup="p" data-bs-toggle="pill" data-bs-target="#pane-interface" type="button">
             <i class="bi bi-layout-sidebar me-2"></i>Interface
           </button>
-          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-personalization-recipes" type="button">
+          <button class="nav-link d-flex align-items-center" data-mgroup="p" data-bs-toggle="pill" data-bs-target="#pane-personalization-recipes" type="button">
             <i class="bi bi-sliders me-2"></i>Recipe Preferences
           </button>
           {% if not features.satellite %}
-          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-personalization-storage" type="button">
+          <button class="nav-link d-flex align-items-center" data-mgroup="p" data-bs-toggle="pill" data-bs-target="#pane-personalization-storage" type="button">
             <i class="bi bi-grid-3x3-gap me-2"></i>Storage Categories
           </button>
-          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-personalization-weather" type="button">
+          <button class="nav-link d-flex align-items-center" data-mgroup="p" data-bs-toggle="pill" data-bs-target="#pane-personalization-weather" type="button">
             <i class="bi bi-cloud-sun me-2"></i>Stream Deck Weather
           </button>
           {% endif %}
@@ -4837,6 +4850,33 @@ function showKioskWizard() {
   document.getElementById('wizard-root')?.classList.remove('d-none');
 }
 
+// Top toggle: show one side-menu group ('p' Personalization or 's' Settings),
+// hide the other, and activate a pill in the shown group so a pane is visible.
+// Pass an explicit pill to activate (e.g. from a #pane- hash); otherwise the
+// first visible pill of the group is shown.
+function showSettingsMenu(group, activate) {
+  group = (group === 'p') ? 'p' : 's';
+  try { localStorage.setItem('settingsMenu', group); } catch (e) { }
+  var ts = document.getElementById('menu-toggle-s');
+  var tp = document.getElementById('menu-toggle-p');
+  if (ts) ts.classList.toggle('active', group === 's');
+  if (tp) tp.classList.toggle('active', group === 'p');
+  var sidebar = document.querySelector('.side-menu .nav-pills');
+  if (!sidebar) return;
+  var firstPill = null;
+  sidebar.querySelectorAll('.menu-section, [data-bs-toggle="pill"]').forEach(function (el) {
+    var g = el.getAttribute('data-mgroup') || 's';
+    var show = (g === group);
+    el.classList.toggle('d-none', !show);
+    if (show && el.getAttribute('data-bs-toggle') === 'pill' && !firstPill) firstPill = el;
+  });
+  var pill = (activate && (activate.getAttribute('data-mgroup') || 's') === group) ? activate : firstPill;
+  if (pill) {
+    try { bootstrap.Tab.getOrCreateInstance(pill).show(); }
+    catch (e) { pill.click(); }
+  }
+}
+
 (function init() {
   showProvider();
   showRecipeSource();
@@ -4861,19 +4901,23 @@ function showKioskWizard() {
   toggleAuthRequired();
   {% endif %}
 
-  // If the page was opened with a #pane-* hash (e.g. from the navbar unlock
-  // hint), activate the matching settings pill tab.
+  // Pick the side-menu group. A #pane-* hash wins (and selects its group); else
+  // the last-used choice; else default to Personalization (the everyday screen).
   var hash = window.location.hash;
-  if (hash && hash.startsWith('#pane-')) {
-    var btn = document.querySelector('[data-bs-target="' + hash + '"]');
-    if (btn) {
-      var tab = bootstrap.Tab.getOrCreateInstance(btn);
-      tab.show();
-      setTimeout(function() {
-        var el = document.getElementById(hash.slice(1));
-        if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});
-      }, 120);
-    }
+  var hashBtn = (hash && hash.startsWith('#pane-'))
+    ? document.querySelector('[data-bs-target="' + hash + '"]') : null;
+  var startGroup;
+  if (hashBtn) {
+    startGroup = hashBtn.getAttribute('data-mgroup') || 's';
+  } else {
+    try { startGroup = localStorage.getItem('settingsMenu') || 'p'; } catch (e) { startGroup = 'p'; }
+  }
+  showSettingsMenu(startGroup, hashBtn);
+  if (hashBtn) {
+    setTimeout(function() {
+      var el = document.getElementById(hash.slice(1));
+      if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});
+    }, 120);
   }
 })();
 

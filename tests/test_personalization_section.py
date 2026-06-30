@@ -125,3 +125,18 @@ def test_stand_mixer_attachment_toggle_present(client, monkeypatch):
     # Wired to the stand_mixer checkbox on load and change.
     assert "appliance_stand_mixer" in html
     assert "syncStandMixerAttachments" in html
+
+
+def test_settings_personalization_top_toggle_present(client, monkeypatch):
+    """The Settings page has a top toggle to switch between Settings and
+    Personalization, and the Personalization pills carry the group marker so the
+    toggle can show one menu at a time (FoodAssistant)."""
+    from app.config import settings
+    monkeypatch.setattr(settings, "deployment_mode", "server")
+    with patch.object(type(settings), "is_configured", lambda self: True):
+        html = client.get("/setup").text
+    assert 'onclick="showSettingsMenu(\'p\')"' in html
+    assert 'onclick="showSettingsMenu(\'s\')"' in html
+    assert 'function showSettingsMenu(' in html
+    # The personalization pills are tagged so the toggle can hide them.
+    assert 'data-mgroup="p"' in html
