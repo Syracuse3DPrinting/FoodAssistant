@@ -289,4 +289,6 @@ body {
 /* Progress bars */
 .progress { background-color: #141a26; }
 .progress-bar { background-color: var(--mid-blue); }
-</content>
+
+/* contrast: dark badge text (FoodAssistant-tjlm) */
+.badge.bg-secondary, .badge.bg-info, .badge.bg-danger { color: #000 !important; }

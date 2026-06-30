@@ -338,6 +338,37 @@
     }
     .timer-window-expired { color: #ff6b6b; }
     .timer-window-expired .timer-window-clock { color: #ff6b6b; }
+
+    /* Contrast hardening (FoodAssistant-tjlm). These load after any theme
+       overlay, so they correct low-contrast spots the bundled themes leave on
+       shared chrome. Higher specificity than the overlays' rules so they win
+       even over an overlay's !important on .nav-link.active. */
+    /* Active side-menu / pill: the pill background is always a saturated
+       primary, so several light/neon overlays that retint .nav-link.active to
+       their accent made accent-on-blue (e.g. iOS Light). Force white text. */
+    .nav-pills .nav-link.active,
+    .nav-pills .show > .nav-link,
+    .side-menu .nav-link.active { color: #fff !important; }
+    /* Accent badges (success/info/warning) are medium-to-bright in every bundled
+       theme, where white text fails. Dark text reads on all of them; danger and
+       primary stay white (their backgrounds are dark enough). */
+    .badge.bg-success, .badge.bg-info, .badge.bg-warning,
+    .badge.text-bg-success, .badge.text-bg-info, .badge.text-bg-warning {
+      color: #000 !important;
+    }
+    /* Bootstrap's info cyan is unreadable as outline text on light surfaces and
+       some dark themes retint it to a low-contrast hue. Pin the Save buttons'
+       outline-info to a readable teal for the active colour mode. */
+    {% if theme_mode == 'light' %}
+    .btn-outline-info { color: #0a6e80 !important; border-color: #0a6e80 !important; }
+    .btn-outline-info:hover { background-color: #0a6e80 !important; border-color: #0a6e80 !important; color: #fff !important; }
+    /* On a light theme the muted secondary grey is too pale for white badge
+       text; dark text reads. (Dark themes keep white: their secondary is dark.) */
+    .badge.bg-secondary, .badge.text-bg-secondary { color: #000 !important; }
+    {% else %}
+    .btn-outline-info { color: #6ed5e8 !important; border-color: #6ed5e8 !important; }
+    .btn-outline-info:hover { background-color: #6ed5e8 !important; border-color: #6ed5e8 !important; color: #06222a !important; }
+    {% endif %}
   </style>
 </head>
 <body>

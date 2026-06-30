@@ -129,6 +129,26 @@
        visibly switches to the other. visibility (not display) avoids any
        layout shift while hidden. */
     .menu-initializing .side-menu, .menu-initializing .tab-content { visibility: hidden; }
+
+    /* Contrast hardening (FoodAssistant-tjlm), mirrored from base.html so the
+       standalone Settings page is legible under every theme. Loaded after the
+       theme overlay and at higher specificity so it corrects the active side
+       menu pill, accent badges, and the Save (outline-info) buttons. */
+    .nav-pills .nav-link.active,
+    .nav-pills .show > .nav-link,
+    .side-menu .nav-link.active { color: #fff !important; }
+    .badge.bg-success, .badge.bg-info, .badge.bg-warning,
+    .badge.text-bg-success, .badge.text-bg-info, .badge.text-bg-warning {
+      color: #000 !important;
+    }
+    {% if theme_mode == 'light' %}
+    .btn-outline-info { color: #0a6e80 !important; border-color: #0a6e80 !important; }
+    .btn-outline-info:hover { background-color: #0a6e80 !important; border-color: #0a6e80 !important; color: #fff !important; }
+    .badge.bg-secondary, .badge.text-bg-secondary { color: #000 !important; }
+    {% else %}
+    .btn-outline-info { color: #6ed5e8 !important; border-color: #6ed5e8 !important; }
+    .btn-outline-info:hover { background-color: #6ed5e8 !important; border-color: #6ed5e8 !important; color: #06222a !important; }
+    {% endif %}
   </style>
 </head>
 <body>

@@ -340,3 +340,6 @@ body::after {
   background-color: var(--or-magenta);
   box-shadow: 0 0 8px rgba(255, 46, 151, 0.6);
 }
+
+/* contrast: dark badge text (FoodAssistant-tjlm) */
+.badge.bg-secondary, .badge.bg-info { color: #000 !important; }

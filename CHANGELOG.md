@@ -19,6 +19,7 @@ All notable changes to FoodAssistant are recorded here. The format is based on
 - **Settings and Personalization split into clearer menus.** The Interface pane is now two separate menu items, Theme and Navigation. Display and Stream Deck moved from Settings into the Personalization menu, and the live attached-hardware detection moved from the Stream Deck pane to the Hardware pane where hardware detection belongs.
 
 ### Fixed
+- **Theme contrast fixes.** Several bundled themes had unreadable spots: the selected side-menu item showed accent-on-blue (worst on iOS Light), the Save buttons were a washed-out cyan on light themes, and status badges used white text on bright backgrounds. These now use legible pairings on every theme. Also removed stray markup that had leaked into three theme stylesheets and was breaking their later rules.
 - **Custom themes now take effect.** Selecting or saving a custom theme correctly recolours the whole app, including the Settings page, instead of appearing to do nothing.
 - **Settings opens straight to the right menu.** The page no longer flashes the Settings menu and then jumps to Personalization on load.
 - **Dragging a tab back into a folder works.** The navigation editor now nests reliably: the middle of a row drops a tab into a folder (the top and bottom edges reorder), and dropping onto any item already inside a folder adds it to that folder, so a tab moved out of a group can be dragged back in.
