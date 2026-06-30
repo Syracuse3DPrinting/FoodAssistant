@@ -1374,6 +1374,16 @@
               </div>
               {% endfor %}
             </div>
+            <!-- Amazon Associates tag for the Shop page links (FoodAssistant-k2kv). -->
+            <div class="mb-3">
+              <label class="form-label" for="amazon_affiliate_tag"><i class="bi bi-bag me-1"></i>Amazon Associates tag
+                <span class="text-secondary small">(optional)</span></label>
+              <input type="text" class="form-control" id="amazon_affiliate_tag"
+                     placeholder="yourtag-20" value="{{ s.amazon_affiliate_tag }}" {% if features.satellite %}readonly{% endif %}>
+              <div class="form-text">Your own <a href="https://affiliate-program.amazon.com/" target="_blank">Amazon Associates</a>
+                tracking id. When set, the <a href="ui/shop" target="_blank">Shop</a> page's product links carry it so
+                qualifying purchases earn a commission. Leave blank to keep the links un-tagged.</div>
+            </div>
             <div class="row g-2">
               <div class="col-sm-4">
                 <label class="form-label">Perishable window <span class="text-secondary small">(days)</span></label>
@@ -3632,6 +3642,7 @@ function savePaneRecipes(btn) {
     staple_items:      optVal('staple_items'),
     cook_ai_context:   optVal('cook_ai_context'),
     kitchen_appliances: collectAppliances(),
+    amazon_affiliate_tag: document.getElementById('amazon_affiliate_tag') ? optVal('amazon_affiliate_tag') : undefined,
     perishable_days:   document.getElementById('perishable_days') ? num('perishable_days', 14) : undefined,
     expiring_soon_days: document.getElementById('expiring_soon_days') ? num('expiring_soon_days', 5) : undefined,
     suggest_per_tier:  document.getElementById('suggest_per_tier') ? num('suggest_per_tier', 8) : undefined,

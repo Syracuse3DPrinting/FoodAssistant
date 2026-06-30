@@ -182,7 +182,7 @@ _SAVEABLE = [
     "mealie_base_url", "mealie_api_key", "mealie_public_url",
     "device_hostname",
     "recipe_source", "themealdb_api_key", "spoonacular_api_key",
-    "staple_items", "cook_ai_context", "kitchen_appliances",
+    "staple_items", "cook_ai_context", "kitchen_appliances", "amazon_affiliate_tag",
     "perishable_days", "expiring_soon_days", "suggest_per_tier",
     "nav_order", "nav_hidden", "custom_nav_tabs", "nav_parents",
     "custom_storage_categories", "ui_theme",
@@ -220,7 +220,7 @@ SATELLITE_PULL_FIELDS = [
     "grocy_base_url", "grocy_api_key", "grocy_public_url",
     "mealie_base_url", "mealie_api_key", "mealie_public_url",
     "recipe_source", "themealdb_api_key", "spoonacular_api_key",
-    "staple_items", "cook_ai_context", "kitchen_appliances",
+    "staple_items", "cook_ai_context", "kitchen_appliances", "amazon_affiliate_tag",
     "perishable_days", "expiring_soon_days", "suggest_per_tier",
     "custom_storage_categories", "ui_theme",
     # Stream Deck weather widget config, so a satellite's deck matches the
@@ -600,6 +600,11 @@ class Settings(BaseSettings):
     # useful before the user edits anything; an explicit empty list (user
     # unchecked everything) is preserved distinctly from the unset default.
     kitchen_appliances: list = DEFAULT_KITCHEN_APPLIANCES
+    # Amazon Associates tag (the user's own Associate ID), used to monetize the
+    # Shop page's product links (FoodAssistant-k2kv). Empty means links are still
+    # built and useful, just not tagged. Shared to satellites so the whole fleet
+    # uses one tag (see SATELLITE_PULL_FIELDS).
+    amazon_affiliate_tag: str = ""
     perishable_days: int = 14
     expiring_soon_days: int = 5
     suggest_per_tier: int = 8
