@@ -168,6 +168,30 @@ def snooze(db: Session, item_id: int, hours: float = 24.0) -> dict | None:
     return _set_status(db, item_id, "snoozed", snooze_until=until)
 
 
+def archive_all(db: Session) -> int:
+    """Archive every currently active item at once. Returns how many were
+    archived. A food-expired item that is still expiring will reappear on the
+    next sweep (its dedupe key revives it), which is intended."""
+    now = _iso(_now())
+    rows = (
+        db.query(ActionItem)
+        .filter(ActionItem.status.in_(("open", "snoozed")))
+        .all()
+    )
+    n = 0
+    for r in rows:
+        # Skip snoozed-not-yet-due rows so "Archive all" only clears the visible
+        # inbox, matching list_active().
+        if r.status == "snoozed" and (r.snooze_until or "") > now:
+            continue
+        r.status = "archived"
+        r.updated_at = now
+        n += 1
+    if n:
+        db.commit()
+    return n
+
+
 def get(db: Session, item_id: int) -> dict | None:
     row = db.get(ActionItem, item_id)
     return _row_dict(row) if row is not None else None

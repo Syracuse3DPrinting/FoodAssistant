@@ -94,6 +94,14 @@ async def count_items(request: Request, db: Session = Depends(get_db)):
     return {"count": action_items.count_active(db)}
 
 
+@router.post("/archive-all")
+async def archive_all_items(request: Request, db: Session = Depends(get_db)):
+    """Archive every active action item at once (FoodAssistant-n5vb)."""
+    if _upstream():
+        return await _forward(request, "/archive-all")
+    return {"ok": True, "archived": action_items.archive_all(db)}
+
+
 @router.post("/{item_id}/archive")
 async def archive_item(item_id: int, request: Request, db: Session = Depends(get_db)):
     if _upstream():

@@ -128,6 +128,26 @@ def client(monkeypatch, tmp_path):
         os.chdir(cwd)
 
 
+def test_archive_all_clears_the_inbox(db):
+    ai.create(db, ai.KIND_GENERIC, "A")
+    ai.create(db, ai.KIND_GENERIC, "B")
+    ai.create(db, ai.KIND_FOOD_EXPIRED, "Milk", dedupe_key="k")
+    assert ai.count_active(db) == 3
+    n = ai.archive_all(db)
+    assert n == 3
+    assert ai.count_active(db) == 0
+
+
+def test_archive_all_endpoint(client):
+    db = SessionLocal()
+    ai.create(db, ai.KIND_GENERIC, "One")
+    ai.create(db, ai.KIND_GENERIC, "Two")
+    db.close()
+    r = client.post("/action-items/archive-all").json()
+    assert r["ok"] and r["archived"] == 2
+    assert client.get("/action-items").json()["count"] == 0
+
+
 def test_inbox_endpoints_list_and_act(client):
     db = SessionLocal()
     item = ai.create(db, ai.KIND_GENERIC, "Do a thing")

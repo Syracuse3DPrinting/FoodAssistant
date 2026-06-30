@@ -15,9 +15,14 @@
       <i class="bi bi-bell me-2"></i>Action Items
       <span class="badge text-bg-danger ms-1" id="action-items-count">0</span>
     </h4>
-    <button class="btn btn-outline-secondary btn-sm" onclick="loadActionItems()" title="Refresh">
-      <i class="bi bi-arrow-clockwise"></i>
-    </button>
+    <div class="d-flex gap-2">
+      <button class="btn btn-outline-secondary btn-sm" onclick="archiveAllActionItems()" title="Archive every action item">
+        <i class="bi bi-archive me-1"></i>Archive all
+      </button>
+      <button class="btn btn-outline-secondary btn-sm" onclick="loadActionItems()" title="Refresh">
+        <i class="bi bi-arrow-clockwise"></i>
+      </button>
+    </div>
   </div>
   <div id="action-items-list" class="d-flex flex-column gap-2"></div>
 </section>
@@ -265,6 +270,16 @@ async function loadActionItems() {
   if (!items.length) { section.classList.add('d-none'); return; }
   section.classList.remove('d-none');
   items.forEach(it => list.appendChild(actionItemCard(it)));
+}
+
+async function archiveAllActionItems() {
+  const n = document.getElementById('action-items-count').textContent;
+  if (n !== '0' && !confirm('Archive all ' + n + ' action items?')) return;
+  try {
+    await fetch('action-items/archive-all', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  } catch (e) { showToast('Could not archive', true); return; }
+  loadActionItems();
 }
 
 async function actionItemAct(id, action) {

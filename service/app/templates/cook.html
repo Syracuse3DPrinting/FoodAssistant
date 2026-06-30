@@ -811,6 +811,12 @@ function actions(s, tier) {
   const missing = (s.unmatched_ingredients || []).length;
   const btns = [];
   if (s.source === 'themealdb' || s.source === 'spoonacular') {
+    // A web recipe can be cooked straight away (set as the Current Recipe)
+    // without first saving it to Mealie (FoodAssistant-wqef).
+    btns.push(`<button class="btn btn-sm btn-outline-primary" onclick="cookExternal('${s.external_id}', '${s.source}', false, this)"
+      title="Make this the Current Recipe (no need to save it first)"><i class="bi bi-fire me-1"></i>Cook</button>`);
+    btns.push(`<button class="btn btn-sm btn-outline-secondary" onclick="cookExternal('${s.external_id}', '${s.source}', true, this)"
+      title="Add as another concurrent recipe (appetizer, dessert...)"><i class="bi bi-plus-lg me-1"></i>Add course</button>`);
     // Plain Save is always offered so saving never forces a shopping-list edit;
     // in the shopping tier we add Save + list alongside it (FoodAssistant-j278).
     btns.push(`<button class="btn btn-sm btn-outline-info" onclick="importExternal('${s.external_id}', '${s.source}', false, this)"
@@ -943,6 +949,36 @@ async function cookThis(slug, btn) {
   } catch (e) {
     if (btn) { btn.disabled = false; btn.innerHTML = orig; }
     alert('Could not set the current recipe: ' + e.message);
+  }
+}
+
+// Cook a web recipe that has not been saved to Mealie (FoodAssistant-wqef):
+// fetch its full detail, set it as the Current Recipe (or add it as a course),
+// then open the recipe page. No Mealie save required.
+async function cookExternal(externalId, source, asCourse, btn) {
+  const orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>'; }
+  try {
+    const d = await fetch('mealie/recipes/external-detail?external_id=' +
+      encodeURIComponent(externalId) + '&source=' + encodeURIComponent(source)).then(r => r.json());
+    if (!d || d.detail) throw new Error((d && d.detail) || 'could not load the recipe');
+    const payload = {
+      title: d.name || 'Recipe', source: source,
+      servings: parseInt(d.servings, 10) || 1,
+      ingredients: (d.ingredients || []).map(i => ({ name: i })),
+      steps: d.instructions || [],
+      notes: d.description || '',
+    };
+    const endpoint = asCourse ? 'current-recipe/courses' : 'current-recipe';
+    const r = await fetch(endpoint, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+    window.location.href = 'ui/current-recipe';
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+    alert('Could not cook this recipe: ' + e.message);
   }
 }
 
