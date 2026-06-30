@@ -40,3 +40,26 @@ def test_legacy_plaintext_still_verifies():
 
 def test_corrupt_hash_does_not_crash():
     assert verify_secret("x", "scrypt$bogus") is False
+
+
+def test_save_hashes_password_and_pin_on_disk(tmp_path, monkeypatch):
+    import json
+    from app.config import settings
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path), raising=False)
+    # Captured so the mutation save() applies to the global object is restored,
+    # keeping other tests' auth_password/kiosk_pin defaults intact.
+    monkeypatch.setattr(settings, "auth_password", "", raising=False)
+    monkeypatch.setattr(settings, "kiosk_pin", "", raising=False)
+    settings.save({"auth_password": "plaintext-pw", "kiosk_pin": "4242"})
+    on_disk = json.loads((tmp_path / "settings.json").read_text())
+    # The raw secret is never written; a scrypt hash is.
+    assert on_disk["auth_password"].startswith("scrypt$")
+    assert "plaintext-pw" not in on_disk["auth_password"]
+    assert on_disk["kiosk_pin"].startswith("scrypt$")
+    # The live object verifies against the supplied plaintext.
+    assert verify_secret("plaintext-pw", settings.auth_password) is True
+    assert verify_secret("4242", settings.kiosk_pin) is True
+    # A re-save with the already-hashed value does not double-hash.
+    h = settings.auth_password
+    settings.save({"auth_password": h})
+    assert settings.auth_password == h

@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 
 from ..config import settings
+from ..passwords import verify_secret, looks_hashed
 from ..database import get_db
 from ..ingress import ingress_redirect
 from ..models.db_models import ExpiryDefault
@@ -40,12 +41,18 @@ def login(request: Request, password: str = Form(None), totp_code: str = Form(No
             {"request": request, "error": "Invalid code: try again.", "step": "totp"},
             status_code=401)
 
-    # Step 1: password check
+    # Step 1: password check (hashed at rest, FoodAssistant-ufwz)
     if not (settings.auth_password and password and
-            secrets.compare_digest(password, settings.auth_password)):
+            verify_secret(password, settings.auth_password)):
         return templates.TemplateResponse(request, "login.html",
             {"request": request, "error": "Incorrect password.", "step": "password"},
             status_code=401)
+    # Upgrade a legacy plaintext password to a hash on the next good login.
+    if not looks_hashed(settings.auth_password):
+        try:
+            settings.save({"auth_password": password})
+        except Exception:
+            pass
 
     if settings.totp_secret:
         request.session["totp_pending"] = True
@@ -75,8 +82,13 @@ def pin_page(request: Request):
 def pin_verify(request: Request, pin: str = Form(None)):
     if not settings.pin_lock_active():
         return ingress_redirect(request, "/ui/")
-    if pin and secrets.compare_digest(pin.strip(), settings.kiosk_pin):
+    if pin and verify_secret(pin.strip(), settings.kiosk_pin):
         request.session["pin_ok"] = True
+        if not looks_hashed(settings.kiosk_pin):
+            try:
+                settings.save({"kiosk_pin": pin.strip()})
+            except Exception:
+                pass
         return ingress_redirect(request, "/ui/")
     return templates.TemplateResponse(request, "pin.html",
         {"request": request, "error": "Incorrect PIN."}, status_code=401)

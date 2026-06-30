@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.6.176"
+APP_VERSION = "0.6.177"
 
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
@@ -954,6 +954,13 @@ class Settings(BaseSettings):
         # Reject an unknown theme rather than persisting a broken value.
         if data.get("ui_theme") is not None and data["ui_theme"] not in THEMES:
             data["ui_theme"] = _DEFAULT_THEME
+        # Hash the login password and kiosk PIN at rest (FoodAssistant-ufwz) so a
+        # leaked settings.json or backup never exposes the secret. A value that
+        # is already hashed (a re-save) is left alone to avoid double hashing.
+        from .passwords import hash_secret, looks_hashed
+        for _sk in ("auth_password", "kiosk_pin"):
+            if data.get(_sk) and not looks_hashed(data[_sk]):
+                data[_sk] = hash_secret(data[_sk])
         existing.update({k: v for k, v in data.items() if k in _SAVEABLE and v is not None})
         sf.write_text(json.dumps(existing, indent=2))
         sf.chmod(0o600)  # settings.json holds API keys: owner-only
