@@ -856,11 +856,8 @@
           </button>
           {% endif %}
 
-          {# --- App: how the interface looks and who can reach it --------- #}
+          {# --- App: who can reach it -------------------------------------- #}
           {{ menu_header('App') }}
-          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-interface" type="button">
-            <i class="bi bi-layout-sidebar me-2"></i>Interface
-          </button>
           <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-security" type="button">
             <i class="bi bi-shield-lock me-2"></i>Security
             <i class="bi bi-{{ 'check-circle-fill text-success' if sec_ok else 'exclamation-circle-fill text-warning' }} ms-auto" title="{{ 'Configured' if sec_ok else 'Password required' }}"></i>
@@ -896,6 +893,24 @@
           </button>
           <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-network" type="button" onclick="loadNetworkStatus()">
             <i class="bi bi-wifi me-2"></i>Network
+          </button>
+          {% endif %}
+
+          {# --- Personalization: the commonly-changed, taste-level settings,
+                 separated from the set-and-forget Settings above. ---------- #}
+          {{ menu_header('Personalization') }}
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-interface" type="button">
+            <i class="bi bi-layout-sidebar me-2"></i>Interface
+          </button>
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-personalization-recipes" type="button">
+            <i class="bi bi-sliders me-2"></i>Recipe Preferences
+          </button>
+          {% if not features.satellite %}
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-personalization-storage" type="button">
+            <i class="bi bi-grid-3x3-gap me-2"></i>Storage Categories
+          </button>
+          <button class="nav-link d-flex align-items-center" data-bs-toggle="pill" data-bs-target="#pane-personalization-weather" type="button">
+            <i class="bi bi-cloud-sun me-2"></i>Stream Deck Weather
           </button>
           {% endif %}
 
@@ -1070,7 +1085,14 @@
               <div class="test-result mt-2" id="grocy-save-result"></div>
             </div>
           </div>
+        </div>
 
+        <!-- Personalization: Custom Storage Categories (moved from Inventory).
+             Server-only / Pi Hosted: a satellite pulls categories from the main
+             server, so the sidebar link and this pane are gated out for it. -->
+        {% if not features.satellite %}
+        <div class="tab-pane fade" id="pane-personalization-storage">
+          <p class="pane-intro">Extra storage buckets beyond the built-ins, mapped to your Grocy locations.</p>
           <div class="section-card">
             <div class="section-title"><i class="bi bi-grid-3x3-gap text-info"></i> Custom Storage Categories</div>
             <p class="text-secondary small">Add storage buckets beyond the four built-ins (Refrigerated, Frozen,
@@ -1115,6 +1137,7 @@
             </div>
           </div>
         </div>
+        {% endif %}
 
         <!-- AI Providers -->
         <div class="tab-pane fade" id="pane-ai">
@@ -1340,6 +1363,23 @@
             <div class="test-result" id="recipes-result"></div>
           </div>
 
+          {% if features.satellite %}
+          <div class="form-text"><i class="bi bi-hdd-network me-1"></i>Recipe settings are managed on the main server and synced here automatically. Edit them there, then Sync.</div>
+          {% else %}
+          <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneRecipes(this)">
+            <i class="bi bi-check-lg me-1"></i>Save Recipes
+          </button>
+          <div class="test-result mt-2" id="recipes-save-result"></div>
+          {% endif %}
+        </div>
+
+        <!-- Personalization: Recipe Preferences — suggestion tuning + the kitchen
+             appliances checklist (moved from the Settings Recipes pane,
+             FoodAssistant-pszk). Shown to every mode; on a satellite the inputs
+             are read-only because they are managed on the main server. -->
+        <div class="tab-pane fade" id="pane-personalization-recipes">
+          <p class="pane-intro">How "What can I cook?" ranks recipes against your stock, and what your kitchen can make.</p>
+
           <div class="section-card">
             <div class="section-title"><i class="bi bi-sliders text-primary"></i> Suggestion Tuning</div>
             <div class="mb-3">
@@ -1371,7 +1411,7 @@
               </div>
               {% endif %}
               {% for group, title in [('major', 'Major appliances'), ('minor', 'Smaller tools and cookware'), ('attachment', 'Stand mixer attachments')] %}
-              <div class="mb-2">
+              <div class="mb-2 appliance-group" data-group="{{ group }}">
                 <div class="text-secondary small text-uppercase mb-1">{{ title }}</div>
                 <div class="row row-cols-2 row-cols-sm-3 row-cols-md-4 g-1">
                   {% for a in appliance_groups[group] %}
@@ -1410,10 +1450,10 @@
           {% if features.satellite %}
           <div class="form-text"><i class="bi bi-hdd-network me-1"></i>Recipe settings are managed on the main server and synced here automatically. Edit them there, then Sync.</div>
           {% else %}
-          <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneRecipes(this)">
-            <i class="bi bi-check-lg me-1"></i>Save Recipes
+          <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneRecipePrefs(this)">
+            <i class="bi bi-check-lg me-1"></i>Save Recipe Preferences
           </button>
-          <div class="test-result mt-2" id="recipes-save-result"></div>
+          <div class="test-result mt-2" id="recipe-prefs-save-result"></div>
           {% endif %}
         </div>
 
@@ -2149,32 +2189,6 @@ docker compose up -d</code></pre>
         <div class="tab-pane fade" id="pane-devices">
           <p class="pane-intro">Pi Remote satellites that pull their config from this server. Each device checks in on every config sync, so this list updates itself. You can queue a resync or forget a device here.</p>
 
-          <!-- Stream Deck weather lives here (not only on the Pi-only Stream Deck
-               pane) so it can be set on ANY main server, including a non-Pi one,
-               since satellite decks pull it from here (FoodAssistant). -->
-          <div class="section-card mb-3">
-            <div class="section-title"><i class="bi bi-cloud-sun text-info"></i> Stream Deck Weather (for satellite decks)</div>
-            <div class="row g-3 mb-2">
-              <div class="col-md-6">
-                <label class="form-label">Weather Location</label>
-                <input type="text" class="form-control form-control-sm" id="streamdeck_weather_location"
-                       placeholder="Leave empty to auto-detect" value="{{ s.streamdeck_weather_location }}">
-              </div>
-              <div class="col-md-6">
-                <label class="form-label">Weather Units</label>
-                <select class="form-select form-select-sm" id="streamdeck_weather_units">
-                  <option value="f" {{ 'selected' if s.streamdeck_weather_units == 'f' else '' }}>Fahrenheit (°F)</option>
-                  <option value="c" {{ 'selected' if s.streamdeck_weather_units == 'c' else '' }}>Celsius (°C)</option>
-                </select>
-              </div>
-            </div>
-            <button type="button" class="btn btn-info btn-sm" onclick="saveStreamDeckWeather(this)">
-              <i class="bi bi-check-lg me-1"></i>Save weather
-            </button>
-            <span class="test-result sd-weather-result ms-1"></span>
-            <div class="form-text">A city, ZIP, or "lat,lon". Used by this device's deck (if connected) and pulled by every connected satellite deck.</div>
-          </div>
-
           <div class="section-card mb-3">
             <div class="section-title d-flex align-items-center">
               <i class="bi bi-hdd-stack text-info"></i> Known Devices
@@ -2197,6 +2211,36 @@ docker compose up -d</code></pre>
               </button>
             </div>
             <div class="test-result" id="scan-result"></div>
+          </div>
+        </div>
+
+        <!-- Personalization: Stream Deck Weather (moved from Satellite Devices,
+             FoodAssistant-pszk). Stays main-server only (non-satellite): any
+             main server, Pi or not, sets the location/units that satellite decks
+             pull. A satellite reads these read-only in its own Stream Deck pane. -->
+        <div class="tab-pane fade" id="pane-personalization-weather">
+          <p class="pane-intro">The location and units shown on Stream Deck weather keys, here and on every satellite deck.</p>
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-cloud-sun text-info"></i> Stream Deck Weather (for satellite decks)</div>
+            <div class="row g-3 mb-2">
+              <div class="col-md-6">
+                <label class="form-label">Weather Location</label>
+                <input type="text" class="form-control form-control-sm" id="streamdeck_weather_location"
+                       placeholder="Leave empty to auto-detect" value="{{ s.streamdeck_weather_location }}">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Weather Units</label>
+                <select class="form-select form-select-sm" id="streamdeck_weather_units">
+                  <option value="f" {{ 'selected' if s.streamdeck_weather_units == 'f' else '' }}>Fahrenheit (°F)</option>
+                  <option value="c" {{ 'selected' if s.streamdeck_weather_units == 'c' else '' }}>Celsius (°C)</option>
+                </select>
+              </div>
+            </div>
+            <button type="button" class="btn btn-info btn-sm" onclick="saveStreamDeckWeather(this)">
+              <i class="bi bi-check-lg me-1"></i>Save weather
+            </button>
+            <span class="test-result sd-weather-result ms-1"></span>
+            <div class="form-text">A city, ZIP, or "lat,lon". Used by this device's deck (if connected) and pulled by every connected satellite deck.</div>
           </div>
         </div>
         {% endif %}
@@ -2363,7 +2407,7 @@ docker compose up -d</code></pre>
                still reports the synced location and units. -->
           <div class="section-card mb-3">
             <div class="section-title"><i class="bi bi-cloud-sun text-info"></i> Stream Deck Weather</div>
-            <div class="form-text"><i class="bi bi-hdd-network me-1"></i>Weather settings are managed on the main server and sync to this device automatically. Change the location and units there (Settings, Satellite Devices).</div>
+            <div class="form-text"><i class="bi bi-hdd-network me-1"></i>Weather settings are managed on the main server and sync to this device automatically. Change the location and units there (Personalization, Stream Deck Weather).</div>
             <input type="hidden" id="streamdeck_weather_location" value="{{ s.streamdeck_weather_location }}">
             <input type="hidden" id="streamdeck_weather_units" value="{{ s.streamdeck_weather_units }}">
           </div>
@@ -3639,6 +3683,18 @@ function collectAppliances() {
 function applianceSelectAll(state) {
   document.querySelectorAll('#kitchen-appliances .appliance-chk')
     .forEach(c => { c.checked = state; });
+  syncStandMixerAttachments();
+}
+
+// Stand mixer attachments are only relevant when a stand mixer is owned
+// (FoodAssistant-rjdr). Hide that group unless the stand_mixer box is checked,
+// on load and whenever it changes. The Shop side already filters server-side;
+// this keeps the checklist UI in step.
+function syncStandMixerAttachments() {
+  const owns = document.getElementById('appliance_stand_mixer');
+  const group = document.querySelector('#kitchen-appliances .appliance-group[data-group="attachment"]');
+  if (!group) return;
+  group.style.display = (owns && owns.checked) ? '' : 'none';
 }
 
 function savePaneRecipes(btn) {
@@ -3650,13 +3706,21 @@ function savePaneRecipes(btn) {
     recipe_source:     optVal('recipe_source'),
     themealdb_api_key: document.getElementById('themealdb_api_key') ? secretVal('themealdb_api_key') : undefined,
     spoonacular_api_key: document.getElementById('spoonacular_api_key') ? secretVal('spoonacular_api_key') : undefined,
+  }, btn, 'recipes-save-result');
+}
+
+// Personalization: recipe suggestion tuning + the kitchen appliances checklist.
+// These moved out of the Settings Recipes pane (FoodAssistant-pszk); their inputs
+// live in pane-personalization-recipes now, so they are collected and saved here.
+function savePaneRecipePrefs(btn) {
+  return savePane({
     staple_items:      optVal('staple_items'),
     cook_ai_context:   optVal('cook_ai_context'),
     kitchen_appliances: collectAppliances(),
     perishable_days:   document.getElementById('perishable_days') ? num('perishable_days', 14) : undefined,
     expiring_soon_days: document.getElementById('expiring_soon_days') ? num('expiring_soon_days', 5) : undefined,
     suggest_per_tier:  document.getElementById('suggest_per_tier') ? num('suggest_per_tier', 8) : undefined,
-  }, btn, 'recipes-save-result');
+  }, btn, 'recipe-prefs-save-result');
 }
 
 function savePaneInterface(btn) {
@@ -6962,6 +7026,11 @@ document.addEventListener('DOMContentLoaded', checkApStatus);
 document.addEventListener('DOMContentLoaded', loadHardwareDetect);
 document.addEventListener('DOMContentLoaded', _updateGrocyOpenLink);
 document.addEventListener('DOMContentLoaded', _initSyncTimes);
+document.addEventListener('DOMContentLoaded', function () {
+  const owns = document.getElementById('appliance_stand_mixer');
+  if (owns) owns.addEventListener('change', syncStandMixerAttachments);
+  syncStandMixerAttachments();
+});
 </script>
 
 <script>
