@@ -144,6 +144,17 @@ async def current_recipe_page(request: Request):
     })
 
 
+@router.get("/recipes-in-progress", response_class=HTMLResponse)
+async def recipes_in_progress_page(request: Request):
+    """All recipes currently in the works (appetizer, main, dessert...) on one
+    page, each with scale/cook/clear controls (FoodAssistant-dbgx)."""
+    return templates.TemplateResponse(request, "recipes-in-progress.html", {
+        "request": request,
+        "active": "recipes_in_progress",
+        "mealie_configured": settings.mealie_configured(),
+    })
+
+
 @router.get("/mealplan", response_class=HTMLResponse)
 async def mealplan_page(request: Request):
     return templates.TemplateResponse(request, "mealplan.html", {

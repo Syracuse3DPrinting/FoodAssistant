@@ -819,6 +819,8 @@ function actions(s, tier) {
   } else {
     btns.push(`<button class="btn btn-sm btn-outline-primary" onclick="cookThis('${s.slug}', this)"
       title="Make this the Current Recipe"><i class="bi bi-fire me-1"></i>Cook</button>`);
+    btns.push(`<button class="btn btn-sm btn-outline-secondary" onclick="addCourse('${s.slug}', this)"
+      title="Add as another concurrent recipe (appetizer, dessert...)"><i class="bi bi-plus-lg me-1"></i>Add course</button>`);
     btns.push(`<button class="btn btn-sm btn-outline-primary" onclick="openPlan('${s.id}', '${(s.name || '').replace(/'/g, '&#39;')}')"
       title="Add to meal plan"><i class="bi bi-calendar-plus me-1"></i>Plan</button>`);
     btns.push(`<button class="btn btn-sm btn-outline-success" onclick="cookedRecipe('${s.slug}', ${s.matched_ingredients.length}, this)"
@@ -937,6 +939,25 @@ async function cookThis(slug, btn) {
   } catch (e) {
     if (btn) { btn.disabled = false; btn.innerHTML = orig; }
     alert('Could not set the current recipe: ' + e.message);
+  }
+}
+
+// Add a Mealie recipe as another concurrent course (FoodAssistant-dbgx), then
+// open the in-progress page so the user sees the whole meal.
+async function addCourse(slug, btn) {
+  const orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>'; }
+  try {
+    const r = await fetch('current-recipe/from-mealie', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({slug, as_course: true}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    window.location.href = 'ui/recipes-in-progress';
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+    alert('Could not add the course: ' + e.message);
   }
 }
 

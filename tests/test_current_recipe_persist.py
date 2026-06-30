@@ -59,6 +59,60 @@ def test_clear_removes_persisted_file(data_dir):
     assert cr.get_active() is None
 
 
+# -- multiple concurrent recipes (FoodAssistant-dbgx) ----------------------
+
+def _reset_collection():
+    cr._active = None
+    cr._courses = {}
+    cr._next_slot = 1
+    cr._loaded = False
+
+
+def test_multiple_courses_list_scale_clear(data_dir):
+    _reset_collection()
+    cr.set_active({"title": "Main", "ingredients": [{"name": "chicken"}], "servings": 4})
+    appetizer = cr.add_recipe({"title": "Appetizer", "ingredients": [], "servings": 2})
+    dessert = cr.add_recipe({"title": "Dessert", "ingredients": [], "servings": 6})
+    allr = cr.list_all()
+    assert [r["slot"] for r in allr] == [0, 1, 2]
+    assert [r["title"] for r in allr] == ["Main", "Appetizer", "Dessert"]
+    # The primary (slot 0) is still what the single-recipe API returns.
+    assert cr.get_active()["title"] == "Main"
+    # Scale one course independently.
+    cr.scale_recipe(appetizer["slot"], 2.0)
+    assert cr.get_recipe(appetizer["slot"])["scaled_servings"] == 4
+    # Clearing a course leaves the rest.
+    assert cr.clear_recipe(dessert["slot"]) is True
+    assert [r["title"] for r in cr.list_all()] == ["Main", "Appetizer"]
+
+
+def test_first_add_with_no_primary_becomes_primary(data_dir):
+    _reset_collection()
+    r = cr.add_recipe({"title": "Solo", "ingredients": []})
+    assert r["slot"] == cr.PRIMARY_SLOT
+    assert cr.get_active()["title"] == "Solo"
+
+
+def test_courses_persist_across_restart(data_dir):
+    _reset_collection()
+    cr.set_active({"title": "Main", "ingredients": []})
+    cr.add_recipe({"title": "Side", "ingredients": []})
+    cr._active = None
+    cr._courses = {}
+    cr._loaded = False
+    titles = [r["title"] for r in cr.list_all()]
+    assert titles == ["Main", "Side"]
+
+
+def test_legacy_single_recipe_file_still_loads(data_dir):
+    # A pre-multi-recipe file was a bare recipe dict; it must still load as primary.
+    import json
+    _reset_collection()
+    (data_dir / "current_recipe.json").write_text(json.dumps(
+        {"title": "Legacy", "source": "ai", "ingredients": [], "steps": [], "servings": 1}))
+    assert cr.get_active()["title"] == "Legacy"
+
+
 # -- Cooked + leftovers via the API ----------------------------------------
 
 @pytest.fixture

@@ -17,6 +17,7 @@ NAV_TABS = [
     {"key": "recipes",   "label": "Recipes",   "icon": "bi-journal-richtext","href": "ui/recipes",  "requires": "mealie"},
     {"key": "cook",      "label": "Cook",      "icon": "bi-fire",            "href": "ui/cook",     "requires": "mealie"},
     {"key": "current_recipe", "label": "Current Recipe", "icon": "bi-journal-check", "href": "ui/current-recipe", "requires": "mealie"},
+    {"key": "recipes_in_progress", "label": "In Progress", "icon": "bi-list-check", "href": "ui/recipes-in-progress", "requires": "mealie"},
     {"key": "mealplan",  "label": "Meal Plan", "icon": "bi-calendar-week",   "href": "ui/mealplan", "requires": "mealie"},
     {"key": "shopping",  "label": "Shopping",  "icon": "bi-cart",            "href": "ui/shopping"},
     {"key": "camera",    "label": "Camera",    "icon": "bi-camera-video",    "href": "ui/camera",   "requires": "cameras"},

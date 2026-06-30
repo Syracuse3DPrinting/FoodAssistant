@@ -77,6 +77,9 @@ def set_current_recipe(payload: RecipeIn):
 
 class FromMealieIn(BaseModel):
     slug: str
+    # When true, add this recipe as another concurrent course rather than
+    # replacing the primary recipe (FoodAssistant-dbgx).
+    as_course: bool = False
 
 
 @recipe_router.post("/from-mealie")
@@ -98,7 +101,9 @@ async def set_current_from_mealie(payload: FromMealieIn):
                             status_code=502)
     if not detail:
         return JSONResponse({"detail": "Recipe not found in Mealie."}, status_code=404)
-    recipe = current_recipe.set_active(current_recipe.from_mealie_detail(detail, slug))
+    normalized = current_recipe.from_mealie_detail(detail, slug)
+    recipe = (current_recipe.add_recipe(normalized) if payload.as_course
+              else current_recipe.set_active(normalized))
     return {"recipe": recipe}
 
 
@@ -155,14 +160,9 @@ async def _consume_active_recipe(recipe: dict) -> list[str]:
     return consumed
 
 
-@recipe_router.post("/cooked")
-async def cook_current_recipe(db: Session = Depends(get_db)):
-    """Mark the active recipe cooked: consume matched inventory, raise a
-    'save to leftovers?' action item, and clear the active recipe so a finished
-    meal does not linger as the current one (FoodAssistant-yurm)."""
-    recipe = current_recipe.get_active()
-    if recipe is None:
-        return JSONResponse({"detail": "No active recipe"}, status_code=404)
+async def _cook_recipe(recipe: dict, slot: int, db: Session) -> dict:
+    """Shared cook flow for a recipe (primary or a course): consume matched
+    inventory, raise a 'save to leftovers?' action item, and clear that slot."""
     title = recipe.get("title") or "the recipe"
     consumed = await _consume_active_recipe(recipe)
     servings = recipe.get("scaled_servings") or recipe.get("servings") or 1
@@ -174,8 +174,52 @@ async def cook_current_recipe(db: Session = Depends(get_db)):
         dedupe_key=None, level="success",
         payload={"title": title, "servings": servings, "days": _LEFTOVER_DEFAULT_DAYS},
     )
-    current_recipe.clear_active()
+    current_recipe.clear_recipe(slot)
     return {"ok": True, "consumed": consumed, "action_item": item}
+
+
+@recipe_router.post("/cooked")
+async def cook_current_recipe(db: Session = Depends(get_db)):
+    """Mark the primary recipe cooked (FoodAssistant-yurm)."""
+    recipe = current_recipe.get_active()
+    if recipe is None:
+        return JSONResponse({"detail": "No active recipe"}, status_code=404)
+    return await _cook_recipe(recipe, current_recipe.PRIMARY_SLOT, db)
+
+
+# --- Multiple concurrent recipes (FoodAssistant-dbgx) --------------------
+
+@recipe_router.get("/all")
+def list_all_recipes():
+    """Every recipe currently in progress (primary first), each with its slot."""
+    return {"recipes": current_recipe.list_all()}
+
+
+@recipe_router.post("/courses")
+def add_course(payload: RecipeIn):
+    """Add another concurrent recipe (a course) without clearing the others."""
+    return {"recipe": current_recipe.add_recipe(payload.model_dump())}
+
+
+@recipe_router.post("/{slot}/scale")
+def scale_one(slot: int, payload: ScaleIn):
+    recipe = current_recipe.scale_recipe(slot, payload.factor)
+    if recipe is None:
+        return JSONResponse({"detail": "No recipe in that slot"}, status_code=404)
+    return {"recipe": recipe}
+
+
+@recipe_router.delete("/{slot}")
+def clear_one(slot: int):
+    return {"ok": current_recipe.clear_recipe(slot)}
+
+
+@recipe_router.post("/{slot}/cooked")
+async def cook_one(slot: int, db: Session = Depends(get_db)):
+    recipe = current_recipe.get_recipe(slot)
+    if recipe is None:
+        return JSONResponse({"detail": "No recipe in that slot"}, status_code=404)
+    return await _cook_recipe(recipe, slot, db)
 
 
 class LeftoverIn(BaseModel):

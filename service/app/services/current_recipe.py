@@ -43,6 +43,15 @@ class ActiveRecipe:
 
 _lock = threading.Lock()
 _active: ActiveRecipe | None = None
+# Additional concurrent recipes ("courses": appetizer, dessert, ...) keyed by a
+# stable slot id, so a whole meal can be in progress at once (FoodAssistant-dbgx).
+# The primary recipe above (_active) is slot 0; these are slots >= 1. Keeping the
+# primary separate means every existing single-recipe call (and the Stream Deck
+# timer suggestions, which read the primary) keeps working unchanged.
+_courses: dict[int, ActiveRecipe] = {}
+_next_slot = 1
+# The slot id that represents the primary recipe in the multi-recipe API.
+PRIMARY_SLOT = 0
 # Whether we have tried to load the persisted recipe yet this process. A loaded
 # recipe stays active until the user clears or cooks it, surviving a restart
 # (FoodAssistant-yurm), so it is read back from disk once on first access.
@@ -73,32 +82,54 @@ def _from_stored(data: dict) -> ActiveRecipe:
 
 
 def _ensure_loaded_locked() -> None:
-    """Load the persisted recipe once, on first access. Caller holds the lock."""
-    global _active, _loaded
+    """Load the persisted recipes once, on first access. Caller holds the lock.
+
+    Accepts both the new collection format ({primary, courses, next}) and the
+    older single-recipe format (a bare recipe dict), so an upgrade keeps a
+    recipe that was active before the multi-recipe change."""
+    global _active, _courses, _next_slot, _loaded
     if _loaded:
         return
     _loaded = True
     try:
         path = _recipe_path()
-        if path.exists():
-            data = json.loads(path.read_text())
-            if data:
-                _active = _from_stored(data)
+        if not path.exists():
+            return
+        data = json.loads(path.read_text())
+        if not data:
+            return
+        if isinstance(data, dict) and ("primary" in data or "courses" in data):
+            primary = data.get("primary")
+            _active = _from_stored(primary) if primary else None
+            _courses = {
+                int(slot): _from_stored(rd)
+                for slot, rd in (data.get("courses") or {}).items()
+                if isinstance(rd, dict)
+            }
+            _next_slot = max([int(data.get("next", 1)), *( [s + 1 for s in _courses] or [1])])
+        else:
+            # Legacy: the file was a single recipe dict.
+            _active = _from_stored(data)
     except Exception:  # noqa: BLE001 - a bad/old file must not crash the app
-        _active = None
+        _active, _courses = None, {}
 
 
 def _persist_locked() -> None:
-    """Write the active recipe (or clear the file) to disk. Caller holds the
+    """Write the recipe collection (or clear the file) to disk. Caller holds the
     lock. Best-effort: a write failure leaves the in-memory state authoritative."""
     try:
         path = _recipe_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        if _active is None:
+        if _active is None and not _courses:
             if path.exists():
                 path.unlink()
-        else:
-            path.write_text(json.dumps(asdict(_active)))
+            return
+        blob = {
+            "primary": asdict(_active) if _active is not None else None,
+            "courses": {str(slot): asdict(r) for slot, r in _courses.items()},
+            "next": _next_slot,
+        }
+        path.write_text(json.dumps(blob))
     except Exception:  # noqa: BLE001 - persistence is best-effort
         pass
 
@@ -278,3 +309,95 @@ def scale_servings(factor: float) -> dict | None:
             _active.servings_scale = f
         _persist_locked()
         return _serialize(_active)
+
+
+# --- Multiple concurrent recipes (FoodAssistant-dbgx) --------------------
+
+def _slot_recipe_locked(slot: int) -> ActiveRecipe | None:
+    """The ActiveRecipe at ``slot`` (primary or a course), or None. Locked."""
+    if int(slot) == PRIMARY_SLOT:
+        return _active
+    return _courses.get(int(slot))
+
+
+def _serialize_with_slot(recipe: ActiveRecipe, slot: int) -> dict:
+    out = _serialize(recipe)
+    out["slot"] = int(slot)
+    return out
+
+
+def add_recipe(recipe_dict: dict) -> dict:
+    """Add another concurrent recipe (a course) without disturbing the others.
+
+    Returns the serialized recipe with its assigned slot. The first recipe added
+    when nothing is active becomes the primary (slot 0), so the single-recipe
+    surfaces (the Stream Deck timer suggestions) have something to show."""
+    global _active, _next_slot
+    normalized = _normalize(recipe_dict)
+    with _lock:
+        _ensure_loaded_locked()
+        if _active is None:
+            _active = normalized
+            _persist_locked()
+            return _serialize_with_slot(_active, PRIMARY_SLOT)
+        slot = _next_slot
+        _next_slot += 1
+        _courses[slot] = normalized
+        _persist_locked()
+        return _serialize_with_slot(normalized, slot)
+
+
+def list_all() -> list[dict]:
+    """Every recipe in progress, primary first, each tagged with its slot id."""
+    with _lock:
+        _ensure_loaded_locked()
+        out: list[dict] = []
+        if _active is not None:
+            out.append(_serialize_with_slot(_active, PRIMARY_SLOT))
+        for slot in sorted(_courses):
+            out.append(_serialize_with_slot(_courses[slot], slot))
+        return out
+
+
+def get_recipe(slot: int) -> dict | None:
+    """Serialized recipe at ``slot``, or None when that slot is empty."""
+    with _lock:
+        _ensure_loaded_locked()
+        r = _slot_recipe_locked(slot)
+        return _serialize_with_slot(r, slot) if r is not None else None
+
+
+def clear_recipe(slot: int) -> bool:
+    """Clear one recipe by slot. Returns True when something was removed."""
+    global _active
+    with _lock:
+        _ensure_loaded_locked()
+        slot = int(slot)
+        if slot == PRIMARY_SLOT:
+            if _active is None:
+                return False
+            _active = None
+            _persist_locked()
+            return True
+        if slot in _courses:
+            del _courses[slot]
+            _persist_locked()
+            return True
+        return False
+
+
+def scale_recipe(slot: int, factor: float) -> dict | None:
+    """Scale one recipe by slot. Returns the serialized recipe, or None."""
+    with _lock:
+        _ensure_loaded_locked()
+        r = _slot_recipe_locked(slot)
+        if r is None:
+            return None
+        try:
+            f = float(factor)
+        except (TypeError, ValueError):
+            f = r.servings_scale
+        if f > 0:
+            r.servings_scale = f
+        _persist_locked()
+        return _serialize_with_slot(r, slot)
