@@ -43,6 +43,35 @@
     var closeBtn = win.querySelector('.timer-window-close');
     var timers = [];
 
+    // Audible timer chime (FoodAssistant-soj1). Quiet mode silences it so a
+    // finished timer is signalled only by the highlighted row. We chime once per
+    // timer, the first render it is seen expired, tracked by id in `chimed`.
+    // Synthesised with the Web Audio API so there is no asset to ship; some
+    // browsers gate audio until the page has had a user gesture, which a kiosk
+    // gets from its normal taps.
+    var quiet = document.documentElement.getAttribute('data-quiet-mode') === 'true';
+    var chimed = {};
+    function chime() {
+      if (quiet) return;
+      try {
+        var Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        var ctx = new Ctx();
+        var osc = ctx.createOscillator();
+        var gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = 880;
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.3, ctx.currentTime + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.6);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.6);
+        osc.onended = function () { try { ctx.close(); } catch (e) { } };
+      } catch (e) { /* audio unavailable: stay visual only */ }
+    }
+
     if (closeBtn) {
       closeBtn.addEventListener('click', function () {
         try { localStorage.setItem(STORE_KEY, 'off'); } catch (e) { }
@@ -82,6 +111,11 @@
         var remaining = remainingOf(t);
         var expired = remaining <= 0;
 
+        if (expired) {
+          var key = String(t.id != null ? t.id : t.label);
+          if (!chimed[key]) { chimed[key] = true; chime(); }
+        }
+
         var row = document.createElement('div');
         row.className = 'timer-window-row' + (expired ? ' timer-window-expired' : '');
 
@@ -109,6 +143,11 @@
           timers = rows.filter(function (t) {
             return t && (t.running || t.expired);
           });
+          // Forget chimes for timers the server has dropped, so a fresh timer
+          // reusing an id chimes again when it finishes.
+          var present = {};
+          timers.forEach(function (t) { present[String(t.id != null ? t.id : t.label)] = 1; });
+          Object.keys(chimed).forEach(function (k) { if (!present[k]) delete chimed[k]; });
           render();
         })
         .catch(function () { /* empty or unreachable: leave last state */ });

@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.6.177"
+APP_VERSION = "0.6.178"
 
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
@@ -197,6 +197,7 @@ _SAVEABLE = [
     "streamdeck_cameras",
     "streamdeck_ha_base_url", "streamdeck_ha_token", "streamdeck_ha_slots",
     "ha_events_enabled", "ha_camera_popup_seconds", "convert_custom_rows",
+    "quiet_mode",
     "floating_nav_position", "floating_nav_orientation", "floating_nav_autohide_streamdeck",
     "deployment_mode", "remote_server_url", "remote_server_ip", "remote_server_host", "upstream_api_key", "kiosk_pin", "kiosk_readonly_when_locked",
     "satellite_sync_minutes", "satellite_last_sync", "device_id",
@@ -725,6 +726,11 @@ class Settings(BaseSettings):
     # ha_camera_popup_seconds is the default time a popped-up camera stays up.
     ha_events_enabled: bool = False
     ha_camera_popup_seconds: int = 20
+
+    # Quiet mode (FoodAssistant-soj1): silence the audible timer chime so alerts
+    # are visual only (the timer window still highlights a finished timer).
+    # Device-local on purpose, so each kiosk decides its own noise.
+    quiet_mode: bool = False
 
     # User-defined reference rows shown on the Conversions page, each a dict
     # {label, value} (for example {"label": "Stick of butter", "value": "113 g /

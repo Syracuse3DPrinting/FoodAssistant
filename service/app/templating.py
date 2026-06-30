@@ -44,6 +44,8 @@ def theme_context(request: Request) -> dict:
         "features": settings.features(),
         "deployment_mode": settings.deployment_mode,
         "barcode_global_capture": settings.barcode_global_capture,
+        # Quiet mode silences the audible timer chime (FoodAssistant-soj1).
+        "quiet_mode": settings.quiet_mode,
         # Global has-LLM flag (FoodAssistant-9vgx): true when a vision/LLM
         # provider is configured. Templates hide AI-only affordances when false.
         "ai_configured": settings.ai_configured(),

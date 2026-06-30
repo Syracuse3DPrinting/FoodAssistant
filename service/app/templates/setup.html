@@ -1535,6 +1535,13 @@
             </div>
           </div>
 
+          <div class="form-check form-switch mb-3">
+            <input class="form-check-input" type="checkbox" role="switch" id="quiet_mode"
+                   {{ 'checked' if s.quiet_mode else '' }}>
+            <label class="form-check-label" for="quiet_mode">Quiet mode (visual-only alerts)</label>
+            <div class="form-text">When on, a finished kitchen timer is shown only by highlighting it in the timer window, with no audible chime. This setting is per device, so each kiosk can be loud or silent.</div>
+          </div>
+
           <button type="button" class="btn btn-outline-info btn-sm" onclick="savePaneInterface(this)">
             <i class="bi bi-check-lg me-1"></i>Save Theme &amp; Navigation
           </button>
@@ -3661,6 +3668,7 @@ function savePaneInterface(btn) {
     custom_theme_bg:      optVal('custom_theme_bg'),
     custom_theme_surface: optVal('custom_theme_surface'),
     custom_theme_text:    optVal('custom_theme_text'),
+    quiet_mode:           chk('quiet_mode'),
     ...navPayload(),
   }, btn, 'interface-save-result');
 }
