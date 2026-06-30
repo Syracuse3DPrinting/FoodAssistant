@@ -95,6 +95,19 @@ def pin_verify(request: Request, pin: str = Form(None)):
 
 
 @router.get("/", response_class=HTMLResponse)
+async def ui_index(request: Request):
+    """Land on whatever page leads the nav menu, not a hardcoded one
+    (FoodAssistant). When the user moves another page (e.g. the Start Page) to
+    the top, /ui shows that instead of the inventory dashboard. Only redirects to
+    an internal ui/ page, and never to the inventory root, to avoid a loop."""
+    from ..navigation import first_visible_href
+    href = (first_visible_href() or "ui/").strip()
+    target = href.rstrip("/")
+    if target and target != "ui" and target.startswith("ui/"):
+        return ingress_redirect(request, "/" + target)
+    return await inventory_page(request)
+
+
 @router.get("/inventory", response_class=HTMLResponse)
 async def inventory_page(request: Request):
     categories = all_categories()

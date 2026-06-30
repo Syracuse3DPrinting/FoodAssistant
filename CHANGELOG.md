@@ -19,12 +19,14 @@ All notable changes to FoodAssistant are recorded here. The format is based on
 - **Reset navigation to defaults.** The navigation editor has a Reset to defaults button that restores the original tab order, folder grouping, and visibility in one click.
 
 ### Changed
+- **/ui shows the first page in your nav menu.** Visiting the app no longer always lands on the inventory dashboard; it opens whatever page leads your navigation menu. Combined with the Start Page defaulting to the top of the nav when enabled, you can make the Start Page your home screen.
 - **Weather settings moved onto the Weather page.** Weather no longer has its own settings menu section; set the location, units, and (advanced) weather server with the gear button on the Weather page. The Stream Deck weather key still uses the same values.
 - **Start Page editor mirrors the Stream Deck.** The Start Page now has the same custom-key builder as the Stream Deck (Home Assistant actions, timers, weather, cameras, media, macros). Custom keys are one shared library: build or edit a key on either side and it shows up on both, with the Stream Deck key placements preserved.
 - **Combined Start Page and Stream Deck menu.** Settings now has one "Start & Stream Deck" item with a toggle at the top (like Settings vs Personalization) to switch between the on-screen Start Page and the physical Stream Deck, which share the same custom-button library. The Start tab also appears in the main navigation automatically when the Start Page is enabled.
 - **Settings and Personalization split into clearer menus.** The Interface pane is now two separate menu items, Theme and Navigation. Display and Stream Deck moved from Settings into the Personalization menu, and the live attached-hardware detection moved from the Stream Deck pane to the Hardware pane where hardware detection belongs.
 
 ### Fixed
+- **Update check no longer shows a stale "up to date".** The version check now bypasses the GitHub raw CDN cache, so Check for updates sees a new release right after it is pushed instead of a few minutes later.
 - **Theme contrast fixes.** Several bundled themes had unreadable spots: the selected side-menu item showed accent-on-blue (worst on iOS Light), the Save buttons were a washed-out cyan on light themes, and status badges used white text on bright backgrounds. These now use legible pairings on every theme. Also removed stray markup that had leaked into three theme stylesheets and was breaking their later rules.
 - **Custom themes now take effect.** Selecting or saving a custom theme correctly recolours the whole app, including the Settings page, instead of appearing to do nothing.
 - **Settings opens straight to the right menu.** The page no longer flashes the Settings menu and then jumps to Personalization on load.

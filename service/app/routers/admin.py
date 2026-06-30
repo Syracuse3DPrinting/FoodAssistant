@@ -84,13 +84,21 @@ async def check_update():
     unauthenticated calls to succeed.
     """
     import re
+    import time
     import httpx
-    raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/service/app/config.py"
+    # raw.githubusercontent.com is served through a CDN that caches each file for
+    # a few minutes, so just after a push it can still return the previous
+    # APP_VERSION and the check wrongly reports "up to date". A unique query
+    # string busts that cache, and we also send no-cache headers, so a Check for
+    # updates right after a release sees the new version (FoodAssistant).
+    raw_url = (f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/service/app/config.py"
+               f"?cb={int(time.time())}")
+    _no_cache = {"Cache-Control": "no-cache", "Pragma": "no-cache"}
     try:
         async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
             # Primary: the version on main (every patch bump lands here).
             try:
-                rr = await client.get(raw_url)
+                rr = await client.get(raw_url, headers=_no_cache)
                 if rr.status_code == 200:
                     m = re.search(r'APP_VERSION\s*=\s*["\']([0-9][0-9.]*)["\']', rr.text)
                     if m:

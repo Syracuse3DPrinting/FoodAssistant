@@ -161,6 +161,17 @@ def _custom_key(raw_id: str, seen: set[str]) -> str:
     return key
 
 
+def _start_first(keys: list[str]) -> list[str]:
+    """Default the Start tab to the top of the nav when the Start Page is enabled
+    and the user has not set their own order (FoodAssistant). Once the user saves
+    a nav_order, that wins and this no-ops."""
+    if (getattr(settings, "start_page_enabled", False)
+            and not (settings.nav_order or "").strip()
+            and "start" in keys):
+        return ["start"] + [k for k in keys if k != "start"]
+    return keys
+
+
 def _ordered_visible() -> list[dict]:
     """Built-in + custom tabs the user should see, in saved order, minus hidden
     and unconfigured. Flat: nesting is applied later by build_nav_tree."""
@@ -171,10 +182,26 @@ def _ordered_visible() -> list[dict]:
     # Tabs missing from a saved order (added in an update, or freshly created)
     # go at the end in their registration order: built-ins first, then customs.
     tail = [k for k in builtins if k not in order] + [k for k in customs if k not in order]
-    keys = order + tail
+    keys = _start_first(order + tail)
     hidden = {k for k in settings.nav_hidden.split(",") if k}
     return [everything[k] for k in keys
             if k not in hidden and _requirement_met(everything[k])]
+
+
+def first_visible_href() -> str:
+    """Href of the first page in the nav menu (after ordering, nesting, and the
+    Start-first default). Used so visiting /ui shows whatever page leads the menu
+    rather than a hardcoded one (FoodAssistant)."""
+    tree = build_nav_tree()
+    for node in tree:
+        # A heading/folder has no page of its own; use its first child's href.
+        if node.get("href"):
+            return node["href"]
+        for child in node.get("children", []):
+            if child.get("href"):
+                return child["href"]
+    tabs = _ordered_visible()
+    return tabs[0]["href"] if tabs else "ui/"
 
 
 def visible_tabs() -> list[dict]:

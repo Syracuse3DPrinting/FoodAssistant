@@ -327,3 +327,33 @@ def test_navbar_renders_heading_dropdown_label_only(monkeypatch, tmp_path):
         assert 'href="custom_tools"' not in html
     finally:
         os.chdir(cwd)
+
+
+def test_first_visible_href_default_is_inventory(monkeypatch):
+    monkeypatch.setattr(settings, "nav_order", "", raising=False)
+    monkeypatch.setattr(settings, "nav_hidden", "", raising=False)
+    monkeypatch.setattr(settings, "nav_parents", {}, raising=False)
+    monkeypatch.setattr(settings, "custom_nav_tabs", [], raising=False)
+    monkeypatch.setattr(settings, "start_page_enabled", False, raising=False)
+    assert navigation.first_visible_href() == "ui/"
+
+
+def test_start_page_defaults_to_top_when_enabled(monkeypatch):
+    monkeypatch.setattr(settings, "nav_order", "", raising=False)
+    monkeypatch.setattr(settings, "nav_hidden", "", raising=False)
+    monkeypatch.setattr(settings, "nav_parents", {}, raising=False)
+    monkeypatch.setattr(settings, "custom_nav_tabs", [], raising=False)
+    monkeypatch.setattr(settings, "start_page_enabled", True, raising=False)
+    # Start is first in the visible order and leads the nav, so /ui lands there.
+    assert navigation.visible_tabs()[0]["key"] == "start"
+    assert navigation.first_visible_href() == "ui/start"
+
+
+def test_saved_nav_order_overrides_start_first(monkeypatch):
+    # Once the user sets their own order, the Start-first default no-ops.
+    monkeypatch.setattr(settings, "nav_order", "inventory,start", raising=False)
+    monkeypatch.setattr(settings, "nav_hidden", "", raising=False)
+    monkeypatch.setattr(settings, "nav_parents", {}, raising=False)
+    monkeypatch.setattr(settings, "custom_nav_tabs", [], raising=False)
+    monkeypatch.setattr(settings, "start_page_enabled", True, raising=False)
+    assert navigation.visible_tabs()[0]["key"] == "inventory"
