@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.7.26"
+APP_VERSION = "0.7.27"
 
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
@@ -273,6 +273,7 @@ _SAVEABLE = [
     "custom_theme_base", "custom_theme_primary", "custom_theme_accent",
     "custom_theme_bg", "custom_theme_surface", "custom_theme_text",
     "custom_themes",
+    "background_image_url", "background_opacity",
     "ui_scale", "display_rotation",
     "display_type",
     "has_streamdeck", "streamdeck_key_count", "display_touch",
@@ -750,6 +751,15 @@ class Settings(BaseSettings):
     # theme. resolve_custom_colors() picks the right colour set for the active
     # ui_theme so templates do not need to branch.
     custom_themes: list = []
+
+    # Background image (FoodAssistant-e2t6). An optional image painted behind the
+    # whole UI on a fixed layer. background_image_url is either an external URL
+    # or the internal serve route "setup/background/image?v=<hash>" set when a
+    # file is uploaded (the file lives at data_dir/background.<ext>).
+    # background_opacity (0-100) is the image layer's opacity; lower keeps text
+    # readable. Empty url = no background image (the theme colour shows as before).
+    background_image_url: str = ""
+    background_opacity: int = 40
 
     # UI scale. One of the keys in UI_SCALES; applied as a document zoom on the
     # kiosk display only, so the interface fits a small or large hardware panel

@@ -49,6 +49,18 @@
     .nav-link.active, .float-nav-link.active { color: {{ custom_theme_primary }}; }
   </style>
   {% endif %}
+  {% if background_image_url %}
+  {# Background image (FoodAssistant-e2t6), mirrored onto the standalone Settings
+     page so the chosen background is visible while configuring it. #}
+  <style>
+    body::before {
+      content: ""; position: fixed; inset: 0; z-index: -1;
+      background: url("{{ background_image_url }}") center / cover no-repeat;
+      opacity: {{ background_opacity }};
+      pointer-events: none;
+    }
+  </style>
+  {% endif %}
   <link href="static/vendor/bootstrap-icons.min.css" rel="stylesheet">
   <link rel="icon" type="image/svg+xml" href="static/icons/favicon.svg">
   <link rel="icon" type="image/png" sizes="32x32" href="static/icons/favicon-32.png">
@@ -1602,6 +1614,50 @@
               </div>
               <div class="test-result mt-2" id="custom-theme-result"></div>
             </div>
+          </div>
+
+          {# Background image (FoodAssistant-e2t6): an optional photo behind the
+             whole UI, with an opacity slider so text stays readable. Upload a
+             file or paste a URL; the slider applies live and is saved with the
+             other theme settings. #}
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-image text-success"></i> Background image</div>
+            <p class="text-secondary small">Paint a photo behind the whole app. Upload an image or paste a URL, then use
+              the opacity slider so it stays subtle enough to read over. Applies on every page and device.</p>
+            <div class="mb-3">
+              <label class="form-label small mb-1" for="background_file">Upload an image</label>
+              <div class="input-group" style="max-width:480px">
+                <input type="file" class="form-control form-control-sm" id="background_file"
+                       accept="image/png,image/jpeg,image/webp,image/gif">
+                <button type="button" class="btn btn-outline-success btn-sm" onclick="uploadBackground(this)">
+                  <i class="bi bi-upload me-1"></i>Upload
+                </button>
+              </div>
+              <div class="form-text">JPG, PNG, WebP, or GIF, up to 8 MB.</div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label small mb-1" for="background_image_url">…or an image URL</label>
+              <input type="text" class="form-control form-control-sm" id="background_image_url"
+                     style="max-width:480px" placeholder="https://example.com/kitchen.jpg"
+                     value="{{ '' if s.background_image_url.startswith('setup/background/image') else s.background_image_url }}">
+            </div>
+            <div class="mb-3" style="max-width:480px">
+              <label class="form-label small mb-1" for="background_opacity">Opacity:
+                <span id="background_opacity_val">{{ s.background_opacity }}</span>%</label>
+              <input type="range" class="form-range" id="background_opacity" min="0" max="100" step="5"
+                     value="{{ s.background_opacity }}"
+                     oninput="document.getElementById('background_opacity_val').textContent = this.value">
+              <div class="form-text">Lower opacity keeps the interface readable over a busy image.</div>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="saveBackground(this)">
+                <i class="bi bi-check-lg me-1"></i>Save background
+              </button>
+              <button type="button" class="btn btn-outline-danger btn-sm" onclick="clearBackground(this)">
+                <i class="bi bi-trash me-1"></i>Remove background
+              </button>
+            </div>
+            <div class="test-result mt-2" id="background-result"></div>
           </div>
         </div>
 
@@ -3897,6 +3953,61 @@ async function deleteCustomTheme(btn) {
     });
     const d = await r.json();
     if (!d.ok) throw new Error(d.error || 'Delete failed');
+    location.reload();
+  } catch (e) {
+    btn.disabled = false; btn.innerHTML = orig;
+    if (out) out.innerHTML = `<span class="text-danger"><i class="bi bi-x-circle-fill me-1"></i>${e.message}</span>`;
+  }
+}
+
+// Background image (FoodAssistant-e2t6). Upload posts the file to the dedicated
+// endpoint (which stores it and sets background_image_url to the serve route);
+// Save persists the URL/opacity through /save; Remove clears both. Each reloads
+// so the new background applies on this page too.
+async function uploadBackground(btn) {
+  const out = document.getElementById('background-result');
+  const f = document.getElementById('background_file');
+  if (!f || !f.files || !f.files.length) {
+    if (out) out.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle-fill me-1"></i>Choose an image first.</span>';
+    return;
+  }
+  const fd = new FormData();
+  fd.append('file', f.files[0]);
+  const orig = btn.innerHTML; btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Uploading…';
+  try {
+    // Save the opacity first so an upload keeps the slider value the user set.
+    await fetch('setup/save', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({background_opacity: num('background_opacity', 40)}),
+    });
+    const r = await fetch('setup/background', {method: 'POST', body: fd});
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'Upload failed');
+    location.reload();
+  } catch (e) {
+    btn.disabled = false; btn.innerHTML = orig;
+    if (out) out.innerHTML = `<span class="text-danger"><i class="bi bi-x-circle-fill me-1"></i>${e.message}</span>`;
+  }
+}
+
+function saveBackground(btn) {
+  return savePane({
+    background_image_url: optVal('background_image_url'),
+    background_opacity:   num('background_opacity', 40),
+  }, btn, 'background-result').then(() => { setTimeout(() => location.reload(), 400); });
+}
+
+async function clearBackground(btn) {
+  const out = document.getElementById('background-result');
+  const orig = btn.innerHTML; btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Removing…';
+  try {
+    const r = await fetch('setup/background/clear', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}',
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'Failed');
     location.reload();
   } catch (e) {
     btn.disabled = false; btn.innerHTML = orig;

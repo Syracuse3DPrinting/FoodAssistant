@@ -8,8 +8,8 @@ import struct
 import threading
 from pathlib import Path
 import httpx
-from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi import APIRouter, Request, UploadFile, File
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, FileResponse
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
@@ -220,6 +220,11 @@ class SetupPayload(BaseModel):
     custom_theme_bg: str = "#0d1117"
     custom_theme_surface: str = "#161b22"
     custom_theme_text: str = "#e6edf3"
+    # Background image (FoodAssistant-e2t6). The URL round-trips through /save
+    # for the external-URL case; uploads use the dedicated /setup/background
+    # endpoint. Opacity is the image layer's 0-100 visibility.
+    background_image_url: str = ""
+    background_opacity: int = 40
     ui_scale: str = _DEFAULT_UI_SCALE
     display_rotation: int = _DEFAULT_DISPLAY_ROTATION
     display_type: str = _DEFAULT_DISPLAY_TYPE
@@ -674,6 +679,87 @@ async def delete_custom_theme():
     return {"ok": True}
 
 
+# -- Background image (FoodAssistant-e2t6) ----------------------------------
+
+# Bitmap formats a browser renders as a CSS background, mapped to the on-disk
+# extension we save them under. SVG is intentionally excluded: a background SVG
+# can carry script, and it would be served same-origin.
+_BG_TYPES = {
+    "image/jpeg": ".jpg", "image/png": ".png",
+    "image/webp": ".webp", "image/gif": ".gif",
+}
+_BG_MAX_BYTES = 8 * 1024 * 1024  # 8 MB: plenty for a full-screen photo.
+
+
+def _bg_path() -> Path | None:
+    """The stored background image file, or None if none is uploaded."""
+    d = Path(settings.data_dir)
+    for ext in (".jpg", ".png", ".webp", ".gif"):
+        p = d / f"background{ext}"
+        if p.exists():
+            return p
+    return None
+
+
+@router.post("/background")
+async def upload_background(file: UploadFile = File(...)):
+    """Store an uploaded background image and point the setting at it.
+
+    Saves to data_dir/background.<ext> (replacing any previous upload) and sets
+    background_image_url to the internal serve route with a content hash for
+    cache-busting, so a re-upload of a different image refreshes immediately.
+    """
+    ctype = (file.content_type or "").split(";", 1)[0].strip().lower()
+    ext = _BG_TYPES.get(ctype)
+    if not ext:
+        return {"ok": False, "error": "Use a JPG, PNG, WebP, or GIF image."}
+    data = await file.read()
+    if not data:
+        return {"ok": False, "error": "The uploaded file was empty."}
+    if len(data) > _BG_MAX_BYTES:
+        return {"ok": False, "error": "Image is larger than 8 MB."}
+    import hashlib
+    d = Path(settings.data_dir)
+    d.mkdir(parents=True, exist_ok=True)
+    # Remove any previous upload (possibly a different extension) so only one
+    # background file ever exists on disk.
+    for old in (".jpg", ".png", ".webp", ".gif"):
+        op = d / f"background{old}"
+        if op.exists():
+            try:
+                op.unlink()
+            except OSError:
+                pass
+    (d / f"background{ext}").write_bytes(data)
+    token = hashlib.sha256(data).hexdigest()[:12]
+    settings.save({"background_image_url": f"setup/background/image?v={token}"})
+    return {"ok": True, "url": settings.background_image_url}
+
+
+@router.get("/background/image")
+async def serve_background():
+    """Serve the uploaded background image (FileResponse), or 404 if none."""
+    p = _bg_path()
+    if not p:
+        return JSONResponse({"ok": False, "error": "no background"}, status_code=404)
+    media = {"jpg": "image/jpeg", "png": "image/png", "webp": "image/webp",
+             "gif": "image/gif"}.get(p.suffix.lstrip("."), "application/octet-stream")
+    return FileResponse(str(p), media_type=media)
+
+
+@router.post("/background/clear")
+async def clear_background():
+    """Remove the background image (uploaded file and/or URL)."""
+    p = _bg_path()
+    if p:
+        try:
+            p.unlink()
+        except OSError:
+            pass
+    settings.save({"background_image_url": ""})
+    return {"ok": True}
+
+
 class ScalePayload(BaseModel):
     ui_scale: str = _DEFAULT_UI_SCALE
     display_rotation: int = _DEFAULT_DISPLAY_ROTATION
@@ -714,6 +800,21 @@ async def save_setup(payload: SetupPayload):
         data["extra_api_keys"], data["extra_api_key_names"] = merged_sat
     if data.get("display_rotation") not in DISPLAY_ROTATIONS:
         data["display_rotation"] = _DEFAULT_DISPLAY_ROTATION
+    # Background image (FoodAssistant-e2t6): clamp opacity to 0-100 and only
+    # accept an http(s) or the internal serve route as the image URL, so a saved
+    # value can never inject a javascript:/data: URL into the CSS background.
+    if "background_opacity" in data:
+        try:
+            data["background_opacity"] = max(0, min(100, int(data["background_opacity"])))
+        except (TypeError, ValueError):
+            data.pop("background_opacity", None)
+    if "background_image_url" in data:
+        u = (data["background_image_url"] or "").strip()
+        if u and not (u.startswith("http://") or u.startswith("https://")
+                      or u.startswith("setup/background/image")):
+            data.pop("background_image_url", None)
+        else:
+            data["background_image_url"] = u
     # Drop an unknown display type rather than persisting a broken value; an
     # absent value leaves the stored choice untouched.
     if "display_type" in data and data["display_type"] not in DISPLAY_TYPES:

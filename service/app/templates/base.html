@@ -66,6 +66,20 @@
     .nav-link.active, .float-nav-link.active { color: {{ custom_theme_primary }}; }
   </style>
   {% endif %}
+  {% if background_image_url %}
+  {# Background image (FoodAssistant-e2t6): a fixed full-viewport layer behind
+     everything via body::before, at an adjustable opacity. The body keeps its
+     theme background colour as the base the image sits on, so a partly-opaque
+     image blends with the theme and text on cards stays readable. #}
+  <style>
+    body::before {
+      content: ""; position: fixed; inset: 0; z-index: -1;
+      background: url("{{ background_image_url }}") center / cover no-repeat;
+      opacity: {{ background_opacity }};
+      pointer-events: none;
+    }
+  </style>
+  {% endif %}
   <link href="static/vendor/bootstrap-icons.min.css" rel="stylesheet">
   <script>
     // Kiosk mode — load touch-target CSS before first paint to avoid reflow flash

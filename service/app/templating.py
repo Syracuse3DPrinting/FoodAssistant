@@ -51,6 +51,10 @@ def theme_context(request: Request) -> dict:
         "custom_theme_bg": cc["bg"],
         "custom_theme_surface": cc["surface"],
         "custom_theme_text": cc["text"],
+        # Background image (FoodAssistant-e2t6): an optional fixed image layer
+        # behind the whole UI, with a 0-1 opacity for readability.
+        "background_image_url": settings.background_image_url,
+        "background_opacity": max(0, min(100, settings.background_opacity)) / 100.0,
         "ui_scale": settings.ui_scale,
         "ui_scale_factor": ui_scale_factor(settings.ui_scale),
         "display_rotation": settings.display_rotation,

@@ -11,6 +11,7 @@ All notable changes to FoodAssistant are recorded here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Background image.** Set a photo behind the whole UI from Theme settings: upload an image or paste a URL, with an opacity slider so the interface stays readable. Applies on every page and device.
 - **Named custom themes.** The custom theme builder now takes a name and saves your palette as its own entry in the Theme dropdown, so you can keep several and switch between them. A saved theme applies everywhere, including the Settings page itself, and can be deleted from the builder.
 - **Reset navigation to defaults.** The navigation editor has a Reset to defaults button that restores the original tab order, folder grouping, and visibility in one click.
 
