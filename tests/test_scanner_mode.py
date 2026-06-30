@@ -129,6 +129,41 @@ def test_plausible_long_barcode_still_accepted(client, monkeypatch):
     assert r.json().get("status") != "rejected"
 
 
+def test_gtin_check_digit_validation():
+    from app.routers.pending import gtin_check_digit_ok
+    # Real UPC-A (Dr Pepper Cherry Zero Sugar) validates.
+    assert gtin_check_digit_ok("078000035483") is True
+    # A valid EAN-13 validates.
+    assert gtin_check_digit_ok("4006381333931") is True
+    # A single corrupted digit fails the check.
+    assert gtin_check_digit_ok("078000035484") is False
+    # Non-GTIN lengths and non-digit codes are NOT rejected (cannot validate).
+    assert gtin_check_digit_ok("035483") is True        # 6 digits
+    assert gtin_check_digit_ok("0780003583") is True     # 10 digits
+    assert gtin_check_digit_ok("ABC123") is True
+
+
+def test_corrupt_full_length_barcode_is_rejected(client):
+    scanner_mode.set_mode("inventory")
+    r = client.post("/pending/scan", json={"barcode": "078000035484"})  # bad check digit
+    assert r.status_code == 200
+    assert r.json()["status"] == "rejected"
+
+
+def test_valid_upc_is_accepted(client, monkeypatch):
+    scanner_mode.set_mode("inventory")
+    from app.routers import pending as pending_router
+
+    async def _lookup(barcode, db):
+        from app.models.food import FoodItem
+        return FoodItem(name="Dr Pepper")
+
+    monkeypatch.setattr(pending_router, "lookup_barcode", _lookup)
+    r = client.post("/pending/scan", json={"barcode": "078000035483"})
+    assert r.status_code == 200
+    assert r.json().get("status") != "rejected"
+
+
 def test_scanner_mode_endpoints(client):
     assert client.get("/pending/scanner-mode").json()["mode"] == "inventory"
     cycled = client.post("/pending/scanner-mode/cycle").json()

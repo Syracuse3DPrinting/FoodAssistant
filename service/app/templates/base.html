@@ -630,7 +630,13 @@
     // page. Off when the "Scan from any page" setting is disabled. Only a rapid
     // burst counts, and never while a field is focused, so typing is untouched.
     (function () {
-      var buf = '', last = 0, GAP_MS = 50;
+      // Inter-keystroke gap that starts a fresh scan. A USB HID scanner types a
+      // burst, but on a slower box (a Pi Remote) keystrokes can jitter, and a
+      // tight gap split a single scan so only the tail survived ("035483" is the
+      // last 6 digits of "078000035483"), FoodAssistant-pmry. A generous window
+      // tolerates that jitter while still being faster than human typing, and
+      // Enter remains the real terminator, so genuine scans are not merged.
+      var buf = '', last = 0, GAP_MS = 300;
       function submit(code) {
         fetch('pending/scan', {
           method: 'POST',

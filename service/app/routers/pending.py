@@ -91,6 +91,23 @@ async def _autocheck_shopping(item_name: str) -> None:
 _MAX_BARCODE_LEN = 24
 
 
+def gtin_check_digit_ok(code: str) -> bool:
+    """True when an 8/12/13/14-digit numeric GTIN has a valid check digit.
+
+    A misread or partial scan of a UPC-A/EAN-13 almost always fails the GS1
+    check digit, so we can reject a corrupt full-length code instead of queueing
+    nonsense (FoodAssistant-pmry). Non-GTIN lengths and any code with non-digits
+    are NOT validated here (we cannot, so we let them through). Pure and
+    unit-testable: it only does arithmetic."""
+    if not code.isdigit() or len(code) not in (8, 12, 13, 14):
+        return True
+    digits = [int(c) for c in code]
+    body, check = digits[:-1], digits[-1]
+    # GS1: from the rightmost body digit leftward, weights alternate 3, 1, 3, 1...
+    total = sum(d * (3 if i % 2 == 0 else 1) for i, d in enumerate(reversed(body)))
+    return (10 - (total % 10)) % 10 == check
+
+
 class ScanRequest(BaseModel):
     barcode: str
     quantity: float = 1.0
@@ -156,6 +173,17 @@ async def scan_barcode(body: ScanRequest, request: Request, db: Session = Depend
         return JSONResponse(
             {"status": "rejected", "reason": "barcode too long",
              "barcode": barcode[:_MAX_BARCODE_LEN] + "…", "length": len(barcode)},
+            status_code=200,
+        )
+    # Reject a full-length GTIN whose check digit does not validate: that is a
+    # misread or partial scan (a dropped/garbled digit), not a real product, so
+    # queueing it would just create a bogus pending item to clean up. Only
+    # applies to 8/12/13/14-digit numeric codes; everything else passes through
+    # (FoodAssistant-pmry).
+    if not gtin_check_digit_ok(barcode):
+        return JSONResponse(
+            {"status": "rejected", "reason": "barcode check digit failed (likely a misread)",
+             "barcode": barcode},
             status_code=200,
         )
 
