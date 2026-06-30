@@ -361,6 +361,34 @@ async def camera_diag():
     return out
 
 
+@router.get("/camera/preview")
+async def camera_preview(entity: str = "", snapshot_url: str = ""):
+    """Proxy a still frame for a not-yet-added camera, so the Cameras setup page
+    can preview a discovered camera before adding it (FoodAssistant-kval).
+
+    An HA ``entity`` is fetched server-side with the bearer token; a direct
+    ``snapshot_url`` (an IP camera) is redirected to so the browser fetches it."""
+    import httpx
+    from fastapi.responses import Response, RedirectResponse
+    from ..services.cameras import ha_feed
+    entity = (entity or "").strip()
+    snapshot_url = (snapshot_url or "").strip()
+    if entity:
+        url, headers = ha_feed({"ha_entity": entity}, "snapshot")
+        if url:
+            try:
+                async with httpx.AsyncClient(timeout=8.0) as c:
+                    r = await c.get(url, headers=headers)
+            except Exception as e:
+                return JSONResponse({"detail": f"Camera unreachable: {e}"}, status_code=502)
+            if r.status_code != 200:
+                return JSONResponse({"detail": f"Camera returned HTTP {r.status_code}."}, status_code=502)
+            return Response(content=r.content, media_type=r.headers.get("content-type", "image/jpeg"))
+    if snapshot_url:
+        return RedirectResponse(snapshot_url)
+    return JSONResponse({"detail": "Nothing to preview."}, status_code=404)
+
+
 @router.get("/camera/{idx}/snapshot")
 async def camera_snapshot(idx: int):
     """Proxy a still frame for camera ``idx``.

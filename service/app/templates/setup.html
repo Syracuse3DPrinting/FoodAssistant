@@ -5286,6 +5286,44 @@ async function _sdCameraFromHa(btn) {
   finally { btn.disabled = false; btn.innerHTML = orig; }
 }
 
+// Preview a discovered camera in a modal before adding it (FoodAssistant-kval).
+// HA cameras are fetched through the server proxy (bearer token); an IP camera's
+// snapshot URL is loaded directly.
+function _camPreview(cam) {
+  let modal = document.getElementById('cam-preview-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'cam-preview-modal';
+    modal.className = 'modal fade';
+    modal.tabIndex = -1;
+    modal.innerHTML =
+      '<div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content">' +
+        '<div class="modal-header"><h5 class="modal-title" id="cam-preview-title">Camera</h5>' +
+          '<button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>' +
+        '<div class="modal-body text-center">' +
+          '<img id="cam-preview-img" class="img-fluid rounded" alt="Camera preview" style="max-height:70vh">' +
+          '<div id="cam-preview-msg" class="text-secondary small mt-2 d-none"></div>' +
+        '</div>' +
+      '</div></div>';
+    document.body.appendChild(modal);
+  }
+  document.getElementById('cam-preview-title').textContent = cam.name || cam.entity_id || 'Camera';
+  const img = document.getElementById('cam-preview-img');
+  const msg = document.getElementById('cam-preview-msg');
+  msg.classList.add('d-none');
+  img.classList.remove('d-none');
+  const params = new URLSearchParams();
+  if (cam.entity_id) params.set('entity', cam.entity_id);
+  if (cam.snapshot_url) params.set('snapshot_url', cam.snapshot_url);
+  img.src = 'ui/camera/preview?' + params.toString() + '&_=' + Date.now();
+  img.onerror = () => {
+    img.classList.add('d-none');
+    msg.textContent = 'Could not load a snapshot from this camera.';
+    msg.classList.remove('d-none');
+  };
+  new bootstrap.Modal(modal).show();
+}
+
 // Discover all HA cameras and list them with an Add button each. Already-added
 // entities are skipped so the list only offers cameras not yet configured.
 async function _sdDiscoverCameras(btn) {
@@ -5316,6 +5354,14 @@ async function _sdDiscoverCameras(btn) {
       const label = document.createElement('span');
       label.className = 'small';
       label.textContent = `${cam.name} (${cam.entity_id})`;
+      const btns = document.createElement('div');
+      btns.className = 'd-flex gap-1';
+      // Preview the discovered camera before adding it (FoodAssistant-kval).
+      const prev = document.createElement('button');
+      prev.type = 'button';
+      prev.className = 'btn btn-sm btn-outline-info';
+      prev.innerHTML = '<i class="bi bi-eye"></i> Preview';
+      prev.onclick = () => _camPreview(cam);
       const add = document.createElement('button');
       add.type = 'button';
       add.className = 'btn btn-sm ' + (already ? 'btn-outline-secondary' : 'btn-outline-success');
@@ -5327,8 +5373,10 @@ async function _sdDiscoverCameras(btn) {
         add.className = 'btn btn-sm btn-outline-secondary';
         add.innerHTML = '<i class="bi bi-check2"></i> Added';
       };
+      btns.appendChild(prev);
+      btns.appendChild(add);
       item.appendChild(label);
-      item.appendChild(add);
+      item.appendChild(btns);
       list.appendChild(item);
     });
     if (out) { out.appendChild(list); }
