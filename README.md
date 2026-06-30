@@ -252,6 +252,17 @@ Check each project's release notes before a major bump - Mealie in particular ha
 
 See [docs/api.md](docs/api.md) for endpoint reference, including the Current Recipe and timer endpoints, recipe file import, and app-data restore. Interactive docs are at `/docs` when the app is running.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow, local smoke
+test, and how to run the tests. Participation is covered by our
+[Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Security
+
+Please report security vulnerabilities privately. See [SECURITY.md](SECURITY.md)
+for the disclosure process; do not open a public issue for security problems.
+
 ## Changelog
 
 Release notes are in [CHANGELOG.md](CHANGELOG.md).
