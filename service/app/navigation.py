@@ -24,6 +24,7 @@ NAV_TABS = [
     {"key": "camera",    "label": "Camera",    "icon": "bi-camera-video",    "href": "ui/camera",   "requires": "cameras"},
     {"key": "convert",   "label": "Convert",   "icon": "bi-rulers",          "href": "ui/convert"},
     {"key": "weather",   "label": "Weather",   "icon": "bi-cloud-sun",       "href": "ui/weather"},
+    {"key": "start",     "label": "Start",     "icon": "bi-grid-3x3-gap",    "href": "ui/start", "requires": "start_page"},
     {"key": "guide",     "label": "Kitchen Guide", "icon": "bi-book",        "href": "ui/kitchen-guide"},
     {"key": "shop",      "label": "Shop",      "icon": "bi-bag",             "href": "ui/shop"},
     {"key": "defaults",  "label": "Defaults",  "icon": "bi-table",           "href": "ui/defaults"},
@@ -86,6 +87,9 @@ def _requirement_met(tab: dict) -> bool:
         return settings.mealie_configured()
     if req == "cameras":
         return bool(settings.streamdeck_cameras)
+    if req == "start_page":
+        # The Start tab appears in the nav only when the Start Page is enabled.
+        return bool(getattr(settings, "start_page_enabled", False))
     return True
 
 

@@ -152,13 +152,22 @@ def test_saved_custom_theme_shows_in_dropdown(client, monkeypatch):
 
 def test_display_and_streamdeck_moved_to_personalization(client, monkeypatch):
     html = _render(client, monkeypatch, is_pi=True)
-    # Both pills now carry the Personalization group marker.
-    for target in ("#pane-display", "#pane-streamdeck"):
-        seg = html.split(f'data-bs-target="{target}"', 1)
-        assert len(seg) == 2, f"{target} pill missing"
-        # The button tag around the pill includes the personalization group.
-        btn = seg[0].rsplit("<button", 1)[1] + seg[1].split("</button>", 1)[0]
-        assert 'data-mgroup="p"' in btn, f"{target} not under Personalization"
+    # Display is a Personalization pill.
+    seg = html.split('data-bs-target="#pane-display"', 1)
+    assert len(seg) == 2, "Display pill missing"
+    btn = seg[0].rsplit("<button", 1)[1] + seg[1].split("</button>", 1)[0]
+    assert 'data-mgroup="p"' in btn
+    # The Stream Deck no longer has its own pill: it is reached via the combined
+    # "Start & Stream Deck" Personalization pill and the in-pane toggle.
+    assert 'data-bs-target="#pane-streamdeck"' not in html
+    seg2 = html.split('data-bs-target="#pane-start-page"', 1)
+    assert len(seg2) == 2
+    combined = seg2[0].rsplit("<button", 1)[1] + seg2[1].split("</button>", 1)[0]
+    assert 'data-mgroup="p"' in combined
+    assert "Start &amp; Stream Deck" in combined
+    # The toggle to switch between them is present.
+    assert 'onclick="showDeckStart(\'deck\')"' in html
+    assert 'onclick="showDeckStart(\'start\')"' in html
 
 
 def test_attached_hardware_in_hardware_pane_not_streamdeck(client, monkeypatch):

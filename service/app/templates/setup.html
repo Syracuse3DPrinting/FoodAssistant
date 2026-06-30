@@ -992,17 +992,17 @@
           <button class="nav-link d-flex align-items-center" data-mgroup="p" data-bs-toggle="pill" data-bs-target="#pane-display" type="button" onclick="loadDisplayStatus(); loadHardwareStatus()">
             <i class="bi bi-display me-2"></i>Display
           </button>
-          <button class="nav-link d-flex align-items-center" data-mgroup="p" data-bs-toggle="pill" data-bs-target="#pane-streamdeck" type="button" onclick="loadHardwareStatus(); _sdLoadProfiles()">
-            <i class="bi bi-grid-3x3-gap me-2"></i>Stream Deck
-          </button>
           {% endif %}
           {% if not features.satellite %}
           <button class="nav-link d-flex align-items-center" data-mgroup="p" data-bs-toggle="pill" data-bs-target="#pane-personalization-weather" type="button">
             <i class="bi bi-cloud-sun me-2"></i>Weather
           </button>
           {% endif %}
-          <button class="nav-link d-flex align-items-center" data-mgroup="p" data-bs-toggle="pill" data-bs-target="#pane-start-page" type="button" onclick="_startEditorInit()">
-            <i class="bi bi-grid-3x3-gap me-2"></i>Start Page
+          {# Combined Start Page + Stream Deck menu. A top toggle inside the pane
+             switches between the on-screen Start Page and (on a Pi) the physical
+             Stream Deck, which share the same custom-button library. #}
+          <button class="nav-link d-flex align-items-center" data-mgroup="p" data-bs-toggle="pill" data-bs-target="#pane-start-page" type="button" id="pill-deckstart" onclick="_startEditorInit(); {% if is_pi %}loadHardwareStatus(); _sdLoadProfiles();{% endif %}">
+            <i class="bi bi-grid-3x3-gap me-2"></i>{% if is_pi %}Start &amp; Stream Deck{% else %}Start Page{% endif %}
           </button>
 
           {# --- System: maintenance that is not day-to-day config --------- #}
@@ -2426,6 +2426,12 @@ docker compose up -d</code></pre>
 
         <!-- Personalization: on-screen Start Page (FoodAssistant) -->
         <div class="tab-pane fade" id="pane-start-page">
+          {% if is_pi %}
+          <div class="btn-group mb-3 ds-toggle" role="group" aria-label="Switch between Start Page and Stream Deck">
+            <button type="button" class="btn btn-outline-primary active" data-ds="start" onclick="showDeckStart('start')"><i class="bi bi-display me-1"></i>Start Page</button>
+            <button type="button" class="btn btn-outline-primary" data-ds="deck" onclick="showDeckStart('deck')"><i class="bi bi-grid-3x3-gap me-1"></i>Stream Deck</button>
+          </div>
+          {% endif %}
           <p class="pane-intro">An optional full-screen launcher that works like an on-screen Stream Deck. It opens at <a href="ui/start" target="_blank">/ui/start</a> and replaces the fixed and floating menus while shown.</p>
           <div class="section-card">
             <div class="section-title"><i class="bi bi-grid-3x3-gap text-success"></i> Start Page</div>
@@ -2631,6 +2637,10 @@ docker compose up -d</code></pre>
 
         <!-- Stream Deck (Pi appliance only) -->
         <div class="tab-pane fade" id="pane-streamdeck">
+          <div class="btn-group mb-3 ds-toggle" role="group" aria-label="Switch between Start Page and Stream Deck">
+            <button type="button" class="btn btn-outline-primary" data-ds="start" onclick="showDeckStart('start')"><i class="bi bi-display me-1"></i>Start Page</button>
+            <button type="button" class="btn btn-outline-primary active" data-ds="deck" onclick="showDeckStart('deck')"><i class="bi bi-grid-3x3-gap me-1"></i>Stream Deck</button>
+          </div>
           <p class="pane-intro">Configure the Elgato Stream Deck attached to this appliance.</p>
 
           {% if features.satellite %}
@@ -4101,6 +4111,24 @@ function resetNavEditor(btn) {
   if (out) out.innerHTML = '<span class="text-secondary"><i class="bi bi-info-circle me-1"></i>Reset to defaults. Click Save Navigation to keep it.</span>';
 }
 
+// Combined "Start & Stream Deck" menu: a top toggle switches the one pane
+// between the on-screen Start Page (#pane-start-page) and the physical Stream
+// Deck editor (#pane-streamdeck). The deck pane has no sidebar pill of its own;
+// it is shown only via this toggle, so we activate/deactivate it manually.
+function showDeckStart(which) {
+  const s = document.getElementById('pane-start-page');
+  const d = document.getElementById('pane-streamdeck');
+  if (which === 'deck' && d) {
+    if (s) s.classList.remove('active', 'show');
+    d.classList.add('active', 'show');
+  } else {
+    if (d) d.classList.remove('active', 'show');
+    if (s) { s.classList.add('active', 'show'); _startEditorInit(); }
+  }
+  document.querySelectorAll('.ds-toggle [data-ds]').forEach(b =>
+    b.classList.toggle('active', b.dataset.ds === which));
+}
+
 // -- On-screen Start Page editor (FoodAssistant) ---------------------------
 // _startState is a flat token array (one per key): a built-in action key, a
 // "custom:<id>" reference into the shared custom-button store, or "" for blank.
@@ -5401,6 +5429,17 @@ setTimeout(_revealMenu, 1500);
   showRecipeSource();
   scannerTypeChanged();
   renderNavEditor();
+  // Combined Start/Stream Deck menu: the deck pane has no pill, so make sure it
+  // never lingers visible. Hide it whenever any sidebar pill is clicked, and
+  // default the combined pane to the Start Page view when it is opened.
+  document.querySelectorAll('.side-menu [data-bs-toggle="pill"]').forEach(p => {
+    p.addEventListener('click', () => {
+      const d = document.getElementById('pane-streamdeck');
+      if (d) d.classList.remove('active', 'show');
+    });
+  });
+  const _dsPill = document.getElementById('pill-deckstart');
+  if (_dsPill) _dsPill.addEventListener('shown.bs.tab', () => showDeckStart('start'));
   {% if not is_satellite %}
   tunnelModeChanged();
   _initTunnelStatus();
@@ -5420,6 +5459,15 @@ setTimeout(_revealMenu, 1500);
   toggleAuthRequired();
   {% endif %}
 
+  // A bookmark to the (now pill-less) Stream Deck pane still works: open the
+  // combined pill and toggle to the deck view.
+  if (window.location.hash === '#pane-streamdeck') {
+    var dsPill = document.getElementById('pill-deckstart');
+    if (dsPill) {
+      try { bootstrap.Tab.getOrCreateInstance(dsPill).show(); } catch (e) { dsPill.click(); }
+      setTimeout(function () { showDeckStart('deck'); }, 60);
+    }
+  }
   // If we arrived via a #pane-* hash, scroll it into view (the group was
   // already selected at the top of init()).
   var hash = window.location.hash;
