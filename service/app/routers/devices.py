@@ -52,6 +52,15 @@ async def scan_lan(body: ScanBody = Body(default=ScanBody())):
         better = devices.lan_cidr_from_known_devices()
         if better:
             cidr = better
+        else:
+            # Bridge-only server with no LAN reference: scanning the Docker subnet
+            # is useless, so do not. Ask for the range instead. Satellites still
+            # self-register when they sync, so a scan is rarely needed anyway.
+            return {"ok": False, "needs_cidr": True, "error": (
+                "This server runs in a Docker network, so it cannot detect your "
+                "LAN on its own. Enter your LAN range (for example 192.168.1.0/24) "
+                "and scan again. Note that satellites also appear here on their "
+                "own once they sync, so you usually do not need to scan at all.")}
     if not cidr:
         return {"ok": False, "error": "Could not determine a network to scan; enter a CIDR like 192.168.1.0/24."}
 
