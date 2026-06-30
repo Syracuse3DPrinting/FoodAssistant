@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.7.3"
+APP_VERSION = "0.7.4"
 
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
@@ -948,15 +948,45 @@ class Settings(BaseSettings):
                 object.__setattr__(self, k, v)
 
     def save(self, data: dict) -> None:
-        """Merge data into settings.json and apply values to the live object."""
+        """Merge data into settings.json and apply values to the live object.
+
+        Hardened against data loss (FoodAssistant): if the existing settings file
+        is present but cannot be read or parsed, it is preserved aside as
+        settings.json.corrupt.<n> rather than silently overwritten with only the
+        new fields, and the write is atomic (temp file plus rename) so an
+        interrupted write (for example a container restart mid-save) can never
+        truncate the live file and lose every other setting.
+        """
+        import logging as _logging
         sf = Path(self.data_dir) / "settings.json"
         sf.parent.mkdir(parents=True, exist_ok=True)
         existing: dict = {}
         if sf.exists():
+            raw = None
             try:
-                existing = json.loads(sf.read_text())
-            except Exception:
-                pass
+                raw = sf.read_text()
+            except Exception as exc:
+                raw = None
+                _logging.getLogger("foodassistant.config").error(
+                    "settings.json could not be read (%s); preserving it before saving", exc)
+            if raw is not None and raw.strip():
+                try:
+                    existing = json.loads(raw)
+                except Exception as exc:
+                    _logging.getLogger("foodassistant.config").error(
+                        "settings.json is corrupt (%s); preserving it as a backup", exc)
+                    raw = None  # force the preserve-aside path below
+            if raw is None and sf.exists():
+                # Unreadable or corrupt and non-empty: move it aside so the data is
+                # recoverable instead of being clobbered by this partial save.
+                for n in range(1, 1000):
+                    bak = sf.with_name(f"settings.json.corrupt.{n}")
+                    if not bak.exists():
+                        try:
+                            sf.replace(bak)
+                        except Exception:
+                            pass
+                        break
         # Reject an unknown theme rather than persisting a broken value.
         if data.get("ui_theme") is not None and data["ui_theme"] not in THEMES:
             data["ui_theme"] = _DEFAULT_THEME
@@ -968,8 +998,13 @@ class Settings(BaseSettings):
             if data.get(_sk) and not looks_hashed(data[_sk]):
                 data[_sk] = hash_secret(data[_sk])
         existing.update({k: v for k, v in data.items() if k in _SAVEABLE and v is not None})
-        sf.write_text(json.dumps(existing, indent=2))
-        sf.chmod(0o600)  # settings.json holds API keys: owner-only
+        # Atomic write: write a temp file in the same dir, then rename over the
+        # target so a crash mid-write leaves the old file intact.
+        tmp = sf.with_name("settings.json.tmp")
+        tmp.write_text(json.dumps(existing, indent=2))
+        tmp.chmod(0o600)  # settings.json holds API keys: owner-only
+        import os as _os
+        _os.replace(tmp, sf)
         self.apply(existing)
 
 
@@ -991,8 +1026,13 @@ if _sf.exists():
         for _k in ("remote_server_url", "upstream_api_key"):
             if not getattr(settings, _k, "") and _saved.get(_k):
                 object.__setattr__(settings, _k, _saved[_k])
-    except Exception:
-        pass
+    except Exception as _exc:
+        # A corrupt settings.json must be loud, not silent: a swallowed read here
+        # previously let the app come up looking unconfigured and then overwrite
+        # the file on the next save. save() now preserves a corrupt file aside.
+        import logging as _logging
+        _logging.getLogger("foodassistant.config").error(
+            "Could not load settings.json at startup (%s); it will be preserved on the next save", _exc)
 
 # Auto-generate SECRET_KEY on first run so it stays stable across restarts.
 # Persisting is best-effort: if data_dir is not writable (CI, tests, or an
