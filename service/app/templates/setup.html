@@ -2250,26 +2250,15 @@ docker compose up -d</code></pre>
           <p class="pane-intro">Configure the Elgato Stream Deck attached to this appliance.</p>
 
           {% if features.satellite %}
-          <!-- On a satellite the deck weather is server-controlled and shown
-               read-only here; it is edited on the main server (Satellite Devices
-               pane). The ids are kept so the deck save still reports them. -->
+          <!-- On a satellite the deck weather is server-controlled, so there are
+               no editable controls here, just a note pointing to the main server.
+               The values are kept as hidden inputs (same ids) so a deck save
+               still reports the synced location and units. -->
           <div class="section-card mb-3">
             <div class="section-title"><i class="bi bi-cloud-sun text-info"></i> Stream Deck Weather</div>
-            <div class="row g-3 mb-2">
-              <div class="col-md-6">
-                <label class="form-label">Weather Location</label>
-                <input type="text" class="form-control form-control-sm" id="streamdeck_weather_location"
-                       value="{{ s.streamdeck_weather_location }}" readonly>
-              </div>
-              <div class="col-md-6">
-                <label class="form-label">Weather Units</label>
-                <select class="form-select form-select-sm" id="streamdeck_weather_units" disabled>
-                  <option value="f" {{ 'selected' if s.streamdeck_weather_units == 'f' else '' }}>Fahrenheit (°F)</option>
-                  <option value="c" {{ 'selected' if s.streamdeck_weather_units == 'c' else '' }}>Celsius (°C)</option>
-                </select>
-              </div>
-            </div>
-            <div class="form-text"><i class="bi bi-hdd-network me-1"></i>Weather comes from the main server and syncs automatically. Change it there.</div>
+            <div class="form-text"><i class="bi bi-hdd-network me-1"></i>Weather settings are managed on the main server and sync to this device automatically. Change the location and units there (Settings, Satellite Devices).</div>
+            <input type="hidden" id="streamdeck_weather_location" value="{{ s.streamdeck_weather_location }}">
+            <input type="hidden" id="streamdeck_weather_units" value="{{ s.streamdeck_weather_units }}">
           </div>
           {% endif %}
 
