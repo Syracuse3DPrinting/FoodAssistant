@@ -13,9 +13,14 @@
 -->
 <link href="vendor/bootstrap.min.css" rel="stylesheet">
 <link href="vendor/bootstrap-icons.min.css" rel="stylesheet">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
 <style>
-  body { padding-top: 60px; }
+  /* Faint ghosted brand mark behind the app, same as the real UI. */
+  body::before { content:""; position:fixed; inset:0; z-index:-1;
+    background:url("logo-mark.png") center center / min(58vmin, 460px) no-repeat;
+    opacity:.06; pointer-events:none; }
   .navbar-brand { font-weight: 700; letter-spacing: -0.5px; }
+  .brand-logo { height: 30px; width: auto; }
   .screen { display: none; }
   .screen.active { display: block; }
   /* Inventory panels (from the app's inventory.html) */
@@ -55,6 +60,9 @@
   @keyframes blink { 50% { opacity:.25; } }
   /* Stream Deck */
   .deck { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; max-width:540px; }
+  .deck-start { max-width:760px; }
+  .deck-start .key { font-size:.85rem; }
+  .deck-start .key i { font-size:1.7rem; }
   .key { aspect-ratio:1/1; border-radius:10px; display:flex; flex-direction:column; align-items:center;
     justify-content:center; gap:3px; cursor:pointer; user-select:none; border:2px solid rgba(255,255,255,.12);
     font-size:.72rem; text-align:center; color:#fff; }
@@ -65,9 +73,9 @@
 </style>
 </head>
 <body>
-<nav class="navbar navbar-expand-lg bg-body-tertiary border-bottom fixed-top">
+<nav class="navbar navbar-expand-lg bg-body-tertiary border-bottom sticky-top">
   <div class="container-fluid">
-    <span class="navbar-brand"><i class="bi bi-fridge me-2 text-info"></i>Pantry Raider</span>
+    <span class="navbar-brand d-flex align-items-center"><img src="logo-mark.png" alt="" class="brand-logo me-2">Pantry Raider</span>
     <ul class="navbar-nav flex-row flex-wrap gap-1" id="nav">
       <li class="nav-item"><button class="nav-link active px-2" data-screen="inventory"><i class="bi bi-grid me-1"></i>Inventory</button></li>
       <li class="nav-item"><button class="nav-link px-2" data-screen="expiring"><i class="bi bi-clock-history me-1"></i>Expiring</button></li>
@@ -76,6 +84,7 @@
       <li class="nav-item"><button class="nav-link px-2" data-screen="mealplan"><i class="bi bi-calendar-week me-1"></i>Meal Plan</button></li>
       <li class="nav-item"><button class="nav-link px-2" data-screen="camera"><i class="bi bi-camera-video me-1"></i>Camera</button></li>
       <li class="nav-item"><button class="nav-link px-2" data-screen="convert"><i class="bi bi-rulers me-1"></i>Convert</button></li>
+      <li class="nav-item"><button class="nav-link px-2" data-screen="start"><i class="bi bi-grid-1x2 me-1"></i>Start Page</button></li>
       <li class="nav-item"><button class="nav-link px-2" data-screen="deck"><i class="bi bi-grid-3x3-gap me-1"></i>Stream Deck</button></li>
       <li class="nav-item"><button class="nav-link px-2" data-screen="settings"><i class="bi bi-gear me-1"></i>Settings</button></li>
     </ul>
@@ -200,6 +209,15 @@
     </div>
   </section>
 
+  <!-- START PAGE -->
+  <section class="screen" id="screen-start">
+    <h4 class="my-3"><i class="bi bi-grid-1x2 me-2"></i>Start Page</h4>
+    <p class="text-secondary">An optional full-screen launcher that works like an on-screen Stream Deck: same key catalog,
+      same shared custom keys. Home Assistant, media, and macro keys fire right from the screen, no deck required.</p>
+    <div class="deck deck-start" id="start-grid"></div>
+    <div class="alert alert-secondary mt-3 mb-0" id="start-msg">Tap a key&hellip;</div>
+  </section>
+
   <!-- STREAM DECK -->
   <section class="screen" id="screen-deck">
     <h4 class="my-3"><i class="bi bi-grid-3x3-gap me-2"></i>Stream Deck kiosk</h4>
@@ -298,7 +316,7 @@ function commitPending(){ pending = []; renderPending(); }
 const TIERS = {
   ready:   {label:'Ready to Cook', icon:'bi-check-circle', color:'success'},
   staples: {label:'With Pantry Staples', icon:'bi-egg-fried', color:'info'},
-  shopping:{label:'Needs Shopping', icon:'bi-cart', color:'warning'},
+  shopping:{label:'Worth a Shop Run', icon:'bi-cart', color:'warning'},
 };
 const RECIPES = {
   ready: [
@@ -400,11 +418,18 @@ const KEYS = [
   {i:'bi-brightness-high',l:'Brightness',c:'#374151',m:'Cycle the deck brightness.'},
   {i:'bi-gear',l:'Settings',c:'#6b7280',m:'Open the setup page on the display.'},
 ];
-function renderDeck(){
-  const d=document.getElementById('deck');
-  d.innerHTML = KEYS.map(k=>`<div class="key" style="background:${k.c}" data-m="${esc(k.m)}" data-l="${esc(k.l)}"><i class="bi ${k.i}"></i><span>${k.l}</span></div>`).join('');
-  d.querySelectorAll('.key').forEach(el=>el.onclick=()=>document.getElementById('deck-msg').innerHTML=`<strong>${el.dataset.l}</strong> &mdash; ${el.dataset.m}`);
+function renderKeys(gridId, msgId, keys){
+  const d=document.getElementById(gridId);
+  d.innerHTML = keys.map(k=>`<div class="key" style="background:${k.c}" data-m="${esc(k.m)}" data-l="${esc(k.l)}"><i class="bi ${k.i}"></i><span>${k.l}</span></div>`).join('');
+  d.querySelectorAll('.key').forEach(el=>el.onclick=()=>document.getElementById(msgId).innerHTML=`<strong>${el.dataset.l}</strong>: ${el.dataset.m}`);
 }
+function renderDeck(){ renderKeys('deck','deck-msg',KEYS); }
+// The Start Page shares the deck's key catalog and custom keys; its action keys
+// (Home Assistant, media, macro) execute server-side, so they work on any screen.
+const START_KEYS = KEYS.map(k =>
+  k.l==='Lights' ? {...k, m:'Home Assistant key: fires from the screen, no deck needed.'} :
+  k.l==='Play'   ? {...k, m:'Media key: plays/pauses right from the screen.'} : k);
+function renderStart(){ renderKeys('start-grid','start-msg',START_KEYS); }
 
 // ---- Expiring -------------------------------------------------------------
 function expStatus(d){
@@ -454,6 +479,7 @@ const SETTINGS = [
   {icon:'bi-house-gear', name:'Home Assistant', ok:false, note:'Cameras, notifications, voice', fields:[['Status','Not configured']]},
   {icon:'bi-display', name:'Interface', ok:true, note:'Theme, kiosk, display', fields:[['Theme','Dark'],['Kiosk','Auto on Pi display']]},
   {icon:'bi-hdd-network', name:'Stream Deck', ok:true, note:'Physical control surface', fields:[['Device','15-key'],['Pages','Kitchen, Home']]},
+  {icon:'bi-grid-1x2', name:'Start Page', ok:true, note:'On-screen launcher, shares custom keys with the deck', fields:[['Keys','15'],['Home screen','Yes']]},
 ];
 function renderSettings(){
   document.getElementById('settings-cards').innerHTML = SETTINGS.map(s => `
@@ -473,7 +499,7 @@ function renderSettings(){
 
 // ---- Init -----------------------------------------------------------------
 renderInventory(); renderExpiring(); renderPending(); renderCook(); renderMealPlan();
-renderCamSwitch(); fillUnits(); buildKeypad(); convert(); renderDeck(); renderSettings();
+renderCamSwitch(); fillUnits(); buildKeypad(); convert(); renderDeck(); renderStart(); renderSettings();
 </script>
 </body>
 </html>
