@@ -199,6 +199,11 @@ defaults; a drag on the device overrides them per-device via localStorage.
 | `floating_nav_orientation` | | Editable | Editable | Device-local |
 | `floating_nav_autohide_streamdeck` | | Editable | Editable | Device-local |
 | `nav_visibility` | | Editable | Editable | Device-local |
+| `timezone` | | Editable | Inherited | Inherited (read-only) |
+| `scheduled_reboot_time` | | Editable | Editable | Device-local |
+| `update_last_checked` | | Auto | Auto | Device-local (bookkeeping) |
+| `update_last_latest` | | Auto | Auto | Device-local (bookkeeping) |
+| `update_last_available` | | Auto | Auto | Device-local (bookkeeping) |
 
 ## Deployment and the satellite link
 

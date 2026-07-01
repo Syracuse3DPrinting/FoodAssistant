@@ -89,6 +89,27 @@ def test_apply_config_sets_only_shareable_fields(monkeypatch, tmp_path):
     assert settings.server_sourced_fields >= {"grocy_base_url", "gemini_api_key"}
 
 
+def test_apply_config_inherits_timezone(monkeypatch, tmp_path):
+    # A Pi Remote inherits the fleet timezone from the main server (it is a
+    # SATELLITE_PULL_FIELD), not a per-device option (FoodAssistant-amp0).
+    from app.services.satellite import _apply_config
+    from app.config import SATELLITE_PULL_FIELDS
+    assert "timezone" in SATELLITE_PULL_FIELDS
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path), raising=False)
+    monkeypatch.setattr(settings, "timezone", "", raising=False)
+    applied = _apply_config({"timezone": "America/Chicago"})
+    assert "timezone" in applied
+    assert settings.timezone == "America/Chicago"
+
+
+def test_push_timezone_noop_off_pi(monkeypatch):
+    # Off a Pi (no host bridge) the push is a safe no-op, never raising.
+    from app.services import satellite as sat
+    monkeypatch.setattr("app.hardware.is_raspberry_pi", lambda: False)
+    assert sat._push_timezone("America/Chicago") is False
+    assert sat._push_timezone("") is False
+
+
 def test_apply_config_persists_pulled_fields(monkeypatch, tmp_path):
     # Pulled config must hit settings.json so it survives a restart and is shared
     # across worker processes (the camera-not-showing-on-pi_remote bug).

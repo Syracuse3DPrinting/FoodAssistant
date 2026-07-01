@@ -21,6 +21,7 @@ from ..config import (
     FLOATING_NAV_POSITIONS,
     FLOATING_NAV_ORIENTATIONS,
     NAV_VISIBILITY,
+    COMMON_TIMEZONES, format_local,
     STREAMDECK_KEY_STYLES, STREAMDECK_ICON_COLORS,
     DEPLOYMENT_MODES, _DEFAULT_DEPLOYMENT_MODE,
     AI_MODELS, SATELLITE_PULL_FIELDS,
@@ -272,6 +273,8 @@ class SetupPayload(BaseModel):
     floating_nav_orientation: str = ""
     floating_nav_autohide_streamdeck: bool = False
     nav_visibility: str = ""
+    timezone: str = ""
+    scheduled_reboot_time: str = ""
     display_touch: bool = False
     auth_required: bool = True
     auth_password: str = ""
@@ -437,6 +440,25 @@ def _grocy_url_for_api(request: Request, detected: str) -> str:
     return f"http://{server_host}:9383"
 
 
+def _system_timezone() -> str:
+    """The host's current IANA timezone name for the "Auto (system)" label, or
+    "" when it cannot be read. Best-effort: reads /etc/timezone, else the
+    /etc/localtime symlink target."""
+    try:
+        tz = Path("/etc/timezone").read_text().strip()
+        if tz:
+            return tz
+    except OSError:
+        pass
+    try:
+        link = os.readlink("/etc/localtime")
+        if "zoneinfo/" in link:
+            return link.split("zoneinfo/", 1)[1]
+    except OSError:
+        pass
+    return ""
+
+
 def _suggest_mealie_url(request: Request) -> str:
     """A suggested Mealie URL for opening in a BROWSER, or '' if not applicable.
 
@@ -549,6 +571,16 @@ async def setup_page(request: Request):
         "is_pi_appliance": settings.is_pi_appliance(),
         # For the Updates card's release-notes link.
         "github_repo": GITHUB_REPO,
+        # Update-check bookkeeping + timezone (FoodAssistant-lq01/-amp0): the last
+        # check shown pre-formatted in the configured zone, plus the tz options.
+        "update_last_checked_display": format_local(
+            settings.update_last_checked, settings.timezone),
+        "update_last_latest": settings.update_last_latest,
+        "update_last_available": settings.update_last_available,
+        "timezone": settings.timezone,
+        "common_timezones": COMMON_TIMEZONES,
+        "system_timezone": _system_timezone(),
+        "scheduled_reboot_time": settings.scheduled_reboot_time,
         # Secrets the main server manages (pulled each sync). On a satellite these
         # render read-only; the device-local secrets (upstream key, password, PIN)
         # stay editable so the device can be paired or re-keyed (FoodAssistant).
@@ -907,6 +939,18 @@ async def save_setup(payload: SetupPayload):
     # Drop an unknown nav-visibility value (empty/invalid keeps the stored one).
     if "nav_visibility" in data and data["nav_visibility"] not in NAV_VISIBILITY:
         data.pop("nav_visibility", None)
+    # Timezone: "" (auto/system) or a valid IANA name; drop anything else so a
+    # typo never breaks timestamp rendering.
+    if "timezone" in data and data["timezone"]:
+        try:
+            from zoneinfo import ZoneInfo
+            ZoneInfo(data["timezone"])
+        except Exception:
+            data.pop("timezone", None)
+    # Scheduled reboot time: "" (off) or 24h HH:MM.
+    if "scheduled_reboot_time" in data and data["scheduled_reboot_time"]:
+        if not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", str(data["scheduled_reboot_time"])):
+            data.pop("scheduled_reboot_time", None)
     # Drop an unknown Stream Deck key style / icon colour (keeps the stored one).
     if "streamdeck_key_style" in data and data["streamdeck_key_style"] not in STREAMDECK_KEY_STYLES:
         data.pop("streamdeck_key_style", None)
@@ -959,6 +1003,24 @@ async def save_setup(payload: SetupPayload):
         provisioned = await _provision_touch_for_display(data["display_type"])
         if provisioned and provisioned.get("needs_reboot"):
             resp["touch_needs_reboot"] = True
+    # Mirror the timezone and nightly-reboot schedule to the host (Pi appliance),
+    # so the system clock and the reboot timer match the saved settings. Best
+    # effort: a missing/old bridge just leaves the host as-is.
+    if settings.is_pi_appliance():
+        if data.get("timezone"):
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as c:
+                    await c.post(f"{_HOST_BRIDGE}/system/timezone",
+                                 json={"tz": data["timezone"]})
+            except Exception:
+                pass
+        if "scheduled_reboot_time" in data:
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as c:
+                    await c.post(f"{_HOST_BRIDGE}/system/scheduled-reboot",
+                                 json={"time": data["scheduled_reboot_time"]})
+            except Exception:
+                pass
     return resp
 
 
@@ -1478,6 +1540,34 @@ async def touch_provision(request: Request):
         return out
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)})
+
+
+@router.post("/maintenance/reboot")
+async def maintenance_reboot():
+    """Reboot the appliance now via the host bridge (Pi appliance only)."""
+    if not is_raspberry_pi():
+        return JSONResponse({"ok": False, "error": "Not available on this platform."})
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as c:
+            r = await c.post(f"{_HOST_BRIDGE}/reboot")
+        return r.json()
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+
+
+@router.post("/maintenance/reload")
+async def maintenance_reload():
+    """Re-read settings.json and reset provider/recipe caches without a restart.
+
+    Works on any platform: it picks up an out-of-band settings change (a restore
+    or hand edit) and rebuilds the cached AI provider and Mealie clients so the
+    new values take effect immediately (FoodAssistant-wvwm)."""
+    applied = settings.reload()
+    reset_providers()
+    from ..services.mealie import reset_cache as reset_mealie_cache, reset_staple_cache
+    reset_mealie_cache()
+    reset_staple_cache()
+    return {"ok": True, "reloaded": len(applied)}
 
 
 @router.post("/streamdeck/restart")

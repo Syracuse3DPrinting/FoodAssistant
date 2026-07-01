@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.7.51"
+APP_VERSION = "0.7.52"
 
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
@@ -130,6 +130,60 @@ FLOATING_NAV_ORIENTATIONS = ("vertical", "horizontal")
 #   hidden - never show the floating nav
 NAV_VISIBILITY = ("auto", "shown", "hidden")
 _DEFAULT_NAV_VISIBILITY = "auto"
+
+
+# A curated shortlist of IANA timezones for the settings dropdown, so a user
+# rarely has to type one. "" (the default) means "follow the system clock",
+# which on a Pi is NTP-synced. Any valid IANA name also works if typed/sent.
+COMMON_TIMEZONES = (
+    "UTC",
+    "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
+    "America/Anchorage", "America/Halifax", "America/Sao_Paulo",
+    "Europe/London", "Europe/Paris", "Europe/Berlin", "Europe/Madrid",
+    "Europe/Moscow", "Africa/Johannesburg",
+    "Asia/Dubai", "Asia/Kolkata", "Asia/Shanghai", "Asia/Tokyo", "Asia/Singapore",
+    "Australia/Sydney", "Pacific/Auckland",
+)
+
+
+def resolve_timezone(name: str):
+    """A ZoneInfo for the configured tz name, the system local zone when unset,
+    or None if the name is invalid (caller then falls back to local/UTC).
+
+    Pure and import-safe: zoneinfo is stdlib on 3.9+, and a bad name degrades to
+    the system zone rather than raising, so a typo never breaks timestamp
+    rendering."""
+    from datetime import datetime
+    try:
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    except Exception:
+        return None
+    if name:
+        try:
+            return ZoneInfo(name)
+        except (ZoneInfoNotFoundError, ValueError, OSError):
+            pass  # fall back to system local
+    # System local zone: astimezone() with no argument uses the OS local tz.
+    return datetime.now().astimezone().tzinfo
+
+
+def format_local(epoch: float, name: str = "", fmt: str = "%Y-%m-%d %H:%M %Z") -> str:
+    """Format a UTC epoch as a local wall-clock string in the given tz name.
+
+    Returns "" for a falsy/invalid epoch so the UI can show "never". Timestamps
+    are stored as UTC epochs (unambiguous) and only rendered through here, so the
+    displayed zone always follows the timezone setting."""
+    if not epoch:
+        return ""
+    from datetime import datetime, timezone as _tz
+    try:
+        dt = datetime.fromtimestamp(float(epoch), _tz.utc)
+    except (TypeError, ValueError, OverflowError, OSError):
+        return ""
+    zone = resolve_timezone(name)
+    if zone is not None:
+        dt = dt.astimezone(zone)
+    return dt.strftime(fmt)
 
 
 def nav_chrome_hidden(nav_visibility: str, has_streamdeck: bool, ui_scale: str) -> bool:
@@ -313,7 +367,8 @@ _SAVEABLE = [
     "ha_events_enabled", "ha_camera_popup_seconds", "convert_custom_rows",
     "quiet_mode",
     "floating_nav_position", "floating_nav_orientation", "floating_nav_autohide_streamdeck",
-    "nav_visibility",
+    "nav_visibility", "timezone", "scheduled_reboot_time",
+    "update_last_checked", "update_last_latest", "update_last_available",
     "deployment_mode", "remote_server_url", "remote_server_ip", "remote_server_host", "upstream_api_key", "kiosk_pin", "kiosk_readonly_when_locked",
     "satellite_sync_minutes", "satellite_last_sync", "device_id",
     "secret_key", "auth_password", "totp_secret", "api_key", "extra_api_keys", "auth_required",
@@ -363,6 +418,10 @@ SATELLITE_PULL_FIELDS = [
     # Fleet-wide auto-update flag, so a satellite obeys the main server's choice
     # and the whole fleet updates (or holds) together (FoodAssistant-k2kk).
     "auto_update",
+    # Timezone: the whole fleet reads timestamps in one zone, set once on the
+    # main server. A satellite inherits it (and applies it to its own host clock
+    # on sync), so it is not offered as a per-device option on a Pi Remote.
+    "timezone",
 ]
 
 # Kitchen appliances the user owns, used to steer the AI cook suggestions so it
@@ -852,6 +911,24 @@ class Settings(BaseSettings):
     # nav_hidden). "auto" hides it on a Stream-Deck-driven large/xlarge kiosk.
     nav_visibility: str = _DEFAULT_NAV_VISIBILITY
 
+    # Display timezone for timestamps shown in the UI. "" follows the system
+    # clock (NTP-synced on a Pi); an IANA name (e.g. "America/New_York")
+    # overrides it. Timestamps are stored as UTC epochs and rendered through
+    # format_local(), so this only changes how they read.
+    timezone: str = ""
+
+    # Update-check bookkeeping (FoodAssistant-lq01): when the app last checked
+    # for a new version (UTC epoch), and what it found, so the UI can show a
+    # "last checked" line without re-checking on every page load.
+    update_last_checked: float = 0.0
+    update_last_latest: str = ""
+    update_last_available: bool = False
+
+    # Optional nightly reboot for a kiosk appliance (FoodAssistant-wvwm):
+    # "HH:MM" 24h local time, or "" to disable. Applied on the host via the
+    # bridge as a systemd timer.
+    scheduled_reboot_time: str = ""
+
     # Stream Deck weather widget. Held at the app level (not just in the
     # controller's config.toml) so a satellite can pull them from the main
     # server via the satellite config sync (FoodAssistant-bra). location is a
@@ -1122,6 +1199,22 @@ class Settings(BaseSettings):
         for k, v in data.items():
             if k in _SAVEABLE and hasattr(self, k) and v is not None:
                 object.__setattr__(self, k, v)
+
+    def reload(self) -> dict:
+        """Re-read settings.json from disk and apply it to the live object.
+
+        Lets the app pick up a settings.json changed out of band (a restore, a
+        hand edit, or another process) without a restart (FoodAssistant-wvwm).
+        Returns the applied dict, or {} on any read/parse error."""
+        sf = Path(self.data_dir) / "settings.json"
+        try:
+            data = json.loads(sf.read_text())
+        except (OSError, ValueError):
+            return {}
+        if isinstance(data, dict):
+            self.apply(data)
+            return data
+        return {}
 
     def save(self, data: dict) -> None:
         """Merge data into settings.json and apply values to the live object.

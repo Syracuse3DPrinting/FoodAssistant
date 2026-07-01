@@ -192,6 +192,23 @@ def _push_streamdeck_settings(timeout: float = 4.0) -> bool:
         return False
 
 
+def _push_timezone(tz: str, timeout: float = 4.0) -> bool:
+    """Apply the fleet timezone to this satellite's host clock via the bridge.
+
+    Best-effort and only meaningful on a Pi appliance: an empty value (the main
+    server following its own system clock) is left alone. Never raises."""
+    try:
+        from ..hardware import is_raspberry_pi
+        if not tz or not is_raspberry_pi():
+            return False
+        resp = httpx.post(f"{_HOST_BRIDGE}/system/timezone",
+                          json={"tz": tz}, timeout=timeout)
+        return resp.status_code == 200
+    except Exception as exc:  # bridge down / old: leave the host clock as-is
+        logger.warning("satellite sync: could not push timezone: %s", exc)
+        return False
+
+
 def _apply_defaults(rows: list[dict]) -> int:
     """Replace the local expiry-defaults table with the server's copy.
 
@@ -407,6 +424,11 @@ def _do_sync_from_upstream(timeout: float = 8.0) -> dict:
     # (bra: weather, gxl: theme colours).
     if any(f in applied for f in _STREAMDECK_SYNCED_FIELDS):
         _push_streamdeck_settings()
+
+    # The fleet shares one timezone set on the main server; apply the pulled
+    # value to this satellite's own host clock so its logs and kiosk read right.
+    if "timezone" in applied:
+        _push_timezone(settings.timezone)
 
     command = data.get("command")
     if command == "resync":

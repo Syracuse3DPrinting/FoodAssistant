@@ -2393,6 +2393,12 @@ docker compose up -d</code></pre>
             </div>
             {% endif %}
 
+            <div class="form-text mt-1" id="update-last-checked">
+              {%- if update_last_checked_display %}Last checked: {{ update_last_checked_display }}
+              {%- if update_last_available %} <span class="text-warning">(v{{ update_last_latest }} available)</span>{% else %} (up to date){% endif %}
+              {%- else %}Not checked yet.{% endif %}
+            </div>
+
             <hr class="my-3">
             <div class="form-check form-switch mb-1">
               <input class="form-check-input" type="checkbox" id="auto_update"
@@ -2408,6 +2414,59 @@ docker compose up -d</code></pre>
             <div class="form-text">On by default. This setting also applies to any Pi Remotes connected to this server, so the fleet stays on the same version. This server itself auto-updates through the Watchtower container (see the README).</div>
             {% endif %}
             <span class="test-result ms-1" id="auto-update-result"></span>
+          </div>
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-clock text-info"></i> Date &amp; time</div>
+            {% if features.satellite %}
+            {# A Pi Remote inherits the fleet timezone from the main server (it is
+               a SATELLITE_PULL_FIELD), so there is no per-device option here. #}
+            <div class="form-text"><i class="bi bi-hdd-network me-1"></i>Timezone is managed on the main server and applied here automatically on each sync{% if timezone %} (currently <strong>{{ timezone }}</strong>){% endif %}.</div>
+            {% else %}
+            <div class="mb-2">
+              <label class="form-label" for="timezone">Timezone{{ info('Timezone for timestamps shown in the app (like the last update check). The clock stays NTP-synced; this only sets how times read. Auto follows the system clock. Pi Remotes inherit this from the server.') }}</label>
+              <select class="form-select form-select-sm" id="timezone" style="max-width:340px">
+                <option value="">Auto{% if system_timezone %} (system: {{ system_timezone }}){% endif %}</option>
+                {% for tz in common_timezones %}
+                <option value="{{ tz }}" {{ 'selected' if timezone == tz else '' }}>{{ tz }}</option>
+                {% endfor %}
+              </select>
+              {% if timezone and timezone not in common_timezones %}
+              <div class="form-text">Current: {{ timezone }} (custom, kept)</div>
+              {% endif %}
+            </div>
+            <button type="button" class="btn btn-outline-info btn-sm" onclick="saveTimezone(this)">
+              <i class="bi bi-check-lg me-1"></i>Save timezone
+            </button>
+            <span class="test-result ms-2" id="timezone-result"></span>
+            {% endif %}
+          </div>
+
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-tools text-warning"></i> Maintenance</div>
+            <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="reloadSettings(this)">
+                <i class="bi bi-arrow-clockwise me-1"></i>Reload settings
+              </button>{{ info('Re-reads settings from disk and rebuilds the AI and Mealie clients so changes take effect without a restart. Handy after a restore or a hand edit.') }}
+              {% if is_pi_appliance %}
+              <button type="button" class="btn btn-outline-danger btn-sm" onclick="rebootNow(this)">
+                <i class="bi bi-power me-1"></i>Reboot now
+              </button>{{ info('Reboots this appliance immediately.') }}
+              {% endif %}
+              <span class="test-result ms-1" id="maintenance-result"></span>
+            </div>
+            {% if is_pi_appliance %}
+            <div class="d-flex flex-wrap gap-2 align-items-end">
+              <div>
+                <label class="form-label" for="scheduled_reboot_time">Nightly reboot{{ info('Reboot the appliance automatically at this time every day, to keep a long-running kiosk fresh. Leave blank to disable.') }}</label>
+                <input type="time" class="form-control form-control-sm" id="scheduled_reboot_time" style="max-width:150px" value="{{ scheduled_reboot_time }}">
+              </div>
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="saveScheduledReboot(this)">
+                <i class="bi bi-check-lg me-1"></i>Save schedule
+              </button>
+              <span class="test-result" id="scheduled-reboot-result"></span>
+            </div>
+            {% endif %}
           </div>
 
           <div class="section-card">
@@ -2617,17 +2676,6 @@ docker compose up -d</code></pre>
           <p class="pane-intro">Configure the screen wired to this appliance. These settings only affect the local kiosk display, not browsers on other devices.</p>
 
           <div class="section-card mb-3">
-            <div class="section-title"><i class="bi bi-display text-info"></i> Kiosk Service</div>
-            <p class="text-secondary small">Runs the on-device browser in full-screen kiosk mode. If you attached the screen after the first install, provision it here, no SSH needed.</p>
-            <div id="kiosk-status-row" class="mb-2"><span class="text-secondary small">Checking...</span></div>
-            <button class="btn btn-outline-info btn-sm d-none" id="btn-install-kiosk" onclick="installKiosk(this)">
-              <i class="bi bi-download me-1"></i>Install kiosk service
-            </button>
-            <div class="test-result mt-2" id="kiosk-install-result"></div>
-            <pre class="install-log d-none bg-body-tertiary border rounded p-2 small mt-2 mb-0" data-log="kiosk"></pre>
-          </div>
-
-          <div class="section-card mb-3">
             <div class="section-title"><i class="bi bi-aspect-ratio text-info"></i> Kiosk Display</div>
             <p class="text-secondary small">Scale and CSS rotation apply immediately in the kiosk browser without a reboot.</p>
             <div class="row g-3 mb-3">
@@ -2695,7 +2743,7 @@ docker compose up -d</code></pre>
             <div class="form-text mt-2" id="display-hint">CSS changes apply on the kiosk immediately.</div>
           </div>
 
-          <div class="section-card">
+          <div class="section-card mb-3">
             <div class="section-title"><i class="bi bi-aspect-ratio text-warning"></i> Orientation</div>
             <p class="text-secondary small">Rotates the kiosk display using the compositor. The change applies when the kiosk restarts (a few seconds); no reboot is needed.</p>
             <div id="kms-rotation-status" class="mb-3">
@@ -2724,6 +2772,19 @@ docker compose up -d</code></pre>
             <div class="alert alert-secondary py-2 small mt-3 mb-0">
               <i class="bi bi-info-circle me-1"></i>Run <code>sudo foodassistant-set-rotation 90</code> via SSH for the same effect.
             </div>
+          </div>
+
+          {# Kiosk Service sits at the bottom: it is a one-time provision step and
+             rarely touched, so the everyday display controls come first. #}
+          <div class="section-card">
+            <div class="section-title"><i class="bi bi-display text-info"></i> Kiosk Service</div>
+            <p class="text-secondary small">Runs the on-device browser in full-screen kiosk mode. If you attached the screen after the first install, provision it here, no SSH needed.</p>
+            <div id="kiosk-status-row" class="mb-2"><span class="text-secondary small">Checking...</span></div>
+            <button class="btn btn-outline-info btn-sm d-none" id="btn-install-kiosk" onclick="installKiosk(this)">
+              <i class="bi bi-download me-1"></i>Install kiosk service
+            </button>
+            <div class="test-result mt-2" id="kiosk-install-result"></div>
+            <pre class="install-log d-none bg-body-tertiary border rounded p-2 small mt-2 mb-0" data-log="kiosk"></pre>
           </div>
         </div>
 
@@ -5240,12 +5301,76 @@ async function checkSatelliteUpdate(btn) {
       write('text-success', '<i class="bi bi-check-circle-fill me-1"></i>' +
         'You are on the latest version (v' + d.current + ').');
     }
+    // Refresh the "last checked" line (a full timestamp in the configured zone
+    // renders on the next page load; "just now" is accurate until then).
+    const lc = document.getElementById('update-last-checked');
+    if (lc && d.ok) {
+      lc.innerHTML = 'Last checked: just now' + (d.update_available
+        ? ' <span class="text-warning">(v' + d.latest + ' available)</span>'
+        : ' (up to date)');
+    }
   } catch (e) {
     console.error('check-update failed:', e);
     write('text-danger', '<i class="bi bi-x-circle me-1"></i>Update check failed (' + (e && e.message ? e.message : e) + '). The server may not be able to reach GitHub.');
   } finally {
     if (btn) { btn.disabled = false; btn.innerHTML = orig; }
   }
+}
+
+// Date & time + Maintenance (FoodAssistant-lq01/-amp0/-wvwm).
+async function saveTimezone(btn) {
+  const el = document.getElementById('timezone-result');
+  const tz = document.getElementById('timezone')?.value ?? '';
+  if (el) el.innerHTML = '<span class="text-secondary">Saving…</span>';
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch('setup/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ timezone: tz }) });
+    const d = await r.json();
+    if (d.ok) { if (el) el.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Timezone saved.</span>'; setTimeout(() => location.reload(), 600); }
+    else if (el) el.innerHTML = '<span class="text-danger">' + (d.error || 'Failed') + '</span>';
+  } catch (e) { if (el) el.innerHTML = '<span class="text-danger">' + e + '</span>'; }
+  finally { if (btn) btn.disabled = false; }
+}
+
+async function reloadSettings(btn) {
+  const el = document.getElementById('maintenance-result');
+  if (el) el.innerHTML = '<span class="text-secondary">Reloading…</span>';
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch('setup/maintenance/reload', { method: 'POST' });
+    const d = await r.json();
+    if (el) el.innerHTML = d.ok ? '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Settings reloaded.</span>'
+      : '<span class="text-danger">' + (d.error || 'Failed') + '</span>';
+  } catch (e) { if (el) el.innerHTML = '<span class="text-danger">' + e + '</span>'; }
+  finally { if (btn) btn.disabled = false; }
+}
+
+async function rebootNow(btn) {
+  if (!confirm('Reboot this appliance now?')) return;
+  const el = document.getElementById('maintenance-result');
+  if (el) el.innerHTML = '<span class="text-secondary">Rebooting…</span>';
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch('setup/maintenance/reboot', { method: 'POST' });
+    const d = await r.json();
+    if (el) el.innerHTML = d.ok ? '<span class="text-warning"><i class="bi bi-power me-1"></i>Rebooting. The device will be back shortly.</span>'
+      : '<span class="text-danger">' + (d.error || 'Failed') + '</span>';
+  } catch (e) { if (el) el.innerHTML = '<span class="text-warning">Reboot requested (the connection dropped, as expected).</span>'; }
+}
+
+async function saveScheduledReboot(btn) {
+  const el = document.getElementById('scheduled-reboot-result');
+  const t = document.getElementById('scheduled_reboot_time')?.value ?? '';
+  if (el) el.innerHTML = '<span class="text-secondary">Saving…</span>';
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch('setup/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scheduled_reboot_time: t }) });
+    const d = await r.json();
+    if (el) el.innerHTML = d.ok
+      ? '<span class="text-success"><i class="bi bi-check-circle me-1"></i>' + (t ? 'Nightly reboot set for ' + t + '.' : 'Nightly reboot disabled.') + '</span>'
+      : '<span class="text-danger">' + (d.error || 'Failed') + '</span>';
+  } catch (e) { if (el) el.innerHTML = '<span class="text-danger">' + e + '</span>'; }
+  finally { if (btn) btn.disabled = false; }
 }
 
 // Satellite: pull the latest source and restart the app via the host bridge.

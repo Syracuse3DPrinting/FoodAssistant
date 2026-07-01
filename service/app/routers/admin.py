@@ -86,6 +86,16 @@ async def check_update():
     import re
     import time
     import httpx
+
+    def _record(latest: str, available: bool) -> None:
+        # Remember when we last checked and what we found, so the UI can show a
+        # "last checked" line without re-checking on every load (FoodAssistant-lq01).
+        try:
+            settings.save({"update_last_checked": time.time(),
+                           "update_last_latest": latest,
+                           "update_last_available": bool(available)})
+        except Exception:
+            pass
     # raw.githubusercontent.com is served through a CDN that caches each file for
     # a few minutes, so just after a push it can still return the previous
     # APP_VERSION and the check wrongly reports "up to date". A unique query
@@ -103,8 +113,10 @@ async def check_update():
                     m = re.search(r'APP_VERSION\s*=\s*["\']([0-9][0-9.]*)["\']', rr.text)
                     if m:
                         latest = m.group(1)
+                        avail = _is_newer(latest, APP_VERSION)
+                        _record(latest, avail)
                         return {"ok": True, "current": APP_VERSION, "latest": latest,
-                                "update_available": _is_newer(latest, APP_VERSION),
+                                "update_available": avail, "checked_at": time.time(),
                                 "release_url": f"https://github.com/{GITHUB_REPO}"}
             except Exception:
                 pass  # fall through to the tag check
@@ -122,8 +134,10 @@ async def check_update():
         if not tags:
             return {"ok": False, "current": APP_VERSION, "error": "No version tags found yet."}
         latest = max(tags, key=_normalize)  # tags API isn't semver-sorted; pick the highest
+        avail = _is_newer(latest, APP_VERSION)
+        _record(latest, avail)
         return {"ok": True, "current": APP_VERSION, "latest": latest,
-                "update_available": _is_newer(latest, APP_VERSION),
+                "update_available": avail, "checked_at": time.time(),
                 "release_url": f"https://github.com/{GITHUB_REPO}/releases/tag/{latest}"}
     except Exception as e:
         return {"ok": False, "current": APP_VERSION,
