@@ -79,6 +79,19 @@
       pointer-events: none;
     }
   </style>
+  {% else %}
+  {# Default: a faint ghosted brand mark centred behind the app. Opacity is kept
+     very low and tuned per light/dark so the pink raccoon reads as a watermark
+     without ever competing with page text (cards sit on their own surface above
+     it). A user-set background image replaces it entirely. #}
+  <style>
+    body::before {
+      content: ""; position: fixed; inset: 0; z-index: -1;
+      background: url("static/icons/logo-mark.png") center center / min(58vmin, 460px) no-repeat;
+      opacity: {{ '0.04' if theme_mode == 'light' else '0.06' }};
+      pointer-events: none;
+    }
+  </style>
   {% endif %}
   <link href="static/vendor/bootstrap-icons.min.css" rel="stylesheet">
   <script>
@@ -114,6 +127,9 @@
   <style>
     body { padding-top: 60px; }
     .navbar-brand { font-weight: 700; letter-spacing: -0.5px; }
+    /* Brand mark (pink line-art raccoon). The pink reads on both dark and light
+       navbars; height-capped so it never grows the fixed 60px bar. */
+    .brand-logo { height: 30px; width: auto; }
     .badge-days { font-size: 0.85em; }
     .table th { white-space: nowrap; }
     .btn-icon { padding: 0.2rem 0.45rem; font-size: 0.8rem; }
@@ -375,7 +391,7 @@
 <body>
   <nav class="navbar navbar-expand-lg bg-body-tertiary border-bottom fixed-top">
     <div class="container-fluid">
-      <a class="navbar-brand" href="ui/"><i class="bi bi-fridge me-2"></i>{{ app_name }}</a>
+      <a class="navbar-brand d-flex align-items-center" href="ui/"><img src="static/icons/logo-mark.png" alt="" class="brand-logo me-2">{{ app_name }}</a>
       {# Primary navigation lives OUTSIDE the collapse so the main menu items stay
          visible on a phone instead of hiding behind the hamburger (the toggler
          now only reveals the utility controls). On small screens the row lays out

@@ -95,10 +95,14 @@ def test_base_html_paints_background_when_set(client, monkeypatch):
     assert "opacity: 0.3" in html
 
 
-def test_no_background_block_when_unset(client, monkeypatch):
+def test_default_ghosted_brand_watermark_when_unset(client, monkeypatch):
+    # With no user background image, the app paints a faint ghosted brand mark
+    # (the raccoon) as the default background, not the user-image layer.
     monkeypatch.setattr(settings, "background_image_url", "")
     monkeypatch.setattr(settings, "grocy_base_url", "http://g")
     monkeypatch.setattr(settings, "grocy_api_key", "k")
     with _configured():
         html = client.get("/ui/about").text
-    assert "body::before" not in html
+    assert "body::before" in html                 # the watermark layer
+    assert "logo-mark.png" in html                # is the brand mark
+    assert "setup/background/image" not in html   # not a user-uploaded image
