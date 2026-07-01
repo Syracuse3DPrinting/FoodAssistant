@@ -71,7 +71,11 @@
   <style>
     body { background: var(--bs-body-bg); }
     /* Shared */
-    .setup-wrap { max-width: 980px; margin: 1.5rem auto; padding: 0 1rem 4rem; }
+    .setup-wrap { max-width: 1240px; margin: 1.5rem auto; padding: 0 1rem 4rem; }
+    /* The sticky menu frame holds the group toggle + the section pills together,
+       so the toggle stays reachable while a long pane scrolls. It scrolls
+       internally if the menu itself is taller than the viewport. */
+    .side-menu { max-height: calc(100vh - 2rem); overflow-y: auto; }
     .section-card { background: var(--bs-tertiary-bg); border: 1px solid var(--bs-border-color); border-radius: 0.75rem; padding: 1.5rem; margin-bottom: 1.25rem; }
     .section-title { font-size: 1.05rem; font-weight: 600; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; }
     .pane-intro { font-size: 0.85rem; color: var(--bs-secondary-color); margin: -0.25rem 0 1rem; }
@@ -872,17 +876,6 @@
     <a href="ui/" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Back to app</a>
   </div>
 
-  {# Top toggle: switch the side menu between everyday Personalization and the
-     set-and-forget Settings, so the two never crowd one long list. #}
-  <div class="btn-group mb-3" role="group" aria-label="Choose Settings or Personalization">
-    <button type="button" class="btn btn-outline-primary" id="menu-toggle-p" onclick="showSettingsMenu('p')">
-      <i class="bi bi-sliders me-1"></i>Personalization
-    </button>
-    <button type="button" class="btn btn-outline-primary" id="menu-toggle-s" onclick="showSettingsMenu('s')">
-      <i class="bi bi-gear me-1"></i>Settings
-    </button>
-  </div>
-
   {% set _inv_ok = features.satellite or (s.grocy_api_key and s.grocy_base_url and s.grocy_base_url != 'http://grocy:80') %}
   {% set _sec_ok = (not s.auth_required) or s.auth_password %}
   {% if not _inv_ok or not _sec_ok %}
@@ -901,6 +894,16 @@
     <!-- Side menu -->
     <div class="col-md-3">
       <div class="side-menu">
+        {# Group toggle lives inside the sticky menu frame so it stays reachable
+           while a long pane scrolls (it never scrolls off with the page). #}
+        <div class="btn-group w-100 mb-2" role="group" aria-label="Choose Settings or Personalization">
+          <button type="button" class="btn btn-sm btn-outline-primary" id="menu-toggle-p" onclick="showSettingsMenu('p')">
+            <i class="bi bi-sliders me-1"></i>Personalization
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-primary" id="menu-toggle-s" onclick="showSettingsMenu('s')">
+            <i class="bi bi-gear me-1"></i>Settings
+          </button>
+        </div>
         {# inline status: True = configured, False/None = needs attention #}
         {% set inv_ok = features.satellite or (s.grocy_api_key and s.grocy_base_url and s.grocy_base_url != 'http://grocy:80') %}
         {% set ai_ok  = s.vision_provider and s.vision_provider != 'none' %}
@@ -2462,8 +2465,12 @@ docker compose up -d</code></pre>
             </div>
             <div class="mb-2 fw-semibold small"><i class="bi bi-grid me-1"></i>Layout</div>
             <p class="text-secondary small mb-2">Drag an action from the palette onto a key, drag keys to rearrange them, or click a key to clear it. Custom buttons are shared with the Stream Deck.</p>
-            <div id="start-grid" class="d-inline-grid gap-2 mb-2" style="grid-template-columns: repeat(5, minmax(0,1fr));"></div>
-            <div id="start-palette" class="d-flex flex-column gap-1 mt-1 mb-3" style="max-width:700px;"></div>
+            {# Grid and palette sit side by side on wide screens (less scrolling),
+               stacking on narrow/mobile widths. #}
+            <div class="d-flex flex-column flex-lg-row gap-3 align-items-start mb-3">
+              <div id="start-grid" class="d-inline-grid gap-2" style="grid-template-columns: repeat(5, minmax(0,1fr));"></div>
+              <div id="start-palette" class="d-flex flex-column gap-1" style="flex:1 1 260px;min-width:0;max-width:700px;"></div>
+            </div>
 
             <div class="mb-2 fw-semibold small"><i class="bi bi-sliders me-1"></i>Custom keys</div>
             <p class="text-secondary small mb-2">Build your own keys (Home Assistant actions, timers, weather, cameras, media, macros), the same as the Stream Deck. Each one appears as a chip in the palette above; drag it onto a key to place it. Custom keys are shared with the Stream Deck both ways.</p>
@@ -2740,8 +2747,12 @@ docker compose up -d</code></pre>
                 <label class="form-label">Key Layout</label>
                 <div class="form-text mb-2">Drag actions from the palette onto grid cells. The grid shape matches your deck orientation. Long-press a timer key to reset it. When you use more keys than fit, the deck adds a "More" key and continues on the next page.</div>
                 <div id="streamdeck-page-nav" class="d-flex align-items-center gap-2 mb-2 d-none"></div>
-                <div id="streamdeck-grid" class="d-inline-grid gap-1 mb-2" style="grid-template-columns: repeat(5, minmax(0,1fr));"></div>
-                <div id="streamdeck-palette" class="d-flex flex-column gap-1 mt-1" style="max-width:700px;"></div>
+                {# Grid and palette side by side on wide screens, stacked on
+                   narrow/mobile widths, to cut down on scrolling. #}
+                <div class="d-flex flex-column flex-lg-row gap-3 align-items-start mb-2">
+                  <div id="streamdeck-grid" class="d-inline-grid gap-2" style="grid-template-columns: repeat(5, minmax(0,1fr));"></div>
+                  <div id="streamdeck-palette" class="d-flex flex-column gap-1" style="flex:1 1 260px;min-width:0;max-width:700px;"></div>
+                </div>
                 <div class="mt-2">
                   <button type="button" class="btn btn-outline-secondary btn-sm" onclick="_sdResetLayout()">
                     <i class="bi bi-arrow-counterclockwise me-1"></i>Reset layout to default
@@ -4193,14 +4204,46 @@ function showDeckStart(which) {
   const s = document.getElementById('pane-start-page');
   const d = document.getElementById('pane-streamdeck');
   if (which === 'deck' && d) {
+    // Bring any custom keys built on the Start Page across to the deck before
+    // showing it, so a key made in one editor appears in the other with no reload.
+    _deckStartSyncDefs('start-overrides', 'streamdeck-overrides', _sdOverrideRow);
     if (s) s.classList.remove('active', 'show');
     d.classList.add('active', 'show');
+    _sdRefreshCustom();
   } else {
     if (d) d.classList.remove('active', 'show');
-    if (s) { s.classList.add('active', 'show'); _startEditorInit(); }
+    if (s) {
+      s.classList.add('active', 'show');
+      _startEditorInit();
+      // ...and the same the other way: deck-built custom keys show on the Start Page.
+      _deckStartSyncDefs('streamdeck-overrides', 'start-overrides', _startBuildRow);
+      _startRenderPalette();
+      _startEditorRender();
+    }
   }
   document.querySelectorAll('.ds-toggle [data-ds]').forEach(b =>
     b.classList.toggle('active', b.dataset.ds === which));
+}
+
+// Custom keys are one shared library across the two editors, but each editor
+// keeps its own set of builder rows. When the user switches editors, merge the
+// rows from the editor being left into the one being entered (the editor just
+// used wins on a shared id). No-op when a container is absent (off-Pi there is
+// only the Start Page). Grid placements are keyed by id, so rebuilding the rows
+// leaves any placements intact.
+function _deckStartSyncDefs(fromWrapId, toWrapId, toBuilder) {
+  const from = document.getElementById(fromWrapId);
+  const to = document.getElementById(toWrapId);
+  if (!from || !to) return;
+  const merged = new Map();
+  for (const row of to.querySelectorAll('.sd-override-row')) {
+    const def = _sdDefFromRow(row); if (def) merged.set(def.id, def);
+  }
+  for (const row of from.querySelectorAll('.sd-override-row')) {
+    const def = _sdDefFromRow(row); if (def) merged.set(def.id, def);
+  }
+  to.innerHTML = '';
+  for (const def of merged.values()) to.appendChild(toBuilder(def));
 }
 
 // -- On-screen Start Page editor (FoodAssistant) ---------------------------
