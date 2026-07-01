@@ -5194,9 +5194,17 @@ async function checkForUpdates() {
   const out = document.getElementById('update-result');
   const logEl = document.getElementById('update-log');
   const btn = document.getElementById('update-btn');
-  if (out) { out.className = 'test-result text-secondary'; out.textContent = 'Checking for updates… this can take a minute.'; }
+  // Persistent, obvious progress state so the user does not press Update again
+  // or leave the page during a slow Pi Remote update (FoodAssistant).
+  if (out) {
+    out.className = 'test-result text-info';
+    out.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>'
+      + '<strong>Updating…</strong> This can take a few minutes on a Pi Remote. '
+      + 'Please wait, do not press Update again, and keep this page open.';
+  }
   if (logEl) { logEl.classList.add('d-none'); logEl.textContent = ''; }
-  if (btn) { btn.disabled = true; }
+  const _btnOrig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Updating…'; }
   try {
     const r = await fetch('setup/update', { method: 'POST' });
     const d = await r.json();
@@ -5221,7 +5229,7 @@ async function checkForUpdates() {
     // app. Poll for it to come back rather than reporting a fetch error.
     await _pollForRestart(out);
   } finally {
-    if (btn) { btn.disabled = false; }
+    if (btn) { btn.disabled = false; btn.innerHTML = _btnOrig; }
   }
 }
 
