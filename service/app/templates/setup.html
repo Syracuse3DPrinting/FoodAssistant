@@ -505,7 +505,7 @@
             <option value="{{ key }}" {{ 'selected' if (s.display_type or 'generic') == key else '' }}>{{ dt.label }}</option>
             {% endfor %}
           </select>
-          <div class="form-text">Pick "Waveshare HDMI touchscreen" for a Waveshare HDMI touch HAT so its touch overlay and input rules are installed at next provision.</div>
+          <div class="form-text">Pick the type that matches your panel: a resistive Waveshare 3.5-4 inch HDMI LCD is the ADS7846 SPI option; a Waveshare HDMI HAT with a USB touch cable is the USB touch option. The touch overlay is installed at provision (or from Settings &rarr; Display &rarr; Apply touch driver).</div>
         </div>
         <div class="form-check form-switch">
           <input class="form-check-input" type="checkbox" role="switch" id="display_touch"
@@ -2640,7 +2640,7 @@ docker compose up -d</code></pre>
                 <option value="{{ key }}" {{ 'selected' if (s.display_type or 'generic') == key else '' }}>{{ dt.label }}</option>
                 {% endfor %}
               </select>
-              <div class="form-text">Choose "Waveshare HDMI touchscreen" for a Waveshare HDMI touch HAT. Its touch overlay and input rules apply after the next reboot / re-provision.</div>
+              <div class="form-text">Pick the type that matches your panel. A <strong>resistive</strong> Waveshare 3.5-4 inch HDMI LCD is the <em>ADS7846 SPI</em> option; a Waveshare HDMI HAT with a USB touch cable is the <em>USB touch</em> option. After choosing, use "Apply touch driver" below so the boot overlay is written (a reboot loads it).</div>
             </div>
             <div class="form-check form-switch mb-2">
               <input class="form-check-input" type="checkbox" role="switch" id="display_touch"
@@ -2648,6 +2648,17 @@ docker compose up -d</code></pre>
               <label class="form-check-label" for="display_touch">Touch-compatible display</label>
             </div>
             {% if is_pi %}
+            <div class="mb-3" id="touch-provision-row">
+              <button class="btn btn-outline-secondary btn-sm" onclick="applyTouchDriver(this)">
+                <i class="bi bi-usb-plug me-1"></i>Apply touch driver
+              </button>
+              <button class="btn btn-outline-secondary btn-sm ms-1" onclick="applyTouchDriver(this, true)"
+                      title="Write the overlay and reboot now to load it">
+                <i class="bi bi-arrow-repeat me-1"></i>Apply &amp; reboot
+              </button>
+              <div class="form-text">Writes the boot config the selected display type needs (for an ADS7846 SPI panel this enables SPI and adds the touch overlay). Needed once, and again only if you change the display type. Takes effect after a reboot.</div>
+              <div class="test-result mt-2" id="touch-provision-result"></div>
+            </div>
             <div class="mb-3" id="touch-calibrate-row">
               <button class="btn btn-outline-secondary btn-sm" onclick="startTouchCalibration()">
                 <i class="bi bi-crosshair me-1"></i>Calibrate touchscreen
@@ -7978,6 +7989,39 @@ document.addEventListener('DOMContentLoaded', () => initTooltips());
 </script>
 
 <script>
+// Write the boot config the selected display type needs (e.g. enable SPI and
+// add the ADS7846 overlay for a resistive HDMI panel). This is what firstboot
+// would have done had the display type been known at first boot; running it
+// here covers a type chosen later in the wizard. A reboot loads a new overlay.
+async function applyTouchDriver(btn, reboot) {
+  const el = document.getElementById('touch-provision-result');
+  const dtype = document.getElementById('display_type')?.value || 'generic';
+  if (el) { el.className = 'test-result mt-2 text-info'; el.textContent = 'Applying...'; }
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch('/setup/touch/provision', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ display_type: dtype, reboot: !!reboot }),
+    });
+    const data = await r.json();
+    if (!data.ok) {
+      if (el) { el.className = 'test-result mt-2 text-danger'; el.textContent = 'Failed: ' + (data.error || 'unknown error'); }
+    } else if (reboot && data.needs_reboot) {
+      if (el) { el.className = 'test-result mt-2 text-success'; el.textContent = 'Overlay written. Rebooting now to load it...'; }
+    } else if (data.needs_reboot) {
+      if (el) { el.className = 'test-result mt-2 text-success'; el.innerHTML = 'Overlay written. <strong>Reboot the Pi</strong> to load it, then calibrate.'; }
+    } else if (data.changed === false && (data.driver === 'ads7846')) {
+      if (el) { el.className = 'test-result mt-2 text-success'; el.textContent = 'Already applied. Touch should be active (calibrate if taps are offset).'; }
+    } else {
+      if (el) { el.className = 'test-result mt-2 text-secondary'; el.textContent = 'No boot overlay needed for this display type.'; }
+    }
+  } catch (e) {
+    if (el) { el.className = 'test-result mt-2 text-danger'; el.textContent = 'Request failed: ' + e; }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 // Touch calibration is performed on the Pi's own display: clicking here sets a
 // server flag, and the kiosk (which polls for it) navigates its screen to the
 // fullscreen tap test. The person calibrating stands at the device.

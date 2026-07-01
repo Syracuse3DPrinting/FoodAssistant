@@ -78,6 +78,64 @@ def test_compose_env_uses_provisioner_repo_dir(monkeypatch):
     assert env["REPO_DIR"] == "/x"
 
 
+# Touch provisioning: write the ADS7846 SPI overlay on a running Pi when the
+# display type was chosen in the wizard after first boot (FoodAssistant-vbfp).
+
+
+def test_config_has_active_ignores_comments():
+    text = "dtparam=audio=on\n#dtparam=spi=on\n  # dtoverlay=ads7846\n"
+    assert bridge._config_has_active(text, "dtparam=audio=on") is True
+    assert bridge._config_has_active(text, "dtparam=spi=on") is False
+    assert bridge._config_has_active(text, "dtoverlay=ads7846") is False
+
+
+def test_provision_touch_ads7846_writes_spi_and_overlay(tmp_path):
+    cfg = tmp_path / "config.txt"
+    cfg.write_text("dtparam=audio=on\ndtoverlay=vc4-kms-v3d\n")
+    changed, needs_reboot = bridge._provision_touch("ads7846", str(cfg))
+    assert changed is True and needs_reboot is True
+    body = cfg.read_text()
+    assert "dtparam=spi=on" in body
+    assert "dtoverlay=ads7846," in body
+    assert "[all]" in body
+
+
+def test_provision_touch_ads7846_is_idempotent(tmp_path):
+    cfg = tmp_path / "config.txt"
+    cfg.write_text("dtparam=audio=on\n")
+    bridge._provision_touch("ads7846", str(cfg))
+    first = cfg.read_text()
+    changed, needs_reboot = bridge._provision_touch("ads7846", str(cfg))
+    assert changed is False and needs_reboot is False
+    assert cfg.read_text() == first          # no duplicate lines
+    assert first.count("dtoverlay=ads7846,") == 1
+
+
+def test_provision_touch_only_adds_missing_overlay(tmp_path):
+    cfg = tmp_path / "config.txt"
+    cfg.write_text("dtparam=spi=on\n")        # SPI already on, overlay missing
+    changed, _ = bridge._provision_touch("ads7846", str(cfg))
+    assert changed is True
+    body = cfg.read_text()
+    assert body.count("dtparam=spi=on") == 1  # not added again
+    assert "dtoverlay=ads7846," in body
+
+
+def test_provision_touch_non_ads7846_is_noop(tmp_path):
+    cfg = tmp_path / "config.txt"
+    cfg.write_text("dtparam=audio=on\n")
+    for driver in ("usb", "generic", "none"):
+        assert bridge._provision_touch(driver, str(cfg)) == (False, False)
+    assert cfg.read_text() == "dtparam=audio=on\n"
+
+
+def test_provision_touch_missing_config_raises(monkeypatch):
+    import pytest
+    monkeypatch.setattr(bridge, "_pi_config_txt", lambda: "")  # not a Pi
+    with pytest.raises(OSError):
+        bridge._provision_touch("ads7846")       # no config found
+
+
 # Mealie readiness probe (FoodAssistant-28z)
 
 

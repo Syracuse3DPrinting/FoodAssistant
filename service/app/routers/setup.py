@@ -1399,6 +1399,47 @@ async def set_display_rotation(payload: KmsRotationPayload):
         return JSONResponse({"ok": False, "error": str(e)})
 
 
+# Map a wizard display type to the touch driver whose boot config the host
+# bridge applies. Only ADS7846 SPI panels need a config.txt overlay written from
+# the running system; USB/DSI/generic need none (DSI's panel overlay is handled
+# by firstboot, and its touch is I2C which libinput picks up on its own).
+_DISPLAY_TOUCH_DRIVER = {
+    "ads7846_hdmi": "ads7846",
+    "waveshare_hdmi": "usb",
+    "dsi_7inch": "generic",
+    "generic": "generic",
+}
+
+
+@router.post("/touch/provision")
+async def touch_provision(request: Request):
+    """Apply the boot config the attached touch panel needs (Pi appliance only).
+
+    Fills the gap where a display type chosen in the wizard after first boot was
+    never provisioned: an ADS7846 SPI panel needs SPI enabled and the ads7846
+    overlay in config.txt before its touch registers. Uses the saved display
+    type unless one is passed in the body. A reboot is required to load a new
+    overlay."""
+    if not is_raspberry_pi():
+        return JSONResponse({"ok": False, "error": "Not available on this platform."})
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    dtype = (body.get("display_type") or settings.display_type or "generic")
+    reboot = bool(body.get("reboot", False))
+    driver = _DISPLAY_TOUCH_DRIVER.get(dtype, "generic")
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as c:
+            r = await c.post(f"{_HOST_BRIDGE}/touch/provision",
+                             json={"driver": driver, "reboot": reboot})
+        out = r.json()
+        out["driver"] = driver
+        return out
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+
+
 @router.post("/streamdeck/restart")
 async def streamdeck_restart():
     """Restart the Stream Deck systemd service (Pi appliance only)."""

@@ -18,6 +18,7 @@ POST /hostname             change hostname       {hostname}
 GET  /display/rotation     current KMS rotation (from /boot/firmware/config.txt)
 POST /display/rotation     set KMS rotation      {degrees, reboot?}
 POST /touch/calibrate      apply touch matrix    {matrix: "a b c d e f"}
+POST /touch/provision      apply SPI+ads7846 overlay for the chosen display type
 POST /streamdeck/restart   restart Stream Deck service
 GET  /streamdeck/actions     list assignable deck actions (for the web editor)
 POST /kiosk/restart        restart the kiosk browser (apply scale/rotation)
@@ -687,6 +688,69 @@ def _write_calibration_rule(matrix):
     return name or "ID_INPUT_TOUCHSCREEN"
 
 
+# Boot config path: /boot/firmware/config.txt on Bookworm+, /boot/config.txt on
+# older releases. Mirrors firstboot.sh's _pi_config_txt. Empty when neither
+# exists (not a Pi, or an unusual image).
+def _pi_config_txt():
+    for p in ("/boot/firmware/config.txt", "/boot/config.txt"):
+        if os.path.exists(p):
+            return p
+    return ""
+
+
+# The ADS7846 SPI resistive-touch overlay for Waveshare 3.5-4in HDMI LCDs and
+# similar small Pi HATs. Kept in step with firstboot.sh configure_touch's
+# ads7846 branch: penirq_pull=2 pulls up the active-low PENIRQ line, swapxy=1
+# matches the panel's landscape mount, and the x/y bounds are the measured
+# Waveshare defaults.
+_ADS7846_OVERLAY = (
+    "dtoverlay=ads7846,cs=1,penirq=25,penirq_pull=2,speed=50000,keep_vcc,"
+    "swapxy=1,pmax=255,xohms=150,xmin=200,xmax=3900,ymin=200,ymax=3900"
+)
+
+
+def _config_has_active(text, needle):
+    """True when a non-comment line of the boot config contains needle."""
+    return any(needle in ln and not ln.lstrip().startswith("#")
+               for ln in text.splitlines())
+
+
+def _provision_touch(driver, cfg_path=None):
+    """Apply, on a running Pi, the boot config a touch panel needs.
+
+    This is the missing counterpart to firstboot.sh configure_touch: the display
+    type chosen in the setup wizard AFTER first boot never re-ran provisioning,
+    so an ADS7846 panel stayed invisible (no SPI, no overlay). Called from the
+    web UI, this writes what firstboot would have.
+
+    driver 'ads7846' enables SPI and adds the ADS7846 overlay (a reboot loads
+    it). Other drivers need no boot-config overlay here. Idempotent: re-running
+    is a no-op once the lines are present. Returns (changed, needs_reboot).
+    Raises OSError when the boot config cannot be found or written."""
+    if driver != "ads7846":
+        return (False, False)
+    cfg = cfg_path or _pi_config_txt()
+    if not cfg:
+        raise OSError("no Pi boot config.txt found")
+    text = open(cfg).read()
+    lines = []
+    if not _config_has_active(text, "dtparam=spi=on"):
+        lines.append("dtparam=spi=on")
+    if not _config_has_active(text, "dtoverlay=ads7846"):
+        lines.append(_ADS7846_OVERLAY)
+    if not lines:
+        return (False, False)
+    # Emit under an explicit [all] header so the overlay applies regardless of
+    # whatever board-specific section the file happened to end in.
+    block = ("\n[all]\n# FoodAssistant: ADS7846 SPI resistive touch "
+             "(Waveshare 3.5-4in HDMI)\n" + "\n".join(lines) + "\n")
+    with open(cfg, "a") as f:
+        if not text.endswith("\n"):
+            f.write("\n")
+        f.write(block)
+    return (True, True)
+
+
 def _streamdeck_keycount(usb_root="/sys/bus/usb/devices"):
     """Best-effort key count for the attached deck, or None if unknown."""
     try:
@@ -953,6 +1017,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._touch_calibrate()
         elif self.path == "/touch/calibrate/reset":
             self._touch_calibrate_reset()
+        elif self.path == "/touch/provision":
+            self._touch_provision()
         elif self.path == "/streamdeck/restart":
             self._streamdeck_restart()
         elif self.path == "/kiosk/restart":
@@ -1242,6 +1308,28 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "removed": existed, "kiosk_restarted": restarted})
         except Exception as e:
             self._send(500, {"ok": False, "error": str(e)})
+
+    def _touch_provision(self):
+        # Apply the boot config an ADS7846 SPI touch panel needs when the display
+        # type was chosen in the wizard after first boot (firstboot never re-runs).
+        # Only ads7846 needs a config.txt change; usb/generic/none are a no-op.
+        body = self._body()
+        driver = (body.get("driver") or "").strip()
+        if driver not in ("ads7846", "usb", "generic", "none", ""):
+            self._send(400, {"ok": False, "error": "unknown touch driver: %s" % driver})
+            return
+        reboot = bool(body.get("reboot", False))
+        try:
+            changed, needs_reboot = _provision_touch(driver)
+        except OSError as e:
+            self._send(500, {"ok": False, "error": str(e)})
+            return
+        if reboot and needs_reboot:
+            try:
+                subprocess.Popen(_reboot_command())
+            except Exception:
+                pass
+        self._send(200, {"ok": True, "changed": changed, "needs_reboot": needs_reboot})
 
     def _streamdeck_get_config(self):
         try:
