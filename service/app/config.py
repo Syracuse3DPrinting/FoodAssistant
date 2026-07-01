@@ -12,7 +12,7 @@ from .hardware import is_raspberry_pi
 
 # Single source of truth for the app version (shown in the UI, used by the
 # update checker, and reported by FastAPI). Bump on each tagged release.
-APP_VERSION = "0.7.49"
+APP_VERSION = "0.7.50"
 
 # GitHub repo used by the in-app update checker.
 GITHUB_REPO = "Syracuse3DPrinting/FoodAssistant"
@@ -120,6 +120,33 @@ _DEFAULT_DISPLAY_TYPE = "generic"
 FLOATING_NAV_POSITIONS = ("off", "bottom", "left", "right")
 _LEGACY_NAV_POSITIONS = ("top-left", "top-right", "bottom-left", "bottom-right")
 FLOATING_NAV_ORIENTATIONS = ("vertical", "horizontal")
+
+# Whether the on-screen navigation chrome (the floating nav bar) shows at all.
+# "auto" hides it only on a Stream-Deck-driven large-scale kiosk, where the deck
+# is the navigation surface and the tiny panel is better used for content; the
+# top navbar's hamburger stays as an on-screen escape either way.
+#   auto   - hide when a Stream Deck is connected AND the UI scale is large/xlarge
+#   shown  - always show the floating nav (subject to its own position setting)
+#   hidden - never show the floating nav
+NAV_VISIBILITY = ("auto", "shown", "hidden")
+_DEFAULT_NAV_VISIBILITY = "auto"
+
+
+def nav_chrome_hidden(nav_visibility: str, has_streamdeck: bool, ui_scale: str) -> bool:
+    """Resolve whether the floating nav should be hidden for this device.
+
+    Named "chrome" to avoid confusion with the nav_hidden setting, which is the
+    comma-separated list of individually hidden nav tabs.
+
+    Pure so it can be unit-tested and reused by the template context. "auto"
+    (the default) hides the on-screen nav on a Stream-Deck kiosk at large or
+    extra-large scale, where the deck already navigates and screen space is
+    scarce; otherwise the nav shows."""
+    if nav_visibility == "hidden":
+        return True
+    if nav_visibility == "shown":
+        return False
+    return bool(has_streamdeck) and ui_scale in ("large", "xlarge")
 
 # Deployment modes chosen on the first wizard step. They steer the rest of
 # setup and (on a Pi) what the first-boot provisioner installs:
@@ -286,6 +313,7 @@ _SAVEABLE = [
     "ha_events_enabled", "ha_camera_popup_seconds", "convert_custom_rows",
     "quiet_mode",
     "floating_nav_position", "floating_nav_orientation", "floating_nav_autohide_streamdeck",
+    "nav_visibility",
     "deployment_mode", "remote_server_url", "remote_server_ip", "remote_server_host", "upstream_api_key", "kiosk_pin", "kiosk_readonly_when_locked",
     "satellite_sync_minutes", "satellite_last_sync", "device_id",
     "secret_key", "auth_password", "totp_secret", "api_key", "extra_api_keys", "auth_required",
@@ -819,6 +847,10 @@ class Settings(BaseSettings):
     floating_nav_position: str = "off"
     floating_nav_orientation: str = "vertical"
     floating_nav_autohide_streamdeck: bool = False
+
+    # Whether the on-screen navigation chrome shows at all (see NAV_VISIBILITY /
+    # nav_hidden). "auto" hides it on a Stream-Deck-driven large/xlarge kiosk.
+    nav_visibility: str = _DEFAULT_NAV_VISIBILITY
 
     # Stream Deck weather widget. Held at the app level (not just in the
     # controller's config.toml) so a satellite can pull them from the main

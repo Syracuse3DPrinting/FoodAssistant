@@ -32,6 +32,18 @@
     var autohide = nav.getAttribute('data-autohide-streamdeck') === '1';
     var hasDeck = nav.getAttribute('data-has-streamdeck') === '1';
 
+    // Server-resolved "hide the on-screen nav entirely" (nav_visibility): on a
+    // Stream-Deck kiosk at large scale the deck is the navigation surface, so
+    // the floating bar just eats the small panel. Keep it off, even in kiosk
+    // mode, and leave the top navbar's hamburger as the on-screen escape
+    // (data-floatnav-active stays unset, so that navbar keeps its toggler).
+    if (nav.getAttribute('data-nav-hidden') === '1') {
+      nav.classList.add('d-none');
+      clearPadding();
+      document.documentElement.removeAttribute('data-floatnav-active');
+      return;
+    }
+
     // Per-device override beats the server default.
     var stored = '';
     try { stored = localStorage.getItem(STORE_KEY) || ''; } catch (e) { }

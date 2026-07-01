@@ -19,6 +19,7 @@ All notable changes to FoodAssistant are recorded here. The format is based on
 - **Background image.** Set a photo behind the whole UI from Theme settings: upload an image or paste a URL, with an opacity slider so the interface stays readable. Applies on every page and device.
 - **Named custom themes.** The custom theme builder now takes a name and saves your palette as its own entry in the Theme dropdown, so you can keep several and switch between them. A saved theme applies everywhere, including the Settings page itself, and can be deleted from the builder.
 - **Reset navigation to defaults.** The navigation editor has a Reset to defaults button that restores the original tab order, folder grouping, and visibility in one click.
+- **Hide the on-screen nav menu.** Settings, Navigation now has an On-screen nav menu option: Auto (the default) hides the nav bar on a Stream-Deck kiosk at large or extra-large scale, where the deck does the navigating and a small panel is better used for content; Always show and Always hide are also available. The top bar keeps a hamburger menu so Settings is always reachable.
 
 ### Changed
 - **/ui shows the first page in your nav menu.** Visiting the app no longer always lands on the inventory dashboard; it opens whatever page leads your navigation menu. Combined with the Start Page defaulting to the top of the nav when enabled, you can make the Start Page your home screen.
@@ -33,6 +34,7 @@ All notable changes to FoodAssistant are recorded here. The format is based on
 - **Custom themes now take effect.** Selecting or saving a custom theme correctly recolours the whole app, including the Settings page, instead of appearing to do nothing.
 - **Settings opens straight to the right menu.** The page no longer flashes the Settings menu and then jumps to Personalization on load.
 - **Dragging a tab back into a folder works.** The navigation editor now nests reliably: the middle of a row drops a tab into a folder (the top and bottom edges reorder), and dropping onto any item already inside a folder adds it to that folder, so a tab moved out of a group can be dragged back in.
+- **Waveshare resistive HDMI touchscreens now register.** A resistive Waveshare 3.5-4 inch HDMI panel uses an ADS7846 SPI touch controller that stays invisible until SPI and its overlay are enabled. Choosing the display type in setup after first boot never wrote those, so touch was dead and the kiosk reported "No touch device detected". Saving the display type now applies the overlay (with an Apply touch driver button under Settings, Display), and the wizard help points resistive panels at the ADS7846 option instead of the USB-touch one. A reboot loads the overlay.
 
 ## [0.7.0] - 2026-06-30
 

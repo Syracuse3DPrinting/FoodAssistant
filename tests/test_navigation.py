@@ -55,6 +55,25 @@ def test_camera_tab_appears_in_all_tabs_editor(monkeypatch):
     assert cam["shown"] is False and cam["available"] is False
 
 
+# -- on-screen nav chrome visibility (FoodAssistant-vbfp follow-up) ---------
+
+def test_nav_chrome_auto_hides_only_on_streamdeck_large_kiosk():
+    from app.config import nav_chrome_hidden
+    # Auto: hide only when a deck is connected AND the scale is large/xlarge.
+    assert nav_chrome_hidden("auto", True, "large") is True
+    assert nav_chrome_hidden("auto", True, "xlarge") is True
+    assert nav_chrome_hidden("auto", True, "normal") is False   # small scale keeps nav
+    assert nav_chrome_hidden("auto", False, "large") is False   # no deck keeps nav
+    assert nav_chrome_hidden("auto", False, "normal") is False
+
+
+def test_nav_chrome_explicit_overrides_win():
+    from app.config import nav_chrome_hidden
+    # "hidden" always hides; "shown" always shows, regardless of deck/scale.
+    assert nav_chrome_hidden("hidden", False, "normal") is True
+    assert nav_chrome_hidden("shown", True, "xlarge") is False
+
+
 # -- custom tab normalization (FoodAssistant-9gdz) --------------------------
 
 def test_normalize_custom_tabs_drops_invalid_and_assigns_keys():

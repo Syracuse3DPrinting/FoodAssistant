@@ -1810,7 +1810,15 @@
               screens. It reserves space so it never overlaps the page. Bottom is a horizontal bar; left and right are
               vertical. The setting below is the default for devices that haven't been customised on this device.</p>
             <div class="mb-3">
-              <label class="form-label" for="floating_nav_position">Dock position</label>
+              <label class="form-label" for="nav_visibility">On-screen nav menu{{ info('Whether the on-screen nav bar shows at all. Auto hides it on a Stream Deck kiosk at large / extra-large scale, where the deck does the navigating and the small screen is better used for content. The top bar keeps a hamburger menu either way, so you can always reach Settings.') }}</label>
+              <select class="form-select form-select-sm" id="nav_visibility" style="max-width:320px">
+                <option value="auto"   {{ 'selected' if (s.nav_visibility or 'auto') == 'auto' else '' }}>Auto (hide on a Stream Deck kiosk at large scale)</option>
+                <option value="shown"  {{ 'selected' if s.nav_visibility == 'shown' else '' }}>Always show</option>
+                <option value="hidden" {{ 'selected' if s.nav_visibility == 'hidden' else '' }}>Always hide</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="floating_nav_position">Dock position{{ info('Which screen edge the on-screen nav bar docks to. Bottom is a horizontal bar; left and right are vertical. A drag on the device overrides this per-device.') }}</label>
               <select class="form-select form-select-sm" id="floating_nav_position" style="max-width:260px">
                 <option value="off"    {{ 'selected' if s.floating_nav_position == 'off' else '' }}>Off</option>
                 <option value="bottom" {{ 'selected' if s.floating_nav_position == 'bottom' else '' }}>Bottom edge</option>
@@ -1821,7 +1829,7 @@
             <div class="form-check form-switch mb-3">
               <input class="form-check-input" type="checkbox" role="switch" id="floating_nav_autohide_streamdeck"
                      {{ 'checked' if s.floating_nav_autohide_streamdeck else '' }}>
-              <label class="form-check-label" for="floating_nav_autohide_streamdeck">Hide it when a Stream Deck is connected</label>
+              <label class="form-check-label" for="floating_nav_autohide_streamdeck">Hide it when a Stream Deck is connected{{ info('A narrower version of Auto: hides the on-screen nav whenever a Stream Deck is connected, at any scale.') }}</label>
             </div>
             <button type="button" class="btn btn-outline-info btn-sm" onclick="saveFloatingNav()">
               <i class="bi bi-check-lg me-1"></i>Save navigation menu
@@ -5716,11 +5724,20 @@ async function saveDisplaySettings() {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ui_scale, display_rotation}),
     });
-    await fetch('setup/save', {
+    const saveResp = await (await fetch('setup/save', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({display_touch, display_type, display_idle_timeout}),
-    });
+    })).json();
     fetch('setup/kiosk/restart', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'}).catch(() => {});
+    if (saveResp && saveResp.touch_needs_reboot) {
+      // The touch overlay was written but only loads on reboot; don't reload the
+      // page (that would hide this), let the user reboot when ready.
+      if (el) el.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Display settings saved. ' +
+        'Touch overlay written &mdash; <strong>reboot to activate touch</strong>. ' +
+        '<button type="button" class="btn btn-outline-secondary btn-sm ms-2" onclick="applyTouchDriver(this, true)">' +
+        '<i class="bi bi-arrow-repeat me-1"></i>Reboot now</button></span>';
+      return;
+    }
     if (el) el.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Display settings saved.</span>';
     location.reload();
   } catch (e) {
@@ -5733,10 +5750,11 @@ async function saveFloatingNav() {
   if (el) el.innerHTML = '<span class="text-secondary">Saving...</span>';
   const floating_nav_position = document.getElementById('floating_nav_position')?.value || 'off';
   const floating_nav_autohide_streamdeck = document.getElementById('floating_nav_autohide_streamdeck')?.checked || false;
+  const nav_visibility = document.getElementById('nav_visibility')?.value || 'auto';
   try {
     await fetch('setup/save', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({floating_nav_position, floating_nav_autohide_streamdeck}),
+      body: JSON.stringify({floating_nav_position, floating_nav_autohide_streamdeck, nav_visibility}),
     });
     // Clear any per-device override so the new default dock takes effect here.
     try { localStorage.removeItem('floatNavPosition'); } catch (e) {}

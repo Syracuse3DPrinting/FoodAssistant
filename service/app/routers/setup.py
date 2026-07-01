@@ -20,6 +20,7 @@ from ..config import (
     DISPLAY_TYPES, _DEFAULT_DISPLAY_TYPE,
     FLOATING_NAV_POSITIONS,
     FLOATING_NAV_ORIENTATIONS,
+    NAV_VISIBILITY,
     STREAMDECK_KEY_STYLES, STREAMDECK_ICON_COLORS,
     DEPLOYMENT_MODES, _DEFAULT_DEPLOYMENT_MODE,
     AI_MODELS, SATELLITE_PULL_FIELDS,
@@ -270,6 +271,7 @@ class SetupPayload(BaseModel):
     floating_nav_position: str = ""
     floating_nav_orientation: str = ""
     floating_nav_autohide_streamdeck: bool = False
+    nav_visibility: str = ""
     display_touch: bool = False
     auth_required: bool = True
     auth_password: str = ""
@@ -902,6 +904,9 @@ async def save_setup(payload: SetupPayload):
     # Same for an unknown floating-nav orientation.
     if "floating_nav_orientation" in data and data["floating_nav_orientation"] not in FLOATING_NAV_ORIENTATIONS:
         data.pop("floating_nav_orientation", None)
+    # Drop an unknown nav-visibility value (empty/invalid keeps the stored one).
+    if "nav_visibility" in data and data["nav_visibility"] not in NAV_VISIBILITY:
+        data.pop("nav_visibility", None)
     # Drop an unknown Stream Deck key style / icon colour (keeps the stored one).
     if "streamdeck_key_style" in data and data["streamdeck_key_style"] not in STREAMDECK_KEY_STYLES:
         data.pop("streamdeck_key_style", None)
@@ -946,7 +951,15 @@ async def save_setup(payload: SetupPayload):
     # blanking loop (FoodAssistant-otiy). Best-effort and Pi-only.
     if "display_idle_timeout" in data:
         await _push_display_idle()
-    return {"ok": True}
+    # Auto-provision the touch overlay when the display type is (re)chosen, so an
+    # ADS7846 SPI panel gets SPI + its overlay written without a separate button
+    # press (FoodAssistant-vbfp). Best-effort and Pi-only; a reboot loads it.
+    resp = {"ok": True}
+    if data.get("display_type") and is_raspberry_pi():
+        provisioned = await _provision_touch_for_display(data["display_type"])
+        if provisioned and provisioned.get("needs_reboot"):
+            resp["touch_needs_reboot"] = True
+    return resp
 
 
 class StorageCategoriesPayload(BaseModel):
@@ -1409,6 +1422,24 @@ _DISPLAY_TOUCH_DRIVER = {
     "dsi_7inch": "generic",
     "generic": "generic",
 }
+
+
+async def _provision_touch_for_display(display_type: str) -> dict | None:
+    """Best-effort: write the touch overlay a display type needs (Pi only).
+
+    Called when the display type is saved so an ADS7846 SPI panel is set up
+    without a separate button press. Only ADS7846 needs a boot-config change;
+    other types are skipped. Never raises. Returns the bridge result, or None."""
+    driver = _DISPLAY_TOUCH_DRIVER.get(display_type, "generic")
+    if driver != "ads7846":
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as c:
+            r = await c.post(f"{_HOST_BRIDGE}/touch/provision",
+                             json={"driver": driver, "reboot": False})
+        return r.json()
+    except Exception:
+        return None
 
 
 @router.post("/touch/provision")

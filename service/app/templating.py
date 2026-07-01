@@ -2,7 +2,7 @@
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
 
-from .config import settings, theme_info, ui_scale_factor, resolve_custom_colors, APP_VERSION
+from .config import settings, theme_info, ui_scale_factor, resolve_custom_colors, nav_chrome_hidden, APP_VERSION
 from .hardware import is_raspberry_pi
 from .ingress import template_globals
 from .navigation import visible_tabs, auto_hidden_groups, build_nav_tree
@@ -72,6 +72,12 @@ def theme_context(request: Request) -> dict:
         "floating_nav_position": settings.floating_nav_position,
         "floating_nav_orientation": settings.floating_nav_orientation,
         "floating_nav_autohide_streamdeck": settings.floating_nav_autohide_streamdeck,
+        # Whether the on-screen nav chrome is suppressed for this device
+        # (FoodAssistant-vbfp follow-up): a Stream-Deck kiosk at large scale
+        # defaults to hidden. base.html reads this to drop the floating nav.
+        "nav_visibility": settings.nav_visibility,
+        "hide_nav_chrome": nav_chrome_hidden(
+            settings.nav_visibility, settings.has_streamdeck, settings.ui_scale),
         "has_streamdeck": settings.has_streamdeck,
         # Cameras for the kiosk camera page (FoodAssistant-oewn).
         "cameras": settings.streamdeck_cameras,
